@@ -14,7 +14,12 @@ enum { FREE, BUILDING, WAITING, PLAYED, RETIRING };
 
 /* the pass chains, written by the timer interrupt through the uncached
    segment: CALL with the pass's registers, the record, END */
-#define PASS_QW 24 /* a chain is 18 quadwords, 20 with the FINISH */
+#define PASS_QW 24 /* a chain is 19 quadwords, 21 with the FINISH */
+/* a once record up to this size (quadwords) is sent in the first pass of
+   its record, not over PATH3: PATH3 only gets the GS between passes, so a
+   record could wait fields for it; larger ones (a level's textures) would
+   make that pass late */
+#define ONCE_INLINE_QW 1024
 #define NPASS_CHAINS 16
 
 static struct {
@@ -28,6 +33,7 @@ static struct {
     u8 *mem;
     u8 *once;          /* the once record: sent over PATH3 when the record is complete */
     volatile int once_pending; /* its PATH3 DMA may still run */
+    int once_inline;   /* to be CALLed by the record's first pass */
     volatile int state;
     u32 frame;
     u32 rgb;
@@ -74,7 +80,7 @@ static void retire(void) {
 
 /* The chain of pass k of slot s (shifted: half a line lower; finish: a
    FINISH after it), in the next of the pass chains. */
-static u64 *pass_chain(int s, u32 k, int shifted, int finish) {
+static u64 *pass_chain(int s, u32 k, int shifted, int finish, int once) {
   u32 y0 = k * h.strip_h;
   /* the lines of the strip that are shown (the last one is shorter) */
   u32 rows = h.rt.h - y0 < h.strip_h ? h.rt.h - y0 : h.strip_h;
@@ -85,6 +91,9 @@ static u64 *pass_chain(int s, u32 k, int shifted, int finish) {
   u64 *c0 = (u64 *)((uintptr_t)pass_mem[h.nchain] | 0x20000000u);
   h.nchain = (h.nchain + 1) % NPASS_CHAINS;
   u64 *c = c0;
+  /* the record's texture uploads, before anything of it is drawn */
+  if (once)
+    c = mx_e_call(c, h.slot[s].once, 0, 0, 0);
   /* the batches of the pass before are drawn before the registers change */
   c = mx_e_call(c, h.slot[s].mem, 16, mx_vif_flush(), mx_vif_direct(16));
   c = mx_e_ad_tag(c, 15, 1);
@@ -129,6 +138,8 @@ static void kick(u32 k) {
     int s0 = h.nwait ? (int)h.wait[0] : -1;
     if (s0 >= 0 && h.slot[s0].once_pending && !mx_dma_busy(MX_CH_GIF))
       h.slot[s0].once_pending = 0;
+    if (s0 >= 0 && h.slot[s0].once_pending)
+      mx_hires_stats.held++;
     if (h.nwait && !h.slot[s0].once_pending) {
       int old = h.played;
       h.played = (int)h.wait[0];
@@ -164,7 +175,8 @@ static void kick(u32 k) {
 
   int shifted = mx_video.interlace && mx_video.ffmd && h.shift_field == (int)h.parity;
   int s = h.played;
-  u64 *c0 = pass_chain(s, k, shifted, 0);
+  int once = h.slot[s].once_inline;
+  u64 *c0 = pass_chain(s, k, shifted, 0, once);
   mx_event e;
   if (mx_dmaq_try_chain(&h.q, c0, 1, &e) < 0) {
     mx_hires_stats.late++;
@@ -173,6 +185,7 @@ static void kick(u32 k) {
   h.prev_at = mx_count(), h.prev_k = k;
   h.prev = e, h.prev_on = 1;
   h.slot[s].last = e, h.slot[s].kicked = 1;
+  h.slot[s].once_inline = 0;
   mx_hires_stats.passes++;
 }
 
@@ -314,8 +327,18 @@ void mx__hires_end(u8 *end, u8 *once_end, int full) {
      PATH3 now, while the frames before are played: on the GIF channel its
      tags' VIF codes are not sent, and its data are GIF packets */
   h.slot[s].once_pending = 0;
-  if (once_end - h.slot[s].once > 16) {
+  h.slot[s].once_inline = 0;
+  u32 once_n = (u32)(once_end - h.slot[s].once) / 16;
+  if (once_n > 1 && once_n <= ONCE_INLINE_QW) {
+    h.slot[s].once_inline = 1;
+  } else if (once_n > 1) {
+    /* the once records before are sent: theirs are no longer pending (pass
+       0 only sees whether the channel is busy, which is then this one) */
     mx_dma_wait(MX_CH_GIF);
+    int was = mx_di();
+    for (int i = 0; i < MX_HIRES_SLOTS; i++)
+      h.slot[i].once_pending = 0;
+    mx_irq_restore(was);
     mx_dma_chain(MX_CH_GIF, h.slot[s].once, 0);
     h.slot[s].once_pending = 1;
   }
@@ -388,7 +411,8 @@ int mx_hires_save_tga(const char *path) {
     u32 n = hh - k * rows < rows ? hh - k * rows : rows;
     for (int f = 0; f < 1 + both; f++) {
       u32 fin = mx_gs.finish;
-      mx_dmaq_chain(&h.q, pass_chain(s, k, f, 1), 1);
+      mx_dmaq_chain(&h.q, pass_chain(s, k, f, 1, h.slot[s].once_inline), 1);
+      h.slot[s].once_inline = 0;
       mx_dmaq_drain(&h.q);
       mx_gs_wait_finish(fin, 1);
       for (u32 y = 0; y < n; y++) {

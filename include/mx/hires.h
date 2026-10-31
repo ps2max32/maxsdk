@@ -56,6 +56,7 @@ struct mx_hires_stats {
   u32 shown;    /* records that became the one played */
   u32 rec_max;  /* the largest record, bytes */
   u32 rec_full; /* frames that did not fit their record (halves left out) */
+  u32 held;     /* fields that kept the record before, as the next one's PATH3 uploads were not done */
   u32 pass_us[MX_HIRES_PASSES]; /* the longest pass of each strip, us (kick to end of DMA) */
 };
 extern struct mx_hires_stats mx_hires_stats;
@@ -77,7 +78,8 @@ u32 mx_hires_slot(void);
    over PATH3 (GIF channel) as soon as the frame is complete, while the
    frames before are still played, not in every pass: texture uploads to GS
    memory that no frame being shown reads (GIF packets only, no VIF codes
-   are sent). The frame is shown once they are done. off: back into the main
+   are sent). The frame is shown once they are done. A small once record
+   (up to 16 KiB) is sent at the start of the frame's first pass instead. off: back into the main
    record. A once record that is full takes no more: the stream goes into
    the main one. */
 void mx_hires_once(int on);
