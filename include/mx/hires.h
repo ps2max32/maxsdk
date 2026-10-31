@@ -68,7 +68,9 @@ extern struct mx_hires_stats mx_hires_stats;
    MX_HIRES_SLOTS records; spr, spr_bytes as mx_frame_init. Load VU1
    microcode before (or in the stream). Returns 0, or -1 if the mode does
    not run or the framebuffer does not fit. mx_gs.tbp is the first block
-   after the framebuffer. */
+   after the framebuffer. mx_frame_stop() ends the passes (the pass being
+   sent and a once record over PATH3 finish): the GS can then be set up in
+   another mode, with another pipeline (a mode change). */
 int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 h, u32 psm, void *mem, u32 bytes,
                   void *spr, u32 spr_bytes);
 /* The record of the frame being built (0 .. MX_HIRES_SLOTS - 1), after

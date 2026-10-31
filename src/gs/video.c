@@ -17,4 +17,9 @@ const struct mx_video_mode mx_video_vga_1024  = {0x3D, 0, 0, 75, 1024, 768, 260,
 const struct mx_video_mode mx_video_vga_1280  = {0x4A, 0, 0, 60, 1280, 1024, 350, 40};
 // clang-format on
 
+const struct mx_video_mode *mx_video_default(void) {
+  /* ROMVER (VVVVRTYYYYMMDD) at the end of the ROM: R is the region */
+  return *(volatile const char *)0x1FC7FF52 == 'E' ? &mx_video_pal : &mx_video_ntsc;
+}
+
 struct mx_video_mode mx_video;

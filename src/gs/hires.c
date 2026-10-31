@@ -362,7 +362,10 @@ void mx__hires_stop(void) {
   mx_irq_restore(was);
   TMR_MODE = 0;
   mx_irq_intc(MX_INTC_TIM0, 0, 0);
+  /* the pass being sent and a once record over PATH3 finish: the pipeline
+     can be started again (another mode) */
   mx_dmaq_release(&h.q);
+  mx_dma_wait(MX_CH_GIF);
 }
 
 u32 mx_hires_slot(void) {
