@@ -26,13 +26,15 @@ static struct {
   u32 line[MX_HIRES_PASSES]; /* the H-blank count at which the beam starts strip j */
   struct {
     u8 *mem;
+    u8 *once;          /* the once record: sent over PATH3 when the record is complete */
+    volatile int once_pending; /* its PATH3 DMA may still run */
     volatile int state;
     u32 frame;
     u32 rgb;
     mx_event last; /* the DMA of its last pass */
     int kicked;
   } slot[MX_HIRES_SLOTS];
-  u32 qw_per_slot;
+  u32 qw_per_slot, once_qw; /* main and once records' quadwords */
   volatile int played;   /* the slot played, -1: none yet */
   volatile u32 wait[MX_HIRES_SLOTS]; /* the waiting slots, oldest first */
   volatile u32 nwait;
@@ -43,6 +45,7 @@ static struct {
   int shift_field;
   mx_event prev;
   int prev_on;
+  u32 prev_at, prev_k;
   u64 *chains;
   u32 nchain;
 } h;
@@ -73,6 +76,8 @@ static void retire(void) {
    FINISH after it), in the next of the pass chains. */
 static u64 *pass_chain(int s, u32 k, int shifted, int finish) {
   u32 y0 = k * h.strip_h;
+  /* the lines of the strip that are shown (the last one is shorter) */
+  u32 rows = h.rt.h - y0 < h.strip_h ? h.rt.h - y0 : h.strip_h;
   u32 oy = h.rt.oy + (y0 << 4) + (shifted ? 8 : 0);
   u32 fbp = h.rt.fbp + k * h.strip_pages;
   u32 zbp = h.rt.fbp + ((k + 1) % MX_HIRES_PASSES) * h.strip_pages;
@@ -90,8 +95,7 @@ static u64 *pass_chain(int s, u32 k, int shifted, int finish) {
     c = mx_e_ad(c, mx_gs_ctx(MX_GS_REG_FRAME_1, ctx), mx_gs_frame(fbp, h.rt.fbw, h.rt.psm, 0));
     c = mx_e_ad(c, mx_gs_ctx(MX_GS_REG_ZBUF_1, ctx), mx_gs_zbuf(zbp, h.zpsm, (u32)ctx));
     c = mx_e_ad(c, mx_gs_ctx(MX_GS_REG_XYOFFSET_1, ctx), mx_gs_xyoffset(h.rt.ox, oy));
-    c = mx_e_ad(c, mx_gs_ctx(MX_GS_REG_SCISSOR_1, ctx),
-                mx_gs_scissor(0, h.rt.w - 1, 0, h.strip_h - 1));
+    c = mx_e_ad(c, mx_gs_ctx(MX_GS_REG_SCISSOR_1, ctx), mx_gs_scissor(0, h.rt.w - 1, 0, rows - 1));
   }
   /* the strip and its Z cleared */
   c = mx_e_ad(c, MX_GS_REG_TEST_1, mx_gs_test(0, 0, 0, 0, 0, 0, 1, 1));
@@ -120,8 +124,12 @@ static void kick(u32 k) {
   retire();
   if (k == 0) {
     mx_hires_stats.fields++;
-    /* the oldest waiting record is played from this field on */
-    if (h.nwait) {
+    /* the oldest waiting record is played from this field on, once its
+       texture uploads (PATH3) are done */
+    int s0 = h.nwait ? (int)h.wait[0] : -1;
+    if (s0 >= 0 && h.slot[s0].once_pending && !mx_dma_busy(MX_CH_GIF))
+      h.slot[s0].once_pending = 0;
+    if (h.nwait && !h.slot[s0].once_pending) {
       int old = h.played;
       h.played = (int)h.wait[0];
       for (u32 i = 1; i < h.nwait; i++)
@@ -142,6 +150,13 @@ static void kick(u32 k) {
   /* the pass before is still being sent: this one is left out (the queue
      stays one deep, and the pass chains it reads are not overwritten); its
      strip shows what was there */
+  /* the pass before's time, from its kick to the end of its DMA */
+  if (h.prev_on && mx_event_done(h.prev)) {
+    u32 t = (h.q.t_last_end - h.prev_at) / (MX_EE_HZ / 1000000);
+    if (t > mx_hires_stats.pass_us[h.prev_k])
+      mx_hires_stats.pass_us[h.prev_k] = t;
+    h.prev_on = 0;
+  }
   if (h.prev_on && !mx_event_done(h.prev)) {
     mx_hires_stats.late++;
     return;
@@ -155,6 +170,7 @@ static void kick(u32 k) {
     mx_hires_stats.late++;
     return;
   }
+  h.prev_at = mx_count(), h.prev_k = k;
   h.prev = e, h.prev_on = 1;
   h.slot[s].last = e, h.slot[s].kicked = 1;
   mx_hires_stats.passes++;
@@ -216,13 +232,18 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   for (u32 j = 0; j < MX_HIRES_PASSES; j++)
     h.line[j] = top + j * h.strip_h * magv * per / 2;
 
-  h.qw_per_slot = bytes / MX_HIRES_SLOTS / 16;
-  mx_dcache_invalidate(mem, h.qw_per_slot * 16 * MX_HIRES_SLOTS);
+  /* a slot: its main record, then its once record (a quarter) */
+  u32 slot_qw = bytes / MX_HIRES_SLOTS / 16;
+  h.once_qw = slot_qw / 4;
+  h.qw_per_slot = slot_qw - h.once_qw;
+  mx_dcache_invalidate(mem, slot_qw * 16 * MX_HIRES_SLOTS);
   /* the pass chains are written uncached: no dirty line of them (crt0's
      clearing of .bss) may be written back over one later */
   mx_dcache_invalidate(pass_mem, sizeof pass_mem);
   for (int i = 0; i < MX_HIRES_SLOTS; i++) {
-    h.slot[i].mem = (u8 *)mem + i * h.qw_per_slot * 16;
+    h.slot[i].mem = (u8 *)mem + i * slot_qw * 16;
+    h.slot[i].once = h.slot[i].mem + h.qw_per_slot * 16;
+    h.slot[i].once_pending = 0;
     h.slot[i].state = FREE;
     h.slot[i].rgb = 0;
     h.slot[i].kicked = 0;
@@ -266,7 +287,7 @@ static int slot_free(void) {
 
 int mx__hires_ready(void) { return h.building >= 0 || slot_free() >= 0; }
 
-u8 *mx__hires_begin(u32 *qw) {
+u8 *mx__hires_begin(u32 *qw, u8 **once, u32 *once_qw) {
   if (h.building < 0) {
     u32 t0 = mx_count();
     int s;
@@ -282,11 +303,22 @@ u8 *mx__hires_begin(u32 *qw) {
     h.building = s;
   }
   *qw = h.qw_per_slot;
+  *once = h.slot[h.building].once;
+  *once_qw = h.once_qw;
   return h.slot[h.building].mem;
 }
 
-void mx__hires_end(u8 *end, int full) {
+void mx__hires_end(u8 *end, u8 *once_end, int full) {
   int s = h.building;
+  /* the once record (texture uploads to places no frame shown uses) over
+     PATH3 now, while the frames before are played: on the GIF channel its
+     tags' VIF codes are not sent, and its data are GIF packets */
+  h.slot[s].once_pending = 0;
+  if (once_end - h.slot[s].once > 16) {
+    mx_dma_wait(MX_CH_GIF);
+    mx_dma_chain(MX_CH_GIF, h.slot[s].once, 0);
+    h.slot[s].once_pending = 1;
+  }
   u32 used = (u32)(end - h.slot[s].mem);
   if (used > mx_hires_stats.rec_max)
     mx_hires_stats.rec_max = used;
@@ -312,8 +344,9 @@ void mx__hires_stop(void) {
 
 u32 mx_hires_slot(void) {
   if (h.building < 0) {
-    u32 qw;
-    mx__hires_begin(&qw);
+    u32 qw, oqw;
+    u8 *once;
+    mx__hires_begin(&qw, &once, &oqw);
   }
   return (u32)h.building;
 }
@@ -378,6 +411,9 @@ int mx_hires_save_tga(const char *path) {
       }
     }
   }
+  /* the header again (once it was lost on the PS2: zeros, the lines right) */
+  mx_fio_lseek(fd, 0, MX_FIO_SEEK_SET);
+  mx_fio_write(fd, hdr, sizeof hdr);
   mx_fio_close(fd);
   mx_dmaq_release(&h.q);
   return 0;

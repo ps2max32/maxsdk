@@ -40,9 +40,11 @@ static struct {
   /* record mode (<mx/hires.h>): the halves are copied one after the other
      into the frame's record, which hires.c plays */
   int record;
-  u8 *rec_at;    /* the next quadword of the record, 0: none open */
-  u32 rec_left;  /* quadwords left in it, the final RET not counted */
+  int rec_open;  /* the frame's records are open */
+  u8 *rec_at[2]; /* the next quadword of the main record and of the once one */
+  u32 rec_left[2]; /* quadwords left in each, the final RET not counted */
   int rec_full;  /* halves were left out */
+  int rec_dest;  /* where the stream goes: 0 main, 1 once (mx_hires_once) */
 } f;
 
 void mx_frame_vsync(int on) {
@@ -156,7 +158,8 @@ int mx_frame_init_chain(void *mem, u32 bytes, void *spr, u32 spr_bytes) {
 void mx__frame_init_record(void *spr, u32 spr_bytes) {
   init_halves(spr, spr_bytes, 1);
   f.record = 1;
-  f.rec_at = 0;
+  f.rec_open = 0;
+  f.rec_dest = 0;
 }
 
 /* Queue the slot being copied into, once its copy is done. */
@@ -187,24 +190,40 @@ static void chain_flush(u32 n) {
    half), and the half (n quadwords) appended to it. A half that does not
    fit is left out, and so are all after it (the record stays a chain). */
 static void rec_open(void) {
-  if (f.rec_at)
+  if (f.rec_open)
     return;
-  u32 qw;
-  f.rec_at = mx__hires_begin(&qw);
-  f.rec_left = qw - 1;
+  u32 qw, oqw;
+  f.rec_at[0] = mx__hires_begin(&qw, &f.rec_at[1], &oqw);
+  f.rec_left[0] = qw - 1;
+  f.rec_left[1] = oqw - 1;
   f.rec_full = 0;
+  f.rec_open = 1;
 }
 
 static void rec_flush(u32 n) {
   rec_open();
   mx_dma_wait(MX_CH_FROMSPR);
-  if (f.rec_full || n > f.rec_left) {
+  int d = f.rec_dest;
+  /* the once record full: in the main one (played every pass, as right) */
+  if (d && n > f.rec_left[1])
+    d = 0;
+  if (f.rec_full || n > f.rec_left[d]) {
     f.rec_full = 1;
     return;
   }
-  mx_dma_from_spr(f.rec_at, f.half[f.cur], n);
-  f.rec_at += 16 * n;
-  f.rec_left -= n;
+  mx_dma_from_spr(f.rec_at[d], f.half[f.cur], n);
+  f.rec_at[d] += 16 * n;
+  f.rec_left[d] -= n;
+}
+
+static void flush(void);
+
+void mx_hires_once(int on) {
+  if (!f.record || f.rec_dest == !!on)
+    return;
+  /* what is built so far goes where it was meant to */
+  flush();
+  f.rec_dest = !!on;
 }
 
 /* Push the current half into the ring and switch to the other one. The
@@ -343,11 +362,14 @@ static void finish(void) {
     flush();
     rec_open();
     mx_dma_wait(MX_CH_FROMSPR);
-    u64 *t = (u64 *)((uintptr_t)f.rec_at | 0x20000000u);
-    t[0] = mx_dmatag(MX_TAG_RET, 0, 0, 0);
-    t[1] = 0;
-    mx__hires_end(f.rec_at + 16, f.rec_full);
-    f.rec_at = 0;
+    for (int d = 0; d < 2; d++) {
+      u64 *t = (u64 *)((uintptr_t)f.rec_at[d] | 0x20000000u);
+      t[0] = mx_dmatag(MX_TAG_RET, 0, 0, 0);
+      t[1] = 0;
+    }
+    mx__hires_end(f.rec_at[0] + 16, f.rec_at[1] + 16, f.rec_full);
+    f.rec_open = 0;
+    f.rec_dest = 0;
     mx_gs.frames++;
     return;
   }

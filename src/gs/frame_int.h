@@ -28,11 +28,11 @@ extern void (*mx__frame3_report)(void);
 /* Record mode, for hires.c (<mx/hires.h>): the stream's halves go into a
    record per frame instead of to VIF1. */
 void mx__frame_init_record(void *spr, u32 spr_bytes);
-/* hires.c: the memory of the next record (waits until one is free; qw:
-   its quadwords), the end of the record (at end, full: halves were left
-   out), the frame stream's mx_frame_ready, and the end of the pipeline */
-u8 *mx__hires_begin(u32 *qw);
-void mx__hires_end(u8 *end, int full);
+/* hires.c: the memory of the next record and of its once record (waits
+   until one is free; qw: their quadwords), the end of the records (at end,
+   once_end; full: halves were left out), the frame stream's mx_frame_ready, and the end of the pipeline */
+u8 *mx__hires_begin(u32 *qw, u8 **once, u32 *once_qw);
+void mx__hires_end(u8 *end, u8 *once_end, int full);
 int mx__hires_ready(void);
 void mx__hires_stop(void);
 

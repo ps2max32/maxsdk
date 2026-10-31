@@ -88,7 +88,7 @@ the PS2; the measurements are in `docs/`. maxsdk is built with clang only.
 | `probe/` | one ELF per hardware question; results go to `docs/` |
 | `examples/<name>/` | the examples, one directory each |
 | `mk/maxsdk.mk` | what a program on maxsdk includes: flags, link, the VU and HLSL rules |
-| `tools/` | `symbolize.py` (exception backtraces), `trace.py`, `vusched/` (hand-scheduled VU1 kernels), `vscode-vsm/` |
+| `tools/` | `symbolize.py` (exception backtraces), `prof.py` (`<mx/prof.h>`'s PC samples as functions), `trace.py`, `vusched/` (hand-scheduled VU1 kernels), `vscode-vsm/` |
 
 ## Decisions (PLAN_MAXSDK.md section 7)
 

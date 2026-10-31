@@ -24,8 +24,13 @@ static int dmac_entry(int ch, void *a, void *addr) {
   return 0;
 }
 
+/* the interrupted code's address of the INTC interrupt being handled (the
+   BIOS's third argument), for mx_prof */
+volatile u32 mx__irq_epc;
+
 static int intc_entry(int cause, void *a, void *addr) {
-  (void)a, (void)addr;
+  (void)a;
+  mx__irq_epc = (u32)(uintptr_t)addr;
   struct slot *s = &intc[cause];
   mx_trace(MX_TR_INTC_IRQ, (u16)cause);
   s->count++;

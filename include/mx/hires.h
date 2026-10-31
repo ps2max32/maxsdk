@@ -33,7 +33,8 @@
    passes the frame. A frame's IMAGE transfers are done in every pass of
    it, in the order recorded, so a frame's own texture uploads are always
    right; textures left in GS memory by an earlier frame are right as long
-   as no later upload overwrote them.
+   as no later upload overwrote them. Uploads that need not be repeated go
+   into the once record (mx_hires_once).
 
    Not with the PATH3 stream (mx_frame3_*), mx_frame_present or
    mx_frame_vu1_compute. The GS must draw a whole frame three times a field:
@@ -46,7 +47,7 @@
 #include <mx/video.h>
 
 #define MX_HIRES_PASSES 3
-#define MX_HIRES_SLOTS 3 /* records: one played, two waiting or being built */
+#define MX_HIRES_SLOTS 4 /* records: one played, three waiting or being built (a fast frame is kept for when a slow one comes) */
 
 struct mx_hires_stats {
   u32 fields;   /* fields drawn (pass 0 kicked) */
@@ -55,6 +56,7 @@ struct mx_hires_stats {
   u32 shown;    /* records that became the one played */
   u32 rec_max;  /* the largest record, bytes */
   u32 rec_full; /* frames that did not fit their record (halves left out) */
+  u32 pass_us[MX_HIRES_PASSES]; /* the longest pass of each strip, us (kick to end of DMA) */
 };
 extern struct mx_hires_stats mx_hires_stats;
 
@@ -71,6 +73,14 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 h, u32 psm, void *me
 /* The record of the frame being built (0 .. MX_HIRES_SLOTS - 1), after
    mx_frame_begin_n: data per frame can be kept per record. */
 u32 mx_hires_slot(void);
+/* on: the frame stream after this goes into the frame's once record, sent
+   over PATH3 (GIF channel) as soon as the frame is complete, while the
+   frames before are still played, not in every pass: texture uploads to GS
+   memory that no frame being shown reads (GIF packets only, no VIF codes
+   are sent). The frame is shown once they are done. off: back into the main
+   record. A once record that is full takes no more: the stream goes into
+   the main one. */
+void mx_hires_once(int on);
 /* The colour each pass clears its strip to, for the frame being built. */
 void mx_hires_clear(u32 r, u32 g, u32 b);
 /* The field (CSR.FIELD) whose passes are drawn half a line lower in
