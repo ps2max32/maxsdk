@@ -10,7 +10,7 @@
    and a third of its height (rounded up to whole pages). The frame stream
    (<mx/frame.h>) is not sent to VIF1: each frame's stream is recorded into
    memory (a chain ending in RET). When the beam starts showing strip k - 1,
-   an EE timer counting H-blanks kicks pass k: strip k's drawing registers,
+   EE timer 0 counting H-blanks kicks pass k: strip k's drawing registers,
    a clear of it, and a CALL of the record; the frame's Z buffer is strip
    k + 1, which the beam shows after strip k, drawn over in its own pass
    before that. Every field draws all three strips from the newest record
@@ -36,9 +36,10 @@
    as no later upload overwrote them.
 
    Not with the PATH3 stream (mx_frame3_*), mx_frame_present or
-   mx_frame_vu1_compute. The GS must draw a whole frame three times a field
-   (late passes are counted: mx_hires_stats.late), or the beam shows a
-   strip half drawn. */
+   mx_frame_vu1_compute. The GS must draw a whole frame three times a field:
+   a pass whose turn comes while the one before is still being sent is left
+   out (mx_hires_stats.late), and the beam shows that strip as it is (half
+   drawn, or the Z of the pass before). */
 
 #include <mx/rt.h>
 #include <mx/types.h>
@@ -50,7 +51,7 @@
 struct mx_hires_stats {
   u32 fields;   /* fields drawn (pass 0 kicked) */
   u32 passes;   /* passes kicked */
-  u32 late;     /* passes whose DMA was still running when the next was kicked */
+  u32 late;     /* passes left out: the one before was still being sent */
   u32 shown;    /* records that became the one played */
   u32 rec_max;  /* the largest record, bytes */
   u32 rec_full; /* frames that did not fit their record (halves left out) */

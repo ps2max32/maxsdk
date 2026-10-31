@@ -14,7 +14,7 @@ enum { FREE, BUILDING, WAITING, PLAYED, RETIRING };
 
 /* the pass chains, written by the timer interrupt through the uncached
    segment: CALL with the pass's registers, the record, END */
-#define PASS_QW 16
+#define PASS_QW 24 /* a chain is 18 quadwords, 20 with the FINISH */
 #define NPASS_CHAINS 16
 
 static struct {
@@ -52,9 +52,11 @@ static u64 pass_mem[NPASS_CHAINS][PASS_QW * 2] MX_ALIGNED(64);
 static u32 shot_line[2048] MX_ALIGNED(64);
 static u8 shot_out[2048 * 3];
 
-#define T2_MODE MX_R32(MX_TIMER_T2_MODE)
-#define T2_COUNT MX_R32(MX_TIMER_T2_COUNT)
-#define T2_COMP MX_R32(MX_TIMER_T2_COMP)
+/* timer 0: the page of timers 2 and 3 is mapped read-only on the PS2 (the
+   kernel's; a write is a TLB modified exception, PS2 2026-10-31) */
+#define TMR_MODE MX_R32(MX_TIMER_T0_MODE)
+#define TMR_COUNT MX_R32(MX_TIMER_T0_COUNT)
+#define TMR_COMP MX_R32(MX_TIMER_T0_COMP)
 
 /* A slot retired by the pass 0 that replaced it is free once the DMA of
    its last pass is done (interrupts off or in a handler). */
@@ -104,6 +106,12 @@ static u64 *pass_chain(int s, u32 k, int shifted, int finish) {
   } else {
     c = mx_e_end(c, 0, mx_vif_flush(), 0);
   }
+  if (c - c0 > 2 * PASS_QW) {
+    mx_printf("mx_hires: a pass chain of %d quadwords\n", (int)(c - c0) / 2);
+    mx_exit(254);
+  }
+  /* the uncached writes are done before the DMA reads them */
+  mx_sync();
   return c0;
 }
 
@@ -131,8 +139,13 @@ static void kick(u32 k) {
   }
   if (h.played < 0)
     return;
-  if (h.prev_on && !mx_event_done(h.prev))
+  /* the pass before is still being sent: this one is left out (the queue
+     stays one deep, and the pass chains it reads are not overwritten); its
+     strip shows what was there */
+  if (h.prev_on && !mx_event_done(h.prev)) {
     mx_hires_stats.late++;
+    return;
+  }
 
   int shifted = mx_video.interlace && mx_video.ffmd && h.shift_field == (int)h.parity;
   int s = h.played;
@@ -151,21 +164,21 @@ static void kick(u32 k) {
    field). */
 static void timer_irq(void *arg) {
   (void)arg;
-  T2_MODE = T2_MODE | (u32)MX_BIT(TIMER_MODE_EQUF);
+  TMR_MODE = TMR_MODE | (u32)MX_BIT(TIMER_MODE_EQUF);
   u32 j = h.next_line;
   if (j >= MX_HIRES_PASSES)
     return;
   h.next_line = j + 1;
   if (j + 1 < MX_HIRES_PASSES)
-    T2_COMP = h.line[j + 1];
+    TMR_COMP = h.line[j + 1];
   kick((j + 1) % MX_HIRES_PASSES);
 }
 
 /* The vblank starts: H-blanks counted from here. */
 static void vsync_hook(void) {
-  T2_COUNT = 0;
+  TMR_COUNT = 0;
   h.next_line = 0;
-  T2_COMP = h.line[0];
+  TMR_COMP = h.line[0];
 }
 
 static u32 align_up(u32 v, u32 a) { return (v + a - 1) / a * a; }
@@ -205,6 +218,9 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
 
   h.qw_per_slot = bytes / MX_HIRES_SLOTS / 16;
   mx_dcache_invalidate(mem, h.qw_per_slot * 16 * MX_HIRES_SLOTS);
+  /* the pass chains are written uncached: no dirty line of them (crt0's
+     clearing of .bss) may be written back over one later */
+  mx_dcache_invalidate(pass_mem, sizeof pass_mem);
   for (int i = 0; i < MX_HIRES_SLOTS; i++) {
     h.slot[i].mem = (u8 *)mem + i * h.qw_per_slot * 16;
     h.slot[i].state = FREE;
@@ -223,13 +239,13 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   mx_dmaq_init(&h.q, MX_CH_VIF1);
   mx__frame_init_record(spr, spr_bytes);
 
-  /* timer 2 counts H-blanks; its compare is the next strip's line */
-  T2_MODE = 0;
+  /* timer 0 counts H-blanks; its compare is the next strip's line */
+  TMR_MODE = 0;
   h.next_line = MX_HIRES_PASSES;
-  T2_COUNT = 0;
-  T2_COMP = 0xFFFF;
-  mx_irq_intc(MX_INTC_TIM0 + 2, timer_irq, 0);
-  T2_MODE = (u32)(MX_SET(TIMER_MODE_CLKS, 3) | MX_BIT(TIMER_MODE_CUE) | MX_BIT(TIMER_MODE_CMPE) |
+  TMR_COUNT = 0;
+  TMR_COMP = 0xFFFF;
+  mx_irq_intc(MX_INTC_TIM0, timer_irq, 0);
+  TMR_MODE = (u32)(MX_SET(TIMER_MODE_CLKS, 3) | MX_BIT(TIMER_MODE_CUE) | MX_BIT(TIMER_MODE_CMPE) |
                   MX_BIT(TIMER_MODE_EQUF) | MX_BIT(TIMER_MODE_OVFF));
   int was = mx_di();
   mx__vsync_hook = vsync_hook;
@@ -289,8 +305,8 @@ void mx__hires_stop(void) {
   int was = mx_di();
   mx__vsync_hook = 0;
   mx_irq_restore(was);
-  T2_MODE = 0;
-  mx_irq_intc(MX_INTC_TIM0 + 2, 0, 0);
+  TMR_MODE = 0;
+  mx_irq_intc(MX_INTC_TIM0, 0, 0);
   mx_dmaq_release(&h.q);
 }
 
@@ -319,8 +335,8 @@ int mx_hires_save_tga(const char *path) {
   int was = mx_di();
   mx__vsync_hook = 0;
   mx_irq_restore(was);
-  T2_MODE = 0;
-  mx_irq_intc(MX_INTC_TIM0 + 2, 0, 0);
+  TMR_MODE = 0;
+  mx_irq_intc(MX_INTC_TIM0, 0, 0);
   mx_dmaq_drain(&h.q);
   int s = h.played;
   if (s < 0)
