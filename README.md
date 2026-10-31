@@ -40,6 +40,7 @@ Each example has its own directory in `examples/`:
 | `spin`, `scene`, `allunits` | phase 3, 6, 7 |
 | `vumax` | the VU1 vertex rate at the floor for six standard vertex programs (flat, Gouraud, textured, one light, lit + textured, ps2gl's SCEI): hand-scheduled kernels (`tools/vusched/vusched.py`) against the EE for every batch size, then throughput with and without the GS, next to the same programs in HLSL ([docs/vu1.md](docs/vu1.md)). Options: `s<k>` one scenario, `t` throughput only, `k` kernels alone, `c` plain DMA chain |
 | `display` | every video mode (NTSC/PAL interlaced and progressive, 480p, 576p, 720p, 1080i, VESA) with the picture's edge marked, and the two read circuits merged: an overlay over 2x magnified animation, a crossfade, a fade to black, the smooth filter. Pad: left/right mode, square scene, d-pad/L1/R1 move the picture; without a press it shows each once and exits |
+| `hires` | 1920 x 1080 interlaced from one 1920 x 540 16-bit buffer (`<mx/hires.h>`, gsKit's hires): the frame stream recorded, played as three strips just ahead of the beam every field, Z in the next strip, the lower field half a line lower; a frame every 4 fields, both fields saved as `host:hires.tga` |
 | `gsmax` | the GS at the rates of the GS manual's performance tables (setup per primitive type, fill rate), over PATH1 ([docs/gif-gs.md](docs/gif-gs.md)) |
 
 Apps on maxsdk live in their own repos: `ps2max/apps/model` (a glTF model, skinned and animated,

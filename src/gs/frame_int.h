@@ -25,4 +25,18 @@ extern struct mx_dmaq *mx__frame3_q;
 /* its part of mx__frame_stalled's report */
 extern void (*mx__frame3_report)(void);
 
+/* Record mode, for hires.c (<mx/hires.h>): the stream's halves go into a
+   record per frame instead of to VIF1. */
+void mx__frame_init_record(void *spr, u32 spr_bytes);
+/* hires.c: the memory of the next record (waits until one is free; qw:
+   its quadwords), the end of the record (at end, full: halves were left
+   out), the frame stream's mx_frame_ready, and the end of the pipeline */
+u8 *mx__hires_begin(u32 *qw);
+void mx__hires_end(u8 *end, int full);
+int mx__hires_ready(void);
+void mx__hires_stop(void);
+
+/* gs.c: called by the vblank interrupt (vblank start), 0: none */
+extern void (*mx__vsync_hook)(void);
+
 #endif

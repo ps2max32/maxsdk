@@ -1,0 +1,87 @@
+#ifndef MX_HIRES_H
+#define MX_HIRES_H
+
+/* High resolution by passes (gsKit's hires, ee/gs/src/gsHires.c): a
+   picture larger than GS memory holds twice (1920 x 540 at 16 bits is
+   2 MiB), drawn into one framebuffer a strip at a time, just ahead of the
+   beam, every field.
+
+   The framebuffer is three strips (MX_HIRES_PASSES) of the picture's width
+   and a third of its height (rounded up to whole pages). The frame stream
+   (<mx/frame.h>) is not sent to VIF1: each frame's stream is recorded into
+   memory (a chain ending in RET). When the beam starts showing strip k - 1,
+   an EE timer counting H-blanks kicks pass k: strip k's drawing registers,
+   a clear of it, and a CALL of the record; the frame's Z buffer is strip
+   k + 1, which the beam shows after strip k, drawn over in its own pass
+   before that. Every field draws all three strips from the newest record
+   that is complete, so the picture is whole however slowly the frames
+   come; a new record is taken at pass 0, the first pass of a field.
+
+   In interlaced FRAME mode (1080i: each field shows all 540 lines) the
+   lower field's passes draw half a line lower (XYOFFSET.Y + 8), which gives
+   the two fields of a 1080-line picture (examples/field).
+
+   What the frame stream may write: the GS registers of both contexts but
+   FRAME, ZBUF, XYOFFSET and SCISSOR, which belong to the passes. Context 1
+   (PRIM.CTXT 0) writes Z, context 2 (CTXT 1) has ZMSK set: draw with
+   context 2 for no Z writes, and set the other registers of the context a
+   primitive uses. Window coordinates are those of a w x h target
+   (mx_gs_px, mx_gs_py: mx_gs.w, mx_gs.h are the picture's).
+
+   Data the stream references (vertex arrays, textures) is read every pass
+   until a later frame has replaced the record: until mx_frame_done()
+   passes the frame. A frame's IMAGE transfers are done in every pass of
+   it, in the order recorded, so a frame's own texture uploads are always
+   right; textures left in GS memory by an earlier frame are right as long
+   as no later upload overwrote them.
+
+   Not with the PATH3 stream (mx_frame3_*), mx_frame_present or
+   mx_frame_vu1_compute. The GS must draw a whole frame three times a field
+   (late passes are counted: mx_hires_stats.late), or the beam shows a
+   strip half drawn. */
+
+#include <mx/rt.h>
+#include <mx/types.h>
+#include <mx/video.h>
+
+#define MX_HIRES_PASSES 3
+#define MX_HIRES_SLOTS 3 /* records: one played, two waiting or being built */
+
+struct mx_hires_stats {
+  u32 fields;   /* fields drawn (pass 0 kicked) */
+  u32 passes;   /* passes kicked */
+  u32 late;     /* passes whose DMA was still running when the next was kicked */
+  u32 shown;    /* records that became the one played */
+  u32 rec_max;  /* the largest record, bytes */
+  u32 rec_full; /* frames that did not fit their record (halves left out) */
+};
+extern struct mx_hires_stats mx_hires_stats;
+
+/* DMAC, the GS and mode m (interlaced: FRAME mode), the framebuffer of
+   w x h pixels of psm (CT32, CT24 with Z32 / CT16, CT16S with Z16, Z16S),
+   shown on read circuit 2, and the frame pipeline in record mode: mem
+   (64-byte aligned, uncached or not written by the EE) holds the
+   MX_HIRES_SLOTS records; spr, spr_bytes as mx_frame_init. Load VU1
+   microcode before (or in the stream). Returns 0, or -1 if the mode does
+   not run or the framebuffer does not fit. mx_gs.tbp is the first block
+   after the framebuffer. */
+int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 h, u32 psm, void *mem, u32 bytes,
+                  void *spr, u32 spr_bytes);
+/* The record of the frame being built (0 .. MX_HIRES_SLOTS - 1), after
+   mx_frame_begin_n: data per frame can be kept per record. */
+u32 mx_hires_slot(void);
+/* The colour each pass clears its strip to, for the frame being built. */
+void mx_hires_clear(u32 r, u32 g, u32 b);
+/* The field (CSR.FIELD) whose passes are drawn half a line lower in
+   interlaced FRAME mode: 0 (default, as gsKit) or 1; -1: no shift. */
+void mx_hires_shift_field(int f);
+/* The framebuffer: the whole picture, w x h (the strips one below the
+   other), for screenshots. */
+const struct mx_rt *mx_hires_rt(void);
+/* The picture of the record played last as a 24-bit TGA file ("host:..."):
+   each strip drawn again and read back; in interlaced FRAME mode both
+   fields (2 h lines). Stops the passes and the pipeline (for tests: the
+   program ends after it). Returns 0, or -1. */
+int mx_hires_save_tga(const char *path);
+
+#endif

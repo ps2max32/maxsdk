@@ -7,6 +7,7 @@
 #include <mx/tex.h>
 #include <mx/trace.h>
 #include <mx/vif.h>
+#include "frame_int.h"
 
 struct mx_gs mx_gs;
 
@@ -149,9 +150,13 @@ static void gs_irq(void *arg) {
   CSR = csr & (MX_BIT(GS_CSR_SIGNAL) | MX_BIT(GS_CSR_FINISH));
 }
 
+void (*mx__vsync_hook)(void);
+
 static void vsync_irq(void *arg) {
   mx_gs.vsync++;
   mx_gs.vsync_at = mx_count();
+  if (mx__vsync_hook)
+    mx__vsync_hook();
   mx_trace(MX_TR_VSYNC, (u16)mx_gs.vsync);
   present_release();
   if (mx_gs.pending) {

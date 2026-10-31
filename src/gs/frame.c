@@ -37,6 +37,12 @@ static struct {
   int presenting; /* mx_frame_present: the frame has ended (its FINISH) */
   u32 pend;
   struct mx_dmaq q;
+  /* record mode (<mx/hires.h>): the halves are copied one after the other
+     into the frame's record, which hires.c plays */
+  int record;
+  u8 *rec_at;    /* the next quadword of the record, 0: none open */
+  u32 rec_left;  /* quadwords left in it, the final RET not counted */
+  int rec_full;  /* halves were left out */
 } f;
 
 void mx_frame_vsync(int on) {
@@ -147,6 +153,12 @@ int mx_frame_init_chain(void *mem, u32 bytes, void *spr, u32 spr_bytes) {
   return 0;
 }
 
+void mx__frame_init_record(void *spr, u32 spr_bytes) {
+  init_halves(spr, spr_bytes, 1);
+  f.record = 1;
+  f.rec_at = 0;
+}
+
 /* Queue the slot being copied into, once its copy is done. */
 static void submit(void) {
   if (!f.pending)
@@ -171,6 +183,30 @@ static void chain_flush(u32 n) {
   f.pending = 1, f.pend = k;
 }
 
+/* Record mode: the record of the frame being built (opened by its first
+   half), and the half (n quadwords) appended to it. A half that does not
+   fit is left out, and so are all after it (the record stays a chain). */
+static void rec_open(void) {
+  if (f.rec_at)
+    return;
+  u32 qw;
+  f.rec_at = mx__hires_begin(&qw);
+  f.rec_left = qw - 1;
+  f.rec_full = 0;
+}
+
+static void rec_flush(u32 n) {
+  rec_open();
+  mx_dma_wait(MX_CH_FROMSPR);
+  if (f.rec_full || n > f.rec_left) {
+    f.rec_full = 1;
+    return;
+  }
+  mx_dma_from_spr(f.rec_at, f.half[f.cur], n);
+  f.rec_at += 16 * n;
+  f.rec_left -= n;
+}
+
 /* Push the current half into the ring and switch to the other one. The
    push waits for the previous one (the other half), so the half we switch
    to is free. */
@@ -178,7 +214,9 @@ static void flush(void) {
   u32 n = (u32)(f.pos - f.half[f.cur]) / 2;
   if (!n)
     return;
-  if (f.chain) {
+  if (f.record) {
+    rec_flush(n);
+  } else if (f.chain) {
     chain_flush(n);
   } else {
     u32 t0 = mx_count(), busy = idle_while(ring_full, n);
@@ -207,7 +245,10 @@ int mx__frame_chain(void) { return f.chain; }
 
 void mx_frame_stop(void) {
   kick();
-  if (f.chain) {
+  if (f.record) {
+    mx__hires_stop();
+    f.record = 0;
+  } else if (f.chain) {
     mx_dmaq_release(&f.q);
     if (mx__frame3_stop)
       mx__frame3_stop();
@@ -235,6 +276,8 @@ u64 *mx_frame_reserve(u32 qwc) {
 void mx_frame_commit(u64 *end) { f.pos = end; }
 
 int mx_frame_ready(void) {
+  if (f.record)
+    return mx__hires_ready();
   /* frame n draws into the buffers of frame n - d, which are free once
      frame n - d + 1 is shown (vsync off: drawn, as it is shown at its
      FINISH) */
@@ -294,6 +337,20 @@ void mx_frame_wait_path3(void) {
 /* The frame's FINISH. Counted before anything after it can be pushed: the
    FINISH interrupt only counts frames that were submitted. */
 static void finish(void) {
+  if (f.record) {
+    /* no FINISH: the record ends with a RET (written past the DMA's
+       quadwords, through the uncached segment) and goes to hires.c */
+    flush();
+    rec_open();
+    mx_dma_wait(MX_CH_FROMSPR);
+    u64 *t = (u64 *)((uintptr_t)f.rec_at | 0x20000000u);
+    t[0] = mx_dmatag(MX_TAG_RET, 0, 0, 0);
+    t[1] = 0;
+    mx__hires_end(f.rec_at + 16, f.rec_full);
+    f.rec_at = 0;
+    mx_gs.frames++;
+    return;
+  }
   /* the PATH3 stream's packets of the frame first */
   if (mx__frame3_end)
     mx__frame3_end();
