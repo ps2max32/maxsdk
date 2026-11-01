@@ -87,6 +87,7 @@ struct mx_vm_stats {
   u32 zero_fills; /* first touches */
   u32 faults;     /* page faults handled in the thread: new pages, the swap file */
   u32 swap_ins, swap_outs, drops; /* drops: clean pages evicted without I/O */
+  u32 file_ins;                   /* pages of a program linked into VM read from its ELF */
   u32 retries;                    /* swap I/O repeated (the file server did not answer) */
   u32 dirty_tracking;             /* 1: TLB modified exceptions (the PS2), 0: every
                                      mapped page counts as written (PCSX2) */

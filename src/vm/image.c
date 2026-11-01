@@ -1,10 +1,11 @@
 /* Programs linked into VM (ld/maxsdk-vm.ld): the segments at MX_VM_BASE
-   and up, read from the program's ELF (argv[0], the path mxload gives)
-   once VM is on, before the constructors. Each page is read like any data
-   (mx_fio_read into VM: the pages are made resident and dirty), so a page
-   evicted later goes to the swap file. */
+   and up come from the program's ELF (argv[0], the path mxload gives),
+   which stays open: once VM is on, before the constructors, their pages
+   are registered with the pager (mx__vm_file_pages), and each is read when
+   it is first touched. A page not written since is dropped when evicted
+   and read again; a written one goes to the swap file. The bss after a
+   segment's bytes is new pages (zero). */
 
-#include <mx/bios.h>
 #include <mx/debug.h>
 #include <mx/sif.h>
 #include <mx/vm.h>
@@ -13,6 +14,7 @@ extern char __mx_vm_start[] __attribute__((weak));
 extern char __mx_vm_end[] __attribute__((weak));
 
 void mx__vm_code(void);
+int mx__vm_file_pages(int fd, u32 va, u32 filesz, u32 offset);
 
 int mx__vm_image(void) { return (uintptr_t)__mx_vm_end > (uintptr_t)__mx_vm_start; }
 
@@ -32,7 +34,6 @@ struct phdr {
 #define PT_LOAD 1
 #define PF_X 1
 #define MAX_PHDRS 16
-#define CHUNK 65536u
 
 static int bad(const char *path, const char *what) {
   mx_printf("maxsdk: %s: %s\n", path, what);
@@ -70,28 +71,13 @@ int mx__vm_load_image(const char *path) {
     }
     if (p->flags & PF_X)
       mx__vm_code();
-    /* the rest (bss) is new pages: zero */
-    if (mx_fio_lseek(fd, (s32)p->offset, MX_FIO_SEEK_SET) != (int)p->offset) {
-      bad(path, "cannot seek to a VM segment");
+    if (p->filesz && mx__vm_file_pages(fd, p->vaddr, p->filesz, p->offset) < 0) {
+      bad(path, "a VM segment the pager does not take (not on a page, or more than 4)");
       goto out;
     }
-    u8 *d = (u8 *)(uintptr_t)p->vaddr;
-    for (u32 done = 0; done < p->filesz;) {
-      /* to the end of the chunk-aligned piece, so a read pins few pages */
-      u32 n = CHUNK - ((p->vaddr + done) & (CHUNK - 1));
-      if (n > p->filesz - done)
-        n = p->filesz - done;
-      if (mx_fio_read(fd, d + done, n) != (int)n) {
-        bad(path, "cannot read a VM segment");
-        goto out;
-      }
-      done += n;
-    }
   }
-  r = 0;
+  return 0; /* fd stays open: the pager reads from it */
 out:
   mx_fio_close(fd);
-  mx_bios_flush_cache(0);
-  mx_bios_flush_cache(2);
   return r;
 }

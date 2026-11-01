@@ -58,6 +58,7 @@
 #define PG_REF 2   /* used since the clock last passed */
 #define PG_BUSY 4  /* in transit to or from the swap file */
 #define PG_SWAP 8  /* its slot holds it */
+#define PG_FILE 16 /* the program's ELF holds it (until PG_SWAP) */
 
 static struct {
   int active;
@@ -80,6 +81,12 @@ static struct {
   struct mx_vm_stats st;
   u32 modified_seen;
   int code; /* the program runs code from VM (src/vm/image.c) */
+  /* the segments of a program linked into VM, read from its ELF */
+  int efd;
+  u32 nseg;
+  struct {
+    u32 va, filesz, offset;
+  } seg[4];
 } vm;
 
 void mx__vm_code(void) { vm.code = 1; }
@@ -383,6 +390,53 @@ static void swap_io(u32 pg, u32 f, int out) {
   vm_fatal(out ? "swap file write failed" : "swap file read failed", pg);
 }
 
+/* Page pg (PG_FILE) into frame f from the program's ELF: the segment's
+   bytes of the page, the rest zero. */
+static void file_in(u32 pg, u32 f) {
+  irq_check(0x18);
+  u32 va = MX_VM_BASE + (pg << PAGE_SHIFT), i = 0;
+  while (i < vm.nseg && !(va >= vm.seg[i].va && va - vm.seg[i].va < vm.seg[i].filesz))
+    i++;
+  if (i == vm.nseg)
+    vm_fatal("a page of the program's ELF outside its segments", pg);
+  u32 at = vm.seg[i].offset + (va - vm.seg[i].va), n = vm.seg[i].va + vm.seg[i].filesz - va;
+  if (n > PAGE)
+    n = PAGE;
+  int got = -1, sought = -1;
+  for (int tries = 0; tries < 4 && got != (int)n; tries++) {
+    if (tries)
+      vm.st.retries++;
+    sought = mx_fio_lseek(vm.efd, (s32)at, MX_FIO_SEEK_SET);
+    if (sought == (int)at)
+      got = mx_fio_read(vm.efd, frame_ptr(f), n);
+  }
+  if (got != (int)n) {
+    mx_printf("\nVM: the program's ELF at %u: seek %d, read %d of %u\n", at, sought, got, n);
+    vm_fatal("reading the program's ELF failed", pg);
+  }
+  if (n < PAGE)
+    __builtin_memset(frame_ptr(f) + n, 0, PAGE - n);
+}
+
+/* src/vm/image.c: pages [va, va + filesz) come from the ELF open as fd, at
+   offset; va on a page. The rest of the segment is new pages (zero). */
+int mx__vm_file_pages(int fd, u32 va, u32 filesz, u32 offset) {
+  if (vm.nseg == sizeof vm.seg / sizeof vm.seg[0] || (va & (PAGE - 1)) || va < MX_VM_BASE ||
+      va - MX_VM_BASE + filesz > vm.npages * PAGE)
+    return -1;
+  vm.efd = fd;
+  vm.seg[vm.nseg].va = va;
+  vm.seg[vm.nseg].filesz = filesz;
+  vm.seg[vm.nseg].offset = offset;
+  vm.nseg++;
+  u32 a = (va - MX_VM_BASE) >> PAGE_SHIFT, b = (va - MX_VM_BASE + filesz + PAGE - 1) >> PAGE_SHIFT;
+  int was = mx_di();
+  for (u32 pg = a; pg < b; pg++)
+    vm.flags[pg] |= PG_FILE;
+  mx_irq_restore(was);
+  return 0;
+}
+
 u32 mx_vm_unpin_done(void);
 
 /* Write page pg (busy, unmapped) out of frame f if it is dirty. */
@@ -450,6 +504,10 @@ static void place(u32 pg, u32 f, int write) {
     swap_io(pg, f, 0);
     code_sync();
     vm.st.swap_ins++;
+  } else if (vm.flags[pg] & PG_FILE) {
+    file_in(pg, f);
+    code_sync();
+    vm.st.file_ins++;
   } else {
     copy_frame(f, -1);
     vm.st.zero_fills++;

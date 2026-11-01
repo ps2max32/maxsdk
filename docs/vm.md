@@ -30,8 +30,13 @@ virtual memory at 0x0800_0000, in 32 KiB pages held in the physical memory left 
 * Started by `mxload.elf host:app.elf args...` (`loader/mxload.c`, linked at 0x01F0_0000):
   it loads the core segments itself, leaves the VM ones, and jumps to the program in its own
   thread, argv[0] the program's path. The start-up turns VM on (`mx_vm_config`, or no swap
-  file and every frame), reads the VM segments from argv[0] (`src/vm/image.c`), and starts
-  the VM heap after them. Started otherwise, the program stops with a message.
+  file and every frame), opens argv[0] and registers the VM segments' pages with the pager
+  (`src/vm/image.c`), and starts the VM heap after them. Started otherwise, the program stops
+  with a message.
+* Those pages are read from the ELF when first touched (`file_in`, the stats' `file_ins`),
+  the bytes past a segment's file size zero. One not written since is dropped when evicted
+  and read from the ELF again; a written one goes to the swap file and comes from there
+  after (PCSX2, which ignores D, writes every page out).
 * With code in VM, a frame filled by the pager (zero fill, swap in, a move) is written out
   of the D-cache and the I-cache is dropped before it is mapped: every page starts at the
   same I-cache index, so the frame's lines of the page before would still hit.
@@ -102,8 +107,9 @@ interrupt in slots 30–31 (it stops when interrupts stay off), and at the end b
 | `vm9_pins` | 200 gathers of 1–4 pages at random places with every frame in use, the tables and the TLB checked after each (`mx__vm_check`: no two TLB entries match one address) |
 | `vm10_mxload` | started by `mxload.elf` (`loader/mxload.c`), a physical program: argv (argv[0] its own path), .data, .rodata and a 256 KiB .bss, interrupts, `host:` I/O after the hand-over. Run as `mxload.elf host:vm10_mxload.elf a bc`; on PCSX2, which passes no arguments, they are in `host:mxload.txt` |
 | `vm11_vmlink` | a program linked into VM (`MX_MEMORY=vm`, `ld/maxsdk-vm.ld`), started by mxload, with 16 frames and a swap file: its own code and data in VM, maxsdk and `MX_CORE_FN`/`MX_CORE_DATA` in core, core calling VM, four functions on pages of their own at one I-cache index called between rounds of heap writes (their frames reused for each other's code), a thread whose function is in VM |
+| `vm12_elfpage` | a program linked into VM paged from its ELF: few pages read at `main`, a 128 KiB table and a 64 KiB array read when touched, evicted and read from the ELF again, half the array written and then from the swap file |
 
-Steps 1–11 pass on the PS2 (2026-11-01) (`vm11_vmlink`'s first version, with 2650 swap
+Steps 1–12 pass on the PS2 (2026-11-01) (`vm11_vmlink`'s first version, with 2650 swap
 transfers in step 4, ran past the 60 s timeout: about 15 a second through `host:`); step 8 in 44 runs of 45, the last 44 in a row (with the
 UCAB fix and the checks below). In the other one, the build before those, the file
 server on the IOP stopped answering after the gather's swap writes: the debug screen showed
