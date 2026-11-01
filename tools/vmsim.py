@@ -12,8 +12,11 @@ file, and their time by the cost of the IOP's calls (docs/vm.md "Costs").
                  runs from the start, so memory is warm)
   --mem BYTES    memory for pages (default: the run's frames)
   --pages 8,16,32  page sizes in KiB
-  --policies clock,lru,opt
-                 clock: second chance, as src/vm/vm.c; lru; opt: Belady's
+  --policies clock,lru,aging,opt
+                 clock: second chance (src/vm/vm.c until 2026-11-01); lru
+                 (src/vm/vm.c now: by its refills); aging: at each tick a page's age
+                 is shifted right with its use in the interval on top (8
+                 bits), the lowest goes; opt: Belady's
                  (evicts the page used again last: no policy faults less)
   --cost SEEK,READKB,WRITEKB  ms of a seek, ms per KiB read, written
                  (default 1.0,0.48,1.24: host:, probe/p21_iolat.c)
@@ -33,7 +36,7 @@ ap.add_argument("trace")
 ap.add_argument("--window", nargs=2, type=int)
 ap.add_argument("--mem", type=int)
 ap.add_argument("--pages", default="8,16,32")
-ap.add_argument("--policies", default="clock,lru,opt")
+ap.add_argument("--policies", default="clock,lru,aging,opt")
 ap.add_argument("--cost", default="1.0,0.48,1.24")
 a = ap.parse_args()
 
@@ -100,7 +103,8 @@ def simulate(policy, pkb):
         for i in range(len(seq) - 1, -1, -1):
             nxt[i] = last.get(seq[i][0], 1 << 62)
             last[seq[i][0]] = i
-    res = {}               # page -> [dirty, ref]
+    res = {}               # page -> [dirty, ref, age]
+    ticks = set(starts)
     lru = OrderedDict()
     ring, hand = [], 0     # clock: frames' pages
     heap = []              # opt: (-next use, page)
@@ -113,6 +117,8 @@ def simulate(policy, pkb):
         nonlocal hand
         if policy == "lru":
             pg, _ = lru.popitem(last=False)
+        elif policy == "aging":
+            pg = min(res, key=lambda q: (256 if res[q][1] else 0) | res[q][2])
         elif policy == "opt":
             while True:
                 nu, pg = heapq.heappop(heap)
@@ -134,6 +140,10 @@ def simulate(policy, pkb):
 
     for i, (pg, w) in enumerate(seq):
         count = w0 <= i < w1
+        if policy == "aging" and i in ticks:
+            for r in res.values():
+                r[2] = r[2] >> 1 | (128 if r[1] else 0)
+                r[1] = False
         if pg not in res:
             if count:
                 st["faults"] += 1
@@ -147,7 +157,7 @@ def simulate(policy, pkb):
                 if policy == "clock":
                     slot = hand
                     hand = (hand + 1) % len(ring)
-            res[pg] = [False, True]
+            res[pg] = [False, True, 0]
             if policy == "clock":
                 if slot is None:
                     ring.append(pg)

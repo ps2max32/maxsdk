@@ -12,13 +12,13 @@ virtual memory at 0x0800_0000, in 32 KiB pages held in the physical memory left 
 | VM | 0x0800_0000 – 0x0FFF_FFFF: not RAM, so a VM pointer taken for a physical address faults instead of reaching other memory. `malloc` (libmxc's `sbrk` → `mx_sbrk`) hands out VM when VM is on. |
 | `malloc` | libmxc's own (`libc/malloc.c`, TLSF: free blocks in lists by size class, found by bitmaps), not picolibc's: that one clears every block it hands out and walks one address-sorted free list on every `free`. Over VM both touch pages all over the heap, each touch maybe a swap transfer: Quake's 16 MiB hunk was written out to swap as it was allocated, and its loading thrashed (1700 page faults a second, no progress). Now `malloc` touches the block's header, its neighbours' and a list head; it does not clear (`calloc` does; new VM pages are zero) |
 | Page | 32 KiB = one TLB entry, both 16 KiB halves valid (PageMask 16 KiB). An entry with an invalid half hangs the PS2 (below), so a page is in the TLB whole or not at all, and every miss is a refill. |
-| TLB | `tlbwi` only, at entries 31–47 in turn, with a table of what each holds (no `tlbwr`, no `tlbp`: PCSX2 gets both wrong). The BIOS's entries 0–30 stay; its UCAB entries (31–38) may be replaced and are put back on a miss. 17 entries: 544 KiB in the TLB at once. |
+| TLB | `tlbwi` only, at entries 24–47 in turn, with a table of what each holds (no `tlbwr`, no `tlbp`: PCSX2 gets both wrong). The BIOS's entries 0–21 stay (scratchpad, kernel, I/O, cached main memory: one large entry from 0 would also map the kernel's first 512 KiB, and a NULL access would not fault). Its 9 entries of uncached main memory (22–30) and 8 of UCAB (31–38) become one each, 32 MiB from 0x2000_0000 and 0x3000_0000 with 16 MiB halves (as its ROM entry 12): the same mappings and a little more. 24 entries: 768 KiB in the TLB at once. |
 | Exception | Codes 1–3 (`SetVTLBRefillHandler`) go to `src/vm/tlb.S`. A refill of a VM page that is mapped and has no entry is done there at once (the fast refill: three registers saved, the next entry written, the tables of `struct mx__vm_fast` in `vm_int.h` updated; not with a trace). Otherwise the registers are saved, C (`mx__vm_exception`, at EXL = 1, on its own stack, core memory only) does as little as it can: it refills the TLB, maps a resident page again, or marks the page dirty (TLB modified). Everything else goes to the thread. |
 | Page fault | A new page (zero fill) or one in the swap file continues in the faulting thread: the registers are copied onto its stack, the exception returns into `mx__vm_slow` with the thread's interrupts, which takes the VM lock (a BIOS semaphore: other threads run meanwhile), zero-fills, or evicts and reads, then resumes by a negative syscall whose handler (at EXL = 1) restores everything and returns to the instruction. A fault with interrupts off, in the BIOS, or on a VM stack ends the program with a report: touch VM that may not be resident only from thread code with interrupts on (pin what an interrupt handler reads). |
-| Eviction | The clock (second chance) over the frames: a used page is taken out of the TLB and kept; an unused one goes, written to its swap slot if dirty, dropped if clean. Pinned and busy pages are skipped. |
+| Eviction | LRU by refills: each refill stamps its page with the refill count (`struct mx__vm_fast`'s `stamp`), and at each vblank the VM's entries leave the TLB, so a page in use refills (is stamped) at least once a vblank (24 refills, some 4000 cycles). The page with the oldest stamp goes, written to its swap slot if dirty, dropped if clean; pinned and busy pages are skipped (a scan of the frames). In Quake III's trace (`tools/vmsim.py`), LRU paged about a third of what the clock (second chance, until 2026-11-01) did. |
 | Dirty tracking | Clean pages are mapped without D: the first store raises TLB modified (code 1) and marks the page. `mx_vm_init` tests it: on PCSX2, which ignores D, every mapped page counts as dirty. |
 | Swap file | Through the IOP file server (`host:`, `mass:`, …), opened read-write and truncated; slots are given out in order, so the file only grows at its end, and a page keeps its slot. A swap in is a seek and two 16 KiB READs, a write out a seek and one WRITE; a seek to where the file already is costs no call (`src/base/sif.c` keeps each descriptor's position). The seek and the transfer hold a lock of their own (the writer thread and a faulting thread share the file). |
-| Writer thread | `mx_vm_config.clean_frames` (0: none): a thread above the priority of the one that called `mx_vm_init` keeps that many frames free or clean. It writes dirty pages ahead of the clock's hand (unused ones first), pinned for the write; the page is clean from the start of the write, and a store meanwhile makes it dirty again (TLB modified; on PCSX2, which ignores D, the page is unmapped and dirty when mapped again). Faults then find clean victims and only read. It sleeps in its I/O (below), so the program runs meanwhile. |
+| Writer thread | `mx_vm_config.clean_frames` (0: none): a thread above the priority of the one that called `mx_vm_init` keeps that many frames free or clean. It writes the dirty pages among those eviction takes next (the `clean_frames` oldest, less the free frames), pinned for the write; the page is clean from the start of the write, and a store meanwhile makes it dirty again (TLB modified; on PCSX2, which ignores D, the page is unmapped and dirty when mapped again). Faults then find clean victims and only read. It sleeps in its I/O (below), so the program runs meanwhile. |
 | Waits for the IOP | A thread waiting for an answer (file server, audsrv) sleeps on its client's semaphore, so other threads run: woken by the answer, by an RDATA request to send, and at each vblank start (to give up after its time). With interrupts off or in a handler it spins. |
 | DMA | The DMAC sees physical addresses only (`<mx/dma.h>`, below). |
 
@@ -105,13 +105,13 @@ virtual memory at 0x0800_0000, in 32 KiB pages held in the physical memory left 
 `mx_vm_config.trace` (bytes, core) records what a program touches, for `tools/vmsim.py`,
 which replays it with other page sizes, memory sizes and eviction policies:
 * The TLB then maps 8 KiB blocks (PageMask 4 KiB, 4 entries a page), so a refill says which
-  block was touched. The pager is unchanged (32 KiB pages, the same frames and clock); the
-  TLB holds 136 KiB instead of 544 KiB, so there are more refills.
+  block was touched. The pager is unchanged (32 KiB pages, the same frames and eviction);
+  the TLB holds 192 KiB instead of 768 KiB, so there are more refills.
 * Each interval (`trace_ms`, 100 ms; checked at each vblank) begins with a tick and the VM's
   entries out of the TLB: the first touch of each block in an interval is a refill and is
   recorded, read or written. Entries are written without D until a store to their block is
   seen in that interval (on PCSX2, which ignores D, only a store that refills counts as one).
-  A page the pager unmaps (evicted, or the clock's second chance) is recorded again when
+  A page the pager unmaps (evicted) is recorded again when
   touched again in the same interval. Ranges pinned (`mx_vm_pin`: the DMAC's, the IOP's
   file transfers) are recorded as touched.
 * The trace is a u32 per event (`struct mx_vm_trace_head`, `MX_VM_TR_*`): blocks read or
@@ -168,7 +168,7 @@ interrupt in slots 30–31 (it stops when interrupts stay off), and at the end b
 | `vm3_defer` | I/O asked for by a timer interrupt and done by a worker thread while the main thread spins |
 | `vm4_exc` | exception → thread code → resume (a break through the VM's own vector and slow path), with I/O in the thread |
 | `vm5_tlb` | TLB entries written by hand, no exceptions; they stay through interrupts, thread switches, I/O |
-| `vm6_refill` | VM without swap: refills, zero fills in the thread, dirty tracking, a second thread, a timer reading a pinned page, reads through the BIOS's UCAB entries once VM pages have replaced them |
+| `vm6_refill` | VM without swap: refills, zero fills in the thread, dirty tracking, a second thread, a timer reading a pinned page, reads through the UCAB ranges (the BIOS's 8 entries, now one) |
 | `vm7_swap` | paging through `host:`: 32 frames for 96 pages, random touches, two threads faulting |
 | `vm8_dma` | DMA from and to VM with every frame in use: scratchpad, VIF1 and GIF scatter-gather, `MX_VM_PIN_DMA` (the gather), queue unpin, fio |
 | `vm9_pins` | 200 gathers of 1–4 pages at random places with every frame in use, the tables and the TLB checked after each (`mx__vm_check`: no two TLB entries match one address) |
@@ -231,9 +231,10 @@ IOP's waits (all, and the file server's), and `mx_prof_report` what changed betw
 `mx_prof_start` and `mx_prof_stop`: the profile of a game's frames then says how much of
 its waiting is the pager.
 
-The clock does not prefer clean pages: a program's code in VM is clean (read from its ELF)
-and among the hottest; with clean pages taken first, Quake III's loading went to frames of
-10 s on the PS2. The writer thread instead cleans the dirty pages the clock may take next.
+Eviction does not prefer clean pages: a program's code in VM is clean (read from its ELF)
+and among the hottest; with clean pages taken first (with the clock), Quake III's loading
+went to frames of 10 s on the PS2. The writer thread instead cleans the dirty pages
+eviction takes next.
 
 The IOP's file manager has 16 descriptors, 3 of them for stdio; a program linked into VM
 holds 2 (its ELF and the swap file), and each mapped file one.

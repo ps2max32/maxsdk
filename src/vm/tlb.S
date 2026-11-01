@@ -66,25 +66,26 @@ mx__vm_vector:
 	sb $3, 0($2)		# page_slot[page] = entry
 	sll $1, $3, 1
 	addu $1, $1, $27
-	lhu $2, VMF_SLOT_PAGE($1)	# what the entry held: page + 1, 0, 0xFFFF
+	lhu $2, VMF_SLOT_PAGE($1)	# what the entry held: page + 1, or 0
 	addiu $26, $26, 1
 	sh $26, VMF_SLOT_PAGE($1)	# slot_page[entry] = page + 1
 	beqz $2, 4f
-	addiu $2, $2, -1
-	ori $1, $0, 0xFFFE
-	beq $2, $1, 4f		# one of the BIOS's (put back on a miss)
 	lw $1, VMF_PAGE_SLOT($27)
 	addu $1, $1, $2
-	sb $0, 0($1)		# that page: no entry
-4:	addiu $3, $3, 1		# the next entry: 31..47 in turn
+	sb $0, -1($1)		# that page: no entry
+4:	addiu $3, $3, 1		# the next entry: 24..47 in turn
 	sltiu $1, $3, 48
 	bnez $1, 5f
 	nop
-	ori $3, $0, 31
+	ori $3, $0, VMF_TLB_FIRST
 5:	sw $3, VMF_NEXT($27)
 	lw $1, VMF_REFILLS($27)
 	addiu $1, $1, 1
 	sw $1, VMF_REFILLS($27)
+	lw $2, VMF_STAMP($27)	# stamp[page] = refills: used now (eviction)
+	sll $3, $26, 2		# k0 = page + 1
+	addu $2, $2, $3
+	sw $1, -4($2)
 	mfc0 $1, $14		# an instruction fetch: BadVAddr = EPC (+ 4 in a delay slot)
 	mfc0 $2, $13
 	bgez $2, 6f

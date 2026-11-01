@@ -158,7 +158,7 @@ void mx_vm_stats(struct mx_vm_stats *s);
    cleared, so the first touch of each block in each interval is a refill:
    recorded once an interval as read or written (a store, or the first one
    to it: TLB modified). The pager runs as without a trace (the same pages,
-   frames and clock); only the TLB holds less (136 KiB). Recording stops
+   frames and eviction); only the TLB holds less (192 KiB). Recording stops
    when the buffer is full. */
 #define MX_VM_TRACE_MAGIC 0x5456584du /* "MXVT" */
 struct mx_vm_trace_head {

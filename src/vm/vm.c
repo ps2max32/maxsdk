@@ -9,9 +9,10 @@
    TLB is written with tlbwi only, at entries
    TLB_FIRST..47 in turn, with a table of what each holds: PCSX2 keeps
    Random at 0 (tlbwr would overwrite the scratchpad's entry 0) and its tlbp
-   finds nothing. The BIOS's own entries below TLB_FIRST (scratchpad, I/O,
-   main memory cached and uncached) stay; its UCAB entries (31..38) may be
-   replaced and are put back on a miss (alias[]).
+   finds nothing. The BIOS's own entries 0..21 (scratchpad, I/O, main
+   memory cached) stay; its 9 entries of uncached main memory (22..30) and
+   8 of UCAB (31..38) become one each (22, 23: 16 MiB halves), so the VM
+   has 24..47 (tlb_init).
 
    Per page: lo[] is its EntryLo0 when mapped (V set; EntryLo1 is the next
    16 KiB), frame_of[] its frame, slot_of[] its slot in the swap file,
@@ -49,9 +50,9 @@
 #define PM4K 0u
 #define BLK 8192u /* with a trace: what a TLB entry maps (PageMask 4 KiB) */
 #define BPP (PAGE / BLK)
-#define TLB_FIRST 31
+#define TLB_FIRST VMF_TLB_FIRST /* 24 */
+#define PM16M 0x01FFE000u
 #define TLB_N 48
-#define SLOT_ALIAS 0xFFFFu   /* a TLB entry holding one of the BIOS's UCAB entries */
 #define FRAME_TAKEN 0xFFFFu  /* page_of: taken, its page not there yet */
 
 /* EntryLo bits */
@@ -62,7 +63,7 @@
 
 /* page flags */
 #define PG_DIRTY 1 /* written since its frame was last written out */
-#define PG_REF 2   /* used since the clock last passed */
+#define PG_REF 2   /* mapped since it came in (the trace's pins) */
 #define PG_BUSY 4  /* in transit to or from the swap file */
 #define PG_SWAP 8  /* its slot holds it */
 #define PG_FILE 16 /* a file holds it (the program's ELF until PG_SWAP, a mapped file) */
@@ -78,14 +79,11 @@ static struct {
   u8 *flags, *pins;
   u8 *page_slot; /* TLB entry of each page (with a trace: of each block), 0: none */
   u32 bpp;              /* TLB entries a page can have: 1, BPP with a trace */
-  u32 nfree, free_hint, hand;
+  u32 nfree, free_hint;
   int dbit;
   int fd;
   u32 nslots;
   int lock;
-  struct {
-    u32 pm, hi, lo0, lo1;
-  } alias[8];
   struct mx_vm_stats st;
   u32 modified_seen;
   int code; /* the program runs code from VM (src/vm/image.c) */
@@ -179,7 +177,7 @@ static u32 tlb_take(void) {
   u32 s = F.next_slot;
   F.next_slot = s + 1 < TLB_N ? s + 1 : TLB_FIRST;
   u32 old = F.slot_page[s];
-  if (old && old != SLOT_ALIAS)
+  if (old)
     vm.page_slot[old - 1] = 0;
   F.slot_page[s] = 0;
   return s;
@@ -285,7 +283,7 @@ static void tr_tick(void) {
   last = ms;
   for (u32 i = TLB_FIRST; i < TLB_N; i++) {
     u32 q = F.slot_page[i];
-    if (q && q != SLOT_ALIAS) {
+    if (q) {
       tlb_clear(i);
       vm.page_slot[q - 1] = 0;
       F.slot_page[i] = 0;
@@ -297,6 +295,25 @@ static void tr_tick(void) {
 }
 
 void mx__irq_vbon_hook(void (*fn)(void)); /* src/irq/irq.c */
+
+/* At each vblank: the VM's entries out of the TLB, so a page in use
+   refills (and gets a new stamp, for evict) at least once a vblank: 24
+   refills, some 4000 cycles. With a trace, its tick does that each
+   interval instead. Interrupts off. */
+static void vblank(void) {
+  if (vm.tr.cap) {
+    tr_tick();
+    return;
+  }
+  for (u32 i = TLB_FIRST; i < TLB_N; i++) {
+    u32 q = F.slot_page[i];
+    if (q) {
+      tlb_clear(i);
+      vm.page_slot[q - 1] = 0;
+      F.slot_page[i] = 0;
+    }
+  }
+}
 
 void mx_vm_trace_mark(u32 tag) {
   if (!vm.tr.cap)
@@ -332,19 +349,21 @@ int mx_vm_trace_save(const char *path) {
   return r ? -1 : (int)n;
 }
 
-/* A miss in the BIOS's UCAB range: its entry back. */
-static int alias_refill(u32 va) {
-  for (int i = 0; i < 8; i++) {
-    /* an entry maps an even and an odd page: (PageMask | 0x1FFF) + 1 bytes */
-    u32 pair = (vm.alias[i].pm | 0x1FFFu) + 1;
-    if (va - vm.alias[i].hi < pair) {
-      u32 s = tlb_take();
-      F.slot_page[s] = SLOT_ALIAS;
-      tlb_write(s, vm.alias[i].pm, vm.alias[i].hi, vm.alias[i].lo0, vm.alias[i].lo1);
-      return 1;
-    }
-  }
-  return 0;
+/* The BIOS's entries of uncached main memory (22..30: 0x2008_0000 on)
+   and UCAB (31..38: 0x3010_0000 on) as one each, 32 MiB from 0x2000_0000
+   and 0x3000_0000 (16 MiB halves, as the BIOS's ROM entry 12): the same
+   mappings and a little more (the kernel's first 512 KiB and 1 MiB), in 2
+   entries instead of 17. The others first out of the way: two entries
+   matching one address are undefined. Interrupts off; nothing in between
+   touches those addresses. */
+static void tlb_init(void) {
+  for (u32 s = 23; s < TLB_N; s++)
+    tlb_clear(s);
+  tlb_write(22, PM16M, 0x20000000u, 0x00000017u, 0x00040017u); /* uncached, D V G */
+  tlb_write(23, PM16M, 0x30000000u, 0x0000003Fu, 0x0004003Fu); /* UCAB */
+  for (u32 s = 0; s < TLB_N; s++)
+    F.slot_page[s] = 0;
+  F.next_slot = TLB_FIRST;
 }
 
 /* ---- pages and frames ------------------------------------------------------- */
@@ -357,6 +376,7 @@ static void map(u32 pg, int write) {
   vm.lo[pg] = mx_paddr_of(frame_ptr(f)).v >> 12 << 6 | LO_CACHED | LO_V | LO_G |
               (vm.flags[pg] & PG_DIRTY ? LO_D : 0);
   vm.flags[pg] |= PG_REF;
+  F.stamp[pg] = F.refills;
   tlb_sync(pg);
 }
 
@@ -432,10 +452,6 @@ int mx__vm_exception(struct mx__vm_x *x) {
   u32 code = x->cause >> 2 & 31, va = x->badvaddr;
   if (code == 9 && break_fn && !(x->cause >> 31))
     return to_thread(x);
-  if (code == 2 || code == 3) {
-    if (va - 0x30100000u < 0x01F00000u && alias_refill(va))
-      return VMX_RETURN;
-  }
   u32 pg = va_page(va);
   if (code < 1 || code > 3 || pg == ~0u) {
     mx__exception_note = va - MX_VM_BASE < MX_VM_LIMIT - MX_VM_BASE
@@ -459,10 +475,12 @@ int mx__vm_exception(struct mx__vm_x *x) {
       blk_fill(pg, va, 1);
     vm.flags[pg] |= PG_DIRTY;
     vm.lo[pg] |= LO_D;
+    F.stamp[pg] = F.refills;
     tlb_sync(pg);
     return VMX_RETURN;
   }
   F.refills++;
+  F.stamp[pg] = F.refills;
   if (x->badvaddr == x->epc + (x->cause >> 31 ? 4u : 0u)) /* an instruction fetch */
     F.refills_i++;
   if (vm.lo[pg] & LO_V) { /* mapped, only not in the TLB */
@@ -683,30 +701,44 @@ static void write_out(u32 pg, u32 f) {
 static void lock(void);
 static void unlock(void);
 
-/* Frames free, or holding a page the clock may take next without a write
-   (clean, not used since its last pass). The lock is held. */
-static u32 clean_count(void) {
-  u32 n = vm.nfree;
+/* The pages eviction takes next: the up to k (16 at most) resident, not
+   pinned, not busy ones used longest ago (by their stamps: the last
+   refill), oldest first, into out. Returns how many. Interrupts off. */
+static u32 oldest(u32 k, u32 *out) {
+  u32 n = 0, age[16];
+  if (k > 16)
+    k = 16;
+  if (!k)
+    return 0;
   for (u32 f = 0; f < vm.nframes; f++) {
     int q = page_in(f);
-    if (q >= 0 && !(vm.flags[q] & (PG_DIRTY | PG_BUSY | PG_REF)) && !vm.pins[q])
-      n++;
+    if (q < 0 || vm.pins[q] || (vm.flags[q] & PG_BUSY))
+      continue;
+    u32 a = F.refills - F.stamp[q], i = n < k ? n++ : k;
+    if (i == k && a <= age[k - 1])
+      continue;
+    if (i == k)
+      i--;
+    for (; i && age[i - 1] < a; i--)
+      age[i] = age[i - 1], out[i] = out[i - 1];
+    age[i] = a, out[i] = (u32)q;
   }
   return n;
 }
 
-/* A dirty page to write ahead: the next ones of the clock's hand, unused
-   ones first; -1 if none. The lock is held. */
+/* A dirty page to write ahead: of the pages eviction takes next (as many
+   as clean_frames, less the free frames), the oldest dirty one; -1 if
+   none. The lock is held. */
 static int dirty_candidate(void) {
-  for (int pass = 0; pass < 2; pass++)
-    for (u32 n = 0; n < vm.nframes; n++) {
-      u32 f = (vm.hand + n) % vm.nframes;
-      int q = page_in(f);
-      if (q >= 0 && (vm.flags[q] & PG_DIRTY) && !(vm.flags[q] & PG_BUSY) && !vm.pins[q] &&
-          (pass || !(vm.flags[q] & PG_REF)))
-        return q;
-    }
-  return -1;
+  int was = mx_di();
+  u32 k = vm.nfree < vm.clean_frames ? vm.clean_frames - vm.nfree : 0, pg[16];
+  u32 n = oldest(k, pg);
+  int q = -1;
+  for (u32 i = 0; i < n && q < 0; i++)
+    if (vm.flags[pg[i]] & PG_DIRTY)
+      q = (int)pg[i];
+  mx_irq_restore(was);
+  return q;
 }
 
 static u8 wstack[8192] MX_ALIGNED(16);
@@ -716,7 +748,7 @@ static void writer(void *arg) {
   for (;;) {
     mx_bios_wait_sema(vm.wsema);
     lock();
-    while (clean_count() < vm.clean_frames) {
+    for (;;) {
       int q = dirty_candidate();
       if (q < 0)
         break;
@@ -768,49 +800,41 @@ static void writer_start(u32 clean) {
   }
 }
 
-/* Take a frame by the clock: a page used since the last pass loses V (and
-   is kept), the first one not used goes (written out if dirty). Returns
-   the frame, marked taken. The lock is held. Clean pages are not preferred:
-   a program's code in VM is clean (read from its ELF) and among the
-   hottest; with clean ones taken first, Quake III's loading went to frames
-   of 10 s on the PS2 (2026-11-01). */
+/* Take a frame: a free one, or the one of the page used longest ago (LRU
+   by the stamps of its refills: a refill is a use, and each vblank the
+   VM's entries leave the TLB (vblank), so a page in use refills at least
+   that often), written out if dirty. Returns the frame, marked taken. The
+   lock is held. Clean pages are not preferred: a program's code in VM is
+   clean (read from its ELF) and among the hottest; with clean ones taken
+   first, Quake III's loading went to frames of 10 s on the PS2
+   (2026-11-01). In Quake III's trace (tools/vmsim.py) LRU paged a third of
+   what the clock paged that came before. */
 static u32 evict(void) {
   mx_vm_unpin_done();
   if (vm.wsema >= 0)
     mx_bios_signal_sema(vm.wsema); /* a frame goes: the writer cleans the next ones */
-  for (u32 n = 0; n < 3 * vm.nframes; n++) {
-    int was = mx_di();
-    int f = frame_take(); /* freed meanwhile */
-    if (f >= 0) {
-      mx_irq_restore(was);
-      return (u32)f;
-    }
-    u32 fr = vm.hand;
-    vm.hand = fr + 1 < vm.nframes ? fr + 1 : 0;
-    int q = page_in(fr);
-    if (q < 0 || vm.pins[q] || (vm.flags[q] & PG_BUSY)) {
-      mx_irq_restore(was);
-      continue;
-    }
-    u32 pg = (u32)q;
-    if (vm.flags[pg] & PG_REF) {
-      vm.flags[pg] &= (u8)~PG_REF;
-      unmap(pg);
-      mx_irq_restore(was);
-      continue;
-    }
-    unmap(pg);
-    vm.flags[pg] |= PG_BUSY;
+  int was = mx_di();
+  int f = frame_take(); /* freed meanwhile */
+  if (f >= 0) {
     mx_irq_restore(was);
-    write_out(pg, fr);
-    was = mx_di();
-    vm.flags[pg] &= (u8)~(PG_BUSY | PG_DIRTY | PG_REF);
-    vm.frame_of[pg] = 0;
-    vm.page_of[fr] = FRAME_TAKEN;
-    mx_irq_restore(was);
-    return fr;
+    return (u32)f;
   }
-  vm_fatal("out of memory: every frame is pinned", 0);
+  u32 pg;
+  if (!oldest(1, &pg)) {
+    mx_irq_restore(was);
+    vm_fatal("out of memory: every frame is pinned", 0);
+  }
+  u32 fr = vm.frame_of[pg] - 1u;
+  unmap(pg);
+  vm.flags[pg] |= PG_BUSY;
+  mx_irq_restore(was);
+  write_out(pg, fr);
+  was = mx_di();
+  vm.flags[pg] &= (u8)~(PG_BUSY | PG_DIRTY | PG_REF);
+  vm.frame_of[pg] = 0;
+  vm.page_of[fr] = FRAME_TAKEN;
+  mx_irq_restore(was);
+  return fr;
 }
 
 /* Make page pg resident at frame f (a free frame, taken), then map it. The
@@ -1371,7 +1395,7 @@ u32 mx__vm_check(void) {
   }
   for (u32 s = TLB_FIRST; s < TLB_N && !r; s++) {
     u32 q = F.slot_page[s];
-    if (q && q != SLOT_ALIAS) {
+    if (q) {
       u32 pg = (q - 1) / vm.bpp, b = (q - 1) % vm.bpp;
       if (vm.page_slot[q - 1] != s)
         r = 4u << 28 | s;
@@ -1439,6 +1463,7 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   vm.flags = table(nt);
   vm.pins = table(nt);
   vm.page_slot = table(nt * vm.bpp);
+  F.stamp = table(nt * 4);
   if (cfg->trace) {
     vm.tr.seen = table(nt * BPP);
     vm.tr.buf = mx_core_alloc(cfg->trace, 16);
@@ -1456,7 +1481,7 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   if (nf > 0xFFFE)
     nf = 0xFFFE;
   vm.page_of = table(nf * 2);
-  if (!vm.lo || !vm.frame_of || !vm.slot_of || !vm.flags || !vm.pins || !vm.page_slot ||
+  if (!vm.lo || !vm.frame_of || !vm.slot_of || !vm.flags || !vm.pins || !vm.page_slot || !F.stamp ||
       !vm.page_of || nf < 4) {
     mx_printf("mx_vm_init: not enough memory (%u frames)\n", nf);
     return -1;
@@ -1476,15 +1501,8 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   vm.swapsema = mx_bios_create_sema(&sp);
   vm.wsema = -1;
 
-  /* the TLB: the BIOS's UCAB entries are put back on a miss */
   int was = mx_di();
-  for (u32 i = 0; i < 8; i++) {
-    tlb_read(TLB_FIRST + i, &vm.alias[i].pm, &vm.alias[i].hi, &vm.alias[i].lo0,
-             &vm.alias[i].lo1);
-    vm.alias[i].lo0 |= LO_G, vm.alias[i].lo1 |= LO_G;
-    F.slot_page[TLB_FIRST + i] = SLOT_ALIAS;
-  }
-  F.next_slot = TLB_FIRST + 8;
+  tlb_init();
   mx_irq_restore(was);
   mx_bios_set_syscall(VM_RESUME_SYSCALL, (void *)mx__vm_resume_k);
   for (int c = 1; c <= 3; c++)
@@ -1530,8 +1548,8 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
     vm.tr.t_last = mx_count();
     vm.tr.cap = cfg->trace / 4;
     mx_irq_restore(was);
-    mx__irq_vbon_hook(tr_tick);
   }
+  mx__irq_vbon_hook(vblank);
   if (cfg->clean_frames && vm.fd >= 0)
     writer_start(cfg->clean_frames);
   return 0;

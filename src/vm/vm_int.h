@@ -32,10 +32,12 @@
 #define VMF_NEXT 12      /* the TLB entry to take next */
 #define VMF_REFILLS 16   /* all refills */
 #define VMF_REFILLS_I 20 /* of them, instruction fetches */
-#define VMF_SLOT_PAGE 32 /* u16[48]: each TLB entry's page + 1 (0xFFFF: the BIOS's) */
+#define VMF_STAMP 24     /* u32 *: each page's last refill (refills then), for eviction */
+#define VMF_SLOT_PAGE 32 /* u16[48]: each TLB entry's page + 1, 0: none */
 #define VMF_SAVE 128     /* three GPRs, 128 bits each */
 #define VMF_SIZE 176
 #define VMF_BASE_PAGE 0x1000 /* MX_VM_BASE >> 15 */
+#define VMF_TLB_FIRST 24     /* the VM's TLB entries: 24..47 */
 
 /* The syscall that resumes a slow fault (a negative one: its handler runs
    at EXL = 1 on the caller's stack). */
@@ -62,12 +64,14 @@ struct mx__vm_fast {
   u32 *lo;
   u8 *page_slot;
   u32 npages, next_slot, refills, refills_i;
-  u32 pad[2];
+  u32 *stamp;
+  u32 pad;
   u16 slot_page[48];
   u64 save[6];
 };
 _Static_assert(__builtin_offsetof(struct mx__vm_fast, next_slot) == VMF_NEXT, "tlb.S offsets");
 _Static_assert(__builtin_offsetof(struct mx__vm_fast, refills_i) == VMF_REFILLS_I, "tlb.S offsets");
+_Static_assert(__builtin_offsetof(struct mx__vm_fast, stamp) == VMF_STAMP, "tlb.S offsets");
 _Static_assert(__builtin_offsetof(struct mx__vm_fast, slot_page) == VMF_SLOT_PAGE, "tlb.S offsets");
 _Static_assert(__builtin_offsetof(struct mx__vm_fast, save) == VMF_SAVE, "tlb.S offsets");
 _Static_assert(sizeof(struct mx__vm_fast) == VMF_SIZE, "tlb.S offsets");

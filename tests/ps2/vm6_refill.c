@@ -14,8 +14,8 @@
      4 every page written and checked whole, twice (refills all the time)
      5 a second thread checking pages while the main thread writes others
      6 a timer interrupt reading a pinned (so resident) page
-     7 reads through each of the BIOS's 8 UCAB entries (31-38, which VM
-       pages have replaced: put back on a miss), the odd page of each too;
+     7 reads through the ranges of the BIOS's 8 UCAB entries (31-38; one
+       entry of 32 MiB with VM on), the odd page of each too;
        then the tables and the TLB consistent (slot 3: mx__vm_check) */
 
 #include "t.h"
