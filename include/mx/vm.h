@@ -30,16 +30,18 @@
 #define MX_VM_PAGE 32768u
 
 struct mx_vm_config {
-  const char *swap; /* swap file ("host:swap.bin", "mass:/swap.bin"); 0: none
-                       (then VM is as large as the frames) */
-  u32 size;         /* bytes of VM; 0: 128 MiB */
-  u32 core_heap;    /* bytes kept for mx_core_alloc; 0: 1 MiB */
-  u32 frames;       /* bytes of physical memory for pages; 0: the rest */
+  char swap[64]; /* swap file ("host:swap.bin", "mass:/swap.bin"); "": none
+                    (then VM is as large as the frames). In the struct, not a
+                    pointer: a program linked into VM reads it before VM is on */
+  u32 size;      /* bytes of VM; 0: 128 MiB */
+  u32 core_heap; /* bytes kept for mx_core_alloc; 0: 1 MiB */
+  u32 frames;    /* bytes of physical memory for pages; 0: the rest */
 };
 
 /* A program that defines this gets VM before its static constructors run
    (so malloc is in VM from the start). */
-extern const struct mx_vm_config mx_vm_config __attribute__((weak));
+extern const struct mx_vm_config mx_vm_config
+    __attribute__((weak, section(".rodata.mx.core"))); /* core, also in a program linked into VM */
 
 /* Turn VM on. Returns 0, or -1 (VM stays off: no swap file, too little
    memory, already on). */

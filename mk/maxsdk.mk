@@ -8,7 +8,8 @@
 #   HLSL_IX      programs also built indexed, HLSL_VU0 programs for VU0,
 #                IX_N (or IX_N_<name>) vertices per indexed batch,
 #                VU_OPT_FLAGS for opt (e.g. -vu-contexts=1)
-# Optional: PS2MAX, LLVM, MAXSDK_OUT (where libmx.a and crt0 are built).
+# Optional: PS2MAX, LLVM, MAXSDK_OUT (where libmx.a and crt0 are built),
+# MX_MEMORY (phys or vm).
 #
 # It gives CC, CFLAGS, $(call link,out,objs), MX_LIB, MX_CRT0, MX_LD, MX_HDRS, MX_LOADER,
 # VU_OBJS, HLSL_OBJS, HLSL_HDRS and their rules, and a rule that builds libmx
@@ -33,7 +34,12 @@ CFLAGS   = $(COMMON_CFLAGS) --target=mips64el -mcpu=r5900 -mabi=n32 -fno-pic -mn
 CFLAGS  += $(EXTRA_CFLAGS)
 MX_LIB   = $(MAXSDK_OUT)/libmx.a
 MX_CRT0  = $(MAXSDK_OUT)/obj/crt0.o
-MX_LD    = $(MAXSDK)/ld/maxsdk.ld
+# MX_MEMORY=vm: the program's own objects linked into VM (docs/vm.md),
+# started by mxload.elf (MX_LOADER); phys (the default): all in core
+MX_MEMORY ?= phys
+MX_LD_phys = $(MAXSDK)/ld/maxsdk.ld
+MX_LD_vm   = $(MAXSDK)/ld/maxsdk-vm.ld
+MX_LD    = $(MX_LD_$(MX_MEMORY))
 # the loader for programs with VM segments (loader/mxload.c)
 MX_LOADER = $(MAXSDK_OUT)/mxload.elf
 MX_HDRS := $(wildcard $(MAXSDK)/include/mx/*.h $(MAXSDK)/include/mx/hw/*.h)

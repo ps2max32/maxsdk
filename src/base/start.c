@@ -40,6 +40,8 @@ extern void (*__init_array_start[])(void);
 extern void (*__init_array_end[])(void);
 
 int main(int argc, char **argv);
+int mx__vm_image(void);
+int mx__vm_load_image(const char *path);
 void mx__libc_exit(int status) __attribute__((weak, noreturn));
 
 static void *heap_end;
@@ -71,7 +73,20 @@ void mx__main(void) {
   mx_vif_reset(1);
   mx_ei();
   /* VM before the constructors, so their malloc is in it already */
-  if (&mx_vm_config && mx_vm_init(&mx_vm_config) < 0)
+  if (mx__vm_image()) {
+    /* linked into VM (ld/maxsdk-vm.ld): VM on, then the program's VM part
+       from its ELF */
+    static const struct mx_vm_config none;
+    if (!by_mxload) {
+      mx_printf("maxsdk: this program is linked into VM: start it with mxload.elf\n");
+      mx_exit(255);
+    }
+    if (mx_vm_init(&mx_vm_config ? &mx_vm_config : &none) < 0 ||
+        mx__vm_load_image(a->argv[0]) < 0) {
+      mx_printf("maxsdk: the program's VM part could not be set up\n");
+      mx_exit(255);
+    }
+  } else if (&mx_vm_config && mx_vm_init(&mx_vm_config) < 0)
     mx_printf("maxsdk: mx_vm_config is set, but VM could not be turned on\n");
 
   for (void (**f)(void) = __init_array_start; f < __init_array_end; f++)

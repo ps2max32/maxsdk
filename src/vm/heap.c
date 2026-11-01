@@ -94,6 +94,7 @@ void mx_core_free(void *p) {
 /* ---- the break ------------------------------------------------------------- */
 
 static u8 *vm_brk;
+void *mx__vm_image_end(void);
 
 void *mx_sbrk(s32 incr) {
   heap_setup();
@@ -102,10 +103,11 @@ void *mx_sbrk(s32 incr) {
   void *r = (void *)-1;
   if (mx_vm_active()) {
     u8 *lim = (u8 *)mx_vm_base() + mx_vm_size();
+    u8 *lo = mx__vm_image_end(); /* after a program linked into VM */
     if (!vm_brk)
-      vm_brk = (u8 *)mx_vm_base();
+      vm_brk = lo;
     if ((incr >= 0 && (u32)(lim - vm_brk) >= (u32)incr) ||
-        (incr < 0 && (u32)(vm_brk - (u8 *)mx_vm_base()) >= (u32)-incr)) {
+        (incr < 0 && (u32)(vm_brk - lo) >= (u32)-incr)) {
       r = vm_brk;
       vm_brk += incr;
     }

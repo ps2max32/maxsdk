@@ -8,7 +8,8 @@
    PCSX2, which starts an ELF without any.
 
    mxload is linked high (MXLOAD_BASE, --defsym=__mx_base in the Makefile)
-   and loads programs below itself, from 0x100000. It then removes its
+   and loads programs below itself, from 0x100000. Segments in VM (a program
+   linked with ld/maxsdk-vm.ld) are left to the program's start-up. It then removes its
    interrupt handlers and jumps to the program's __start in its own thread,
    with a0 = an argument block like ps2link's (<mx/loader.h>), MX_LOADER_MAGIC
    in place of the pid and argv[0] the program's path. The program's start-up
@@ -122,6 +123,9 @@ int main(int argc, char **argv) {
   for (u32 i = 0; i < eh.phnum; i++) {
     const struct phdr *p = &ph[i];
     if (p->type != PT_LOAD || p->memsz == 0)
+      continue;
+    /* VM: the program reads it itself once VM is on (src/vm/image.c) */
+    if (p->vaddr >= MX_VM_BASE && p->vaddr < MX_VM_LIMIT)
       continue;
     mx_dbg_word(1, i);
     mx_dbg_word(2, p->vaddr);

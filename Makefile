@@ -78,10 +78,14 @@ $(LIB): $(LIB_OBJS)
 
 # mxload (loader/mxload.c) is linked high and loads programs below itself.
 MXLOAD_BASE := 0x01F00000
+$(MX_LOADER): override MX_MEMORY = phys
 $(MX_LOADER): $(HERE)/loader/mxload.c $(LIB) $(CRT0) $(HDRS) $(MX_LD)
 	@mkdir -p $(OUT)/loader
 	$(CC) $(CFLAGS) -c $< -o $(OUT)/loader/mxload.o
 	$(call link,$@,--defsym=__mx_base=$(MXLOAD_BASE) $(CRT0) $(OUT)/loader/mxload.o $(LIB))
+
+# tests linked into VM (ld/maxsdk-vm.ld), started by mxload.elf
+$(OUT)/tests/vm11_vmlink.elf: MX_MEMORY = vm
 
 # Each test, probe or example is one C file, linked with crt0 and libmx only
 # (libmx has the compiler helper functions; no libgcc).

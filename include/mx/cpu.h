@@ -70,6 +70,14 @@ MX_INLINE mx_paddr mx_paddr_add(mx_paddr a, u32 bytes) { return (mx_paddr){a.v +
    start in the last line. */
 #define MX_DMA_LINES __attribute__((section(".bss.mx.lines"), aligned(64)))
 
+/* In a program linked into VM (ld/maxsdk-vm.ld): a function or a variable of
+   the program's own that stays in core memory, for what runs or is read
+   with interrupts off (interrupt handlers and their data), thread stacks,
+   and what the DMAC follows. MX_CORE_DATA puts the variable in .data (also
+   a zero one). In a physical program they change nothing. */
+#define MX_CORE_FN __attribute__((section(".text.mx.core")))
+#define MX_CORE_DATA __attribute__((section(".data.mx.core")))
+
 /* ---- Register access --------------------------------------------------- */
 
 #define MX_R32(a) (*(volatile u32 *)(uintptr_t)(a))

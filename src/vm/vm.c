@@ -79,7 +79,22 @@ static struct {
   } alias[8];
   struct mx_vm_stats st;
   u32 modified_seen;
+  int code; /* the program runs code from VM (src/vm/image.c) */
 } vm;
+
+void mx__vm_code(void) { vm.code = 1; }
+
+/* A frame got new contents (written through the D-cache, or by DMA): with
+   code in VM, out of the D-cache and the I-cache before the page is mapped.
+   The I-cache is indexed by the virtual address, and every page starts at
+   the same index, so a line of the frame's page before could still hit.
+   Thread code with interrupts on (positive syscalls turn them on). */
+static void code_sync(void) {
+  if (vm.code) {
+    mx_bios_flush_cache(0);
+    mx_bios_flush_cache(2);
+  }
+}
 
 /* tlb.S */
 void mx__vm_vector(void);
@@ -226,6 +241,7 @@ static void copy_frame(u32 to, int from) {
     zero_frame(to);
   else
     __builtin_memcpy(frame_ptr(to), frame_ptr((u32)from), PAGE);
+  code_sync();
 }
 
 /* ---- the exception ------------------------------------------------------------ */
@@ -432,6 +448,7 @@ static void place(u32 pg, u32 f, int write) {
   mx_irq_restore(was);
   if (vm.flags[pg] & PG_SWAP) {
     swap_io(pg, f, 0);
+    code_sync();
     vm.st.swap_ins++;
   } else {
     copy_frame(f, -1);
@@ -844,7 +861,7 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   if (!np)
     return -1;
   vm.fd = -1;
-  if (cfg->swap) {
+  if (cfg->swap[0]) {
     vm.fd = mx_fio_open(cfg->swap, 3 /* RDWR */ | MX_FIO_CREAT | MX_FIO_TRUNC);
     if (vm.fd < 0) {
       mx_printf("mx_vm_init: cannot open the swap file %s (%d)\n", cfg->swap, vm.fd);
