@@ -3,7 +3,7 @@
 # include mk/maxsdk.mk (the flags, the link and the VU and HLSL rules).
 #
 #   make [OUT=<dir>]                        library, test, probe and example ELFs
-#   make lib                                libmx.a and crt0 only
+#   make lib                                libmx.a, crt0 and mxload.elf only
 #   make test-host                          host tests (generated fields, packets)
 #   make check-deps                         fail if anything links ps2sdk
 #   make gen                                regenerate the hardware headers
@@ -54,8 +54,8 @@ PROBES   := $(patsubst $(HERE)/probe/%.c,$(OUT)/probe/%.elf,$(wildcard $(HERE)/p
 EXAMPLES := $(patsubst %.c,$(OUT)/examples/%.elf,$(notdir $(wildcard $(HERE)/examples/*/*.c)))
 vpath %.c $(EXAMPLE_DIRS)
 
-all: $(LIB) $(CRT0) $(TESTS) $(PROBES) $(EXAMPLES) $(OUT)/batch/ps2batch.elf
-lib: $(LIB) $(CRT0)
+all: $(LIB) $(CRT0) $(MX_LOADER) $(TESTS) $(PROBES) $(EXAMPLES) $(OUT)/batch/ps2batch.elf
+lib: $(LIB) $(CRT0) $(MX_LOADER)
 
 $(OUT)/obj/%.c.o: $(HERE)/%.c $(HDRS)
 	@mkdir -p $(dir $@)
@@ -75,6 +75,13 @@ $(CRT0): $(HERE)/crt/crt0.S
 $(LIB): $(LIB_OBJS)
 	rm -f $@
 	$(LLVM)/llvm-ar rcs $@ $^
+
+# mxload (loader/mxload.c) is linked high and loads programs below itself.
+MXLOAD_BASE := 0x01F00000
+$(MX_LOADER): $(HERE)/loader/mxload.c $(LIB) $(CRT0) $(HDRS) $(MX_LD)
+	@mkdir -p $(OUT)/loader
+	$(CC) $(CFLAGS) -c $< -o $(OUT)/loader/mxload.o
+	$(call link,$@,--defsym=__mx_base=$(MXLOAD_BASE) $(CRT0) $(OUT)/loader/mxload.o $(LIB))
 
 # Each test, probe or example is one C file, linked with crt0 and libmx only
 # (libmx has the compiler helper functions; no libgcc).

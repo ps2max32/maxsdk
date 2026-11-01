@@ -5,9 +5,12 @@ ENTRY(__start)
 
 /* EE main memory below 0x100000 is the kernel's and the loader's (ps2link
    at 0x94000 - 0x100000); the kernel puts the stack at the top of memory
-   (__stack -1), the heap is from _end up to it. */
+   (__stack -1), the heap is from _end up to it. A program linked with
+   --defsym=__mx_base=<address> starts there instead (mxload, which loads
+   programs below itself). */
 MEMORY {
-  ram : ORIGIN = 0x00100000, LENGTH = 0x02000000 - 0x00100000
+  ram : ORIGIN = DEFINED(__mx_base) ? __mx_base : 0x00100000,
+        LENGTH = 0x02000000 - (DEFINED(__mx_base) ? __mx_base : 0x00100000)
   spr : ORIGIN = 0x70000000, LENGTH = 16K
 }
 
@@ -16,7 +19,7 @@ PHDRS {
 }
 
 SECTIONS {
-  .text 0x00100000 : {
+  .text ORIGIN(ram) : {
     __text_start = .;
     KEEP(*(.text.start))
     *(.text .text.*)

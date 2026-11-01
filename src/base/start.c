@@ -3,27 +3,37 @@
 #include <mx/bios.h>
 #include <mx/cpu.h>
 #include <mx/debug.h>
+#include <mx/loader.h>
 #include <mx/mx.h>
 #include <mx/vm.h>
 #include <mx/vu.h>
 
-#define MX_MAX_ARGS 16
-
-/* Filled in by the kernel in SetupThread (when started by ExecPS2). */
-struct mx_args {
-  s32 argc;
-  char *argv[MX_MAX_ARGS];
-  char payload[256];
-};
-
-/* What ps2link passes in a0 to __start. */
-struct mx_loader_args {
-  s32 pid;
-  struct mx_args args;
-};
-
 struct mx_args mx__kernel_args;
 struct mx_loader_args *mx__loader_args;
+/* mxload's arguments, copied: its memory is the heap's now */
+static struct mx_args mxload_args;
+static int by_mxload;
+
+int mx_loader_mxload(void) { return by_mxload; }
+
+/* a0 is garbage when no loader passed one (the BIOS, PCSX2 -elf) */
+static int loader_args_ok(const struct mx_loader_args *l) {
+  u32 p = (u32)(uintptr_t)l;
+  return p && !(p & 3) && p < 0x02000000u - sizeof *l;
+}
+
+static struct mx_args *copy_mxload_args(const struct mx_args *from) {
+  struct mx_args *a = &mxload_args;
+  *a = *from;
+  if (a->argc < 0 || a->argc > MX_MAX_ARGS)
+    a->argc = 0;
+  for (int i = 0; i < a->argc; i++) {
+    u32 off = (u32)(from->argv[i] - from->payload);
+    a->argv[i] = off < sizeof a->payload ? a->payload + off : a->payload + sizeof a->payload - 1;
+  }
+  a->payload[sizeof a->payload - 1] = 0;
+  return a;
+}
 
 extern char _end[];
 extern void (*__init_array_start[])(void);
@@ -48,8 +58,12 @@ void mx__main(void) {
   mx_bios_flush_cache(0);
 
   struct mx_args *a = &mx__kernel_args;
-  if (a->argc == 0 && mx__loader_args && mx__loader_args->args.argc != 0)
-    a = &mx__loader_args->args;
+  struct mx_loader_args *l = mx__loader_args;
+  if (loader_args_ok(l) && l->pid == MX_LOADER_MAGIC) {
+    by_mxload = 1;
+    a = copy_mxload_args(&l->args);
+  } else if (a->argc == 0 && loader_args_ok(l) && l->args.argc != 0)
+    a = &l->args;
 
   mx_debug_init();
   mx_exception_init();

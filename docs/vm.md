@@ -82,8 +82,9 @@ interrupt in slots 30–31 (it stops when interrupts stay off), and at the end b
 | `vm7_swap` | paging through `host:`: 32 frames for 96 pages, random touches, two threads faulting |
 | `vm8_dma` | DMA from and to VM with every frame in use: scratchpad, VIF1 and GIF scatter-gather, `MX_VM_PIN_DMA` (the gather), queue unpin, fio |
 | `vm9_pins` | 200 gathers of 1–4 pages at random places with every frame in use, the tables and the TLB checked after each (`mx__vm_check`: no two TLB entries match one address) |
+| `vm10_mxload` | started by `mxload.elf` (`loader/mxload.c`), a physical program: argv (argv[0] its own path), .data, .rodata and a 256 KiB .bss, interrupts, `host:` I/O after the hand-over. Run as `mxload.elf host:vm10_mxload.elf a bc`; on PCSX2, which passes no arguments, they are in `host:mxload.txt` |
 
-All nine pass on the PS2 (2026-11-01); step 8 in 44 runs of 45, the last 44 in a row (with the
+Steps 1–10 pass on the PS2 (2026-11-01); step 8 in 44 runs of 45, the last 44 in a row (with the
 UCAB fix and the checks below). In the other one, the build before those, the file
 server on the IOP stopped answering after the gather's swap writes: the debug screen showed
 step 6 (the gather of step 5 done and its data right), the program in `wait_answer` with the

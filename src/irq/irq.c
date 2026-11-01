@@ -67,5 +67,20 @@ void mx_irq_intc(int cause, mx_irq_fn fn, void *arg) {
     mx_bios_disable_intc(cause);
 }
 
+void mx_irq_exit(void) {
+  for (int i = 0; i < 10; i++)
+    if (dmac[i].bios_id) {
+      mx_bios_disable_dmac(i);
+      mx_bios_remove_dmac_handler(i, dmac[i].bios_id);
+      dmac[i] = (struct slot){0};
+    }
+  for (int i = 0; i < 15; i++)
+    if (intc[i].bios_id) {
+      mx_bios_disable_intc(i);
+      mx_bios_remove_intc_handler(i, intc[i].bios_id);
+      intc[i] = (struct slot){0};
+    }
+}
+
 u32 mx_irq_dmac_count(int ch) { return dmac[ch].count; }
 u32 mx_irq_intc_count(int cause) { return intc[cause].count; }

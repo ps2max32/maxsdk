@@ -19,6 +19,10 @@ struct mx_sif_client {
 /* Returns 0 on success, < 0 if the IOP side does not answer. */
 int mx_sif_init(void);
 int mx_sif_ready(void);
+/* Removes the SIF0 handler, for a program that hands the machine to another
+   (mxload). SIF0 stays on (ps2link's handler needs it); the IOP still has our
+   receive buffer until the next program's mx_sif_init sends its own. */
+void mx_sif_exit(void);
 /* Bind to RPC server sid. Blocks (polls) until the IOP answers. */
 int mx_sif_bind(struct mx_sif_client *c, u32 sid);
 /* The same, giving up after n tries (0 if the server is not registered). */

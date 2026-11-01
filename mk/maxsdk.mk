@@ -10,7 +10,7 @@
 #                VU_OPT_FLAGS for opt (e.g. -vu-contexts=1)
 # Optional: PS2MAX, LLVM, MAXSDK_OUT (where libmx.a and crt0 are built).
 #
-# It gives CC, CFLAGS, $(call link,out,objs), MX_LIB, MX_CRT0, MX_LD, MX_HDRS,
+# It gives CC, CFLAGS, $(call link,out,objs), MX_LIB, MX_CRT0, MX_LD, MX_HDRS, MX_LOADER,
 # VU_OBJS, HLSL_OBJS, HLSL_HDRS and their rules, and a rule that builds libmx
 # by maxsdk's Makefile when a program needs it. Link a program as
 #   $(call link,$@,$(MX_CRT0) <objects> $(VU_OBJS) $(HLSL_OBJS) $(MX_LIB))
@@ -34,6 +34,8 @@ CFLAGS  += $(EXTRA_CFLAGS)
 MX_LIB   = $(MAXSDK_OUT)/libmx.a
 MX_CRT0  = $(MAXSDK_OUT)/obj/crt0.o
 MX_LD    = $(MAXSDK)/ld/maxsdk.ld
+# the loader for programs with VM segments (loader/mxload.c)
+MX_LOADER = $(MAXSDK_OUT)/mxload.elf
 MX_HDRS := $(wildcard $(MAXSDK)/include/mx/*.h $(MAXSDK)/include/mx/hw/*.h)
 # $(call link,out,objs)
 link     = $(LLVM)/ld.lld -m elf32ltsmipn32 -T$(MX_LD) -z max-page-size=128 \

@@ -74,7 +74,7 @@ static u32 rpc_pid = 1;
 static volatile u32 iop_buf;
 static volatile s32 sregs[32];
 static int sif_state; /* 0 = not tried, 1 = ready, -1 = no IOP */
-static int sif0_handler_id MX_UNUSED;
+static int sif0_handler_id;
 
 static volatile u32 *uw(void *p) { return (volatile u32 *)MX_UNCACHED(p); }
 
@@ -297,6 +297,13 @@ int mx_sif_serve(u32 sid, mx_sif_server_fn fn, void *arg) {
 }
 
 int mx_sif_ready(void) { return sif_state == 1; }
+
+void mx_sif_exit(void) {
+  if (sif0_handler_id > 0)
+    mx_bios_remove_dmac_handler(MX_DMAC_SIF0, sif0_handler_id);
+  sif0_handler_id = 0;
+  sif_state = 0;
+}
 
 int mx_sif_init(void) {
   if (sif_state)

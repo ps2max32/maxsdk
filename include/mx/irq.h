@@ -16,6 +16,10 @@ void mx_irq_dmac(int ch, mx_irq_fn fn, void *arg);
 /* Install fn for INTC cause (MX_INTC_*) and enable it. fn = 0 disables it. */
 void mx_irq_intc(int cause, mx_irq_fn fn, void *arg);
 
+/* Disables and removes every slot's BIOS handler, for a program that hands
+   the machine to another (mxload). */
+void mx_irq_exit(void);
+
 /* Number of times each slot ran (for tests and traces). */
 u32 mx_irq_dmac_count(int ch);
 u32 mx_irq_intc_count(int cause);
