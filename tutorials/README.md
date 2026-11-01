@@ -50,5 +50,5 @@ GS, and converts the pictures into the `images/` directories (`shots.sh`).
 | `<tutorial>/images/` | the pictures (`make shots`) |
 
 After the tutorials: the [examples](../examples/) (`spin`, `scene`, `display`, `vumax`), the
-hardware notes in [docs/](../docs/README.md), and the model demo in `ps2max/apps/maxsdk_model`
+hardware notes in [docs/](../docs/README.md), and the model demo in `ps2max/apps/model`
 (a skinned, animated model drawn by HLSL programs).

@@ -47,7 +47,7 @@ MX_LOADER = $(MAXSDK_OUT)/mxload.elf
 MX_HDRS := $(wildcard $(MAXSDK)/include/mx/*.h $(MAXSDK)/include/mx/hw/*.h)
 # $(call link,out,objs)
 # With MX_MEMORY=vm, the objects of objs also in MX_CORE_OBJS (a library
-# linked as objects, e.g. maxsdk_gl's) stay core: they are linked from an
+# linked as objects, e.g. libgl's) stay core: they are linked from an
 # archive of their own ($(out:.elf=.core.a)), and ld/maxsdk-vm.ld keeps
 # archive members core.
 link_objs = $(filter-out $(MX_CORE_OBJS),$(2)) --whole-archive $(1:.elf=.core.a) --no-whole-archive

@@ -218,4 +218,4 @@ per draw. The light is computed per vertex and Gouraud shading blends it across 
   triangles transformed once), and programs for VU0.
 - [`examples/vumax`](../../examples/vumax/): vertex programs from flat to lit and textured,
   and how fast VU1 runs them.
-- `ps2max/apps/maxsdk_model`: a skinned, animated model drawn by HLSL programs.
+- `ps2max/apps/model`: a skinned, animated model drawn by HLSL programs.
