@@ -463,6 +463,9 @@ static void unlock(void) { mx_bios_signal_sema(vm.lock); }
 /* Debugging (the same): where the slow path is: 1 entered, 2 has the
    lock, 3 done, 0 resumed. */
 volatile u32 mx__vm_where;
+/* Debugging: the last page fault handled in the thread: the instruction
+   and the address. */
+volatile u32 mx__vm_fault_epc, mx__vm_fault_va;
 void mx__vm_slow(struct mx__vm_x *f) {
   if ((f->cause >> 2 & 31) == 9) {
     u32 insn = *(const u32 *)(uintptr_t)f->epc;
@@ -471,6 +474,7 @@ void mx__vm_slow(struct mx__vm_x *f) {
     mx__vm_resume(f);
   }
   u32 pg = (f->badvaddr - MX_VM_BASE) >> PAGE_SHIFT;
+  mx__vm_fault_epc = f->epc, mx__vm_fault_va = f->badvaddr;
   mx__vm_where = 1;
   irq_check(0x30);
   lock();

@@ -150,7 +150,8 @@ $(RT_BUILTINS): $(patsubst $(RT_DIR)/%.c,$(OUT)/rt/%.o,$(RT_SRCS))
 	rm -f $@
 	$(LLVM)/llvm-ar rcs $@ $^
 
-$(LIBMXC): $(OUT)/libc/glue.c.o $(OUT)/libc/compat.c.o $(OUT)/libc/atomic.c.o $(OUT)/libc/cxx.cc.o
+$(LIBMXC): $(OUT)/libc/glue.c.o $(OUT)/libc/compat.c.o $(OUT)/libc/atomic.c.o $(OUT)/libc/malloc.c.o \
+           $(OUT)/libc/cxx.cc.o
 	rm -f $@
 	$(LLVM)/llvm-ar rcs $@ $^
 
@@ -209,12 +210,12 @@ batch: $(OUT)/batch/ps2batch.elf
 # Pure parts of the library are tested on the host too.
 HOST_SRCS := $(wildcard $(HERE)/tests/host/*.c) $(HERE)/src/pkt/pkt.c $(HERE)/src/pkt/chain.c \
              $(HERE)/src/gs/shader.c $(HERE)/src/gs/rt.c $(HERE)/src/gs/display.c \
-             $(HERE)/src/gs/video.c $(HERE)/src/gs/tex.c
+             $(HERE)/src/gs/video.c $(HERE)/src/gs/tex.c $(HERE)/libc/malloc.c
 HOST_BIN   = $(OUT)/host/test_host
 
 $(HOST_BIN): $(HOST_SRCS) $(wildcard $(HERE)/tests/host/*.h) $(HDRS)
 	@mkdir -p $(dir $@)
-	$(HOSTCC) -std=gnu11 -O1 -Wall -Wextra -DMX_HOST -I$(HERE)/include -I$(HERE)/tests/host \
+	$(HOSTCC) -std=gnu11 -O1 -Wall -Wextra -DMX_HOST -DMXC_MALLOC_TEST -I$(HERE)/include -I$(HERE)/tests/host \
 	  $(HOST_SRCS) -o $@
 
 test-host: $(HOST_BIN)
