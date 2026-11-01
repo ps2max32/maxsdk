@@ -42,6 +42,11 @@ struct mx_vm_config {
                        so a page fault reads and does not write first. It
                        runs above the priority of the thread that calls
                        mx_vm_init and sleeps in its I/O */
+  u32 trace;    /* 0, or bytes of a trace of what the program touches, for
+                   tools/vmsim.py (mx_vm_trace_save): core memory besides
+                   core_heap, so the frames are fewer by as much. Slower:
+                   the TLB then maps 8 KiB pieces */
+  u32 trace_ms; /* the trace's interval; 0: 100 ms */
 };
 
 /* A program that defines this gets VM before its static constructors run
@@ -124,7 +129,7 @@ struct mx_vm_piece mx_vm_first_piece(const void *p, u32 bytes);
 
 struct mx_vm_stats {
   u32 pages, frames, free_frames, pinned;
-  u32 refills;    /* TLB refills (no entry) */
+  u32 refills;    /* TLB refills (no entry): MX_VM_REFILL_CYCLES each */
   u32 zero_fills; /* first touches */
   u32 faults;     /* page faults handled in the thread: new pages, the swap file */
   u32 swap_ins, swap_outs, drops; /* drops: clean pages evicted without I/O */
@@ -141,6 +146,39 @@ struct mx_vm_stats {
                                      mapped page counts as written (PCSX2) */
 };
 void mx_vm_stats(struct mx_vm_stats *s);
+/* What a TLB refill of a resident page costs (the PS2, docs/vm.md "Costs") */
+#define MX_VM_REFILL_CYCLES 290
+
+/* ---- the trace (mx_vm_config.trace) ------------------------------------------------ */
+
+/* With a trace, the TLB maps the pages in 8 KiB pieces ("blocks", 4 a
+   page), and each interval (trace_ms, at a vblank) its VM entries are
+   cleared, so the first touch of each block in each interval is a refill:
+   recorded once an interval as read or written (a store, or the first one
+   to it: TLB modified). The pager runs as without a trace (the same pages,
+   frames and clock); only the TLB holds less (136 KiB). Recording stops
+   when the buffer is full. */
+#define MX_VM_TRACE_MAGIC 0x5456584du /* "MXVT" */
+struct mx_vm_trace_head {
+  u32 magic, version;       /* MX_VM_TRACE_MAGIC, 1 */
+  u32 page, block;          /* bytes: MX_VM_PAGE, 8192 */
+  u32 npages, nmap, nframes; /* VM pages, the file window's, frames */
+  u32 interval_ms, events, lost;
+};
+/* Events, a u32 each: kind << 30 | value. */
+#define MX_VM_TR_READ 0  /* block (page * 4 + piece) read in this interval */
+#define MX_VM_TR_WRITE 1 /* block written in this interval (read too, maybe) */
+#define MX_VM_TR_MARK 2  /* mx_vm_trace_mark's tag (30 bits) */
+#define MX_VM_TR_TICK 3  /* an interval begins: ms since the trace began */
+/* A mark in the trace (a frame, a level, a profile's start and stop). */
+void mx_vm_trace_mark(u32 tag);
+/* Drop what was recorded and record from here (a game's loading left
+   out: a few seconds before the frames to study, so memory is warm when
+   they start). */
+void mx_vm_trace_restart(void);
+/* Write the trace to path (the head, then the events), and go on
+   recording. Thread code. Returns the events written, or -1. */
+int mx_vm_trace_save(const char *path);
 
 /* ---- the core heap ----------------------------------------------------------------- */
 

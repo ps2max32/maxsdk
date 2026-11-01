@@ -46,6 +46,9 @@
 #define PAGE_SHIFT 15
 #define HALF (PAGE / 2)
 #define PM16K 0x6000u
+#define PM4K 0u
+#define BLK 8192u /* with a trace: what a TLB entry maps (PageMask 4 KiB) */
+#define BPP (PAGE / BLK)
 #define TLB_FIRST 31
 #define TLB_N 48
 #define SLOT_ALIAS 0xFFFFu   /* a TLB entry holding one of the BIOS's UCAB entries */
@@ -73,8 +76,9 @@ static struct {
   u32 *lo;
   u16 *frame_of, *slot_of, *page_of;
   u8 *flags, *pins;
-  u8 *page_slot; /* TLB entry of each page, 0: none */
-  u16 slot_page[TLB_N];
+  u8 *page_slot; /* TLB entry of each page (with a trace: of each block), 0: none */
+  u16 slot_page[TLB_N]; /* its page (block) + 1 */
+  u32 bpp;              /* TLB entries a page can have: 1, BPP with a trace */
   u32 next_slot;
   u32 nfree, free_hint, hand;
   int dbit;
@@ -98,6 +102,11 @@ static struct {
     int fd;
   } seg[NSEG];
   u32 nmap, map_next; /* pages of the file window, the next one not given out */
+  struct {
+    u32 *buf, cap, n, lost;
+    u8 *seen; /* per block, this interval: epoch << 2 | written << 1 | read */
+    u32 epoch, ms, every_ms, cyc, t_last;
+  } tr; /* the trace (mx_vm_config.trace) */
 } vm;
 
 static u32 page_va(u32 pg) {
@@ -179,24 +188,145 @@ static u32 tlb_take(void) {
    0xE005E000), so never two alike. */
 static void tlb_clear(u32 s) { tlb_write(s, 0, 0xE0000000u + ((48 + s) << 13), 0, 0); }
 
+/* With a trace: block b of page pg (mapped) into TLB entry s. Writable
+   only once a store to it was seen in this interval, so the first one is
+   seen in each (TLB modified). */
+static u32 tr_seen(u32 bi) {
+  u32 v = vm.tr.seen[bi];
+  return (v >> 2) == (vm.tr.epoch & 63) ? v & 3 : 0;
+}
+static void blk_write(u32 s, u32 pg, u32 b) {
+  u32 lo = vm.lo[pg] + (b * BLK >> 12 << 6);
+  if (vm.dbit && !(tr_seen(pg * BPP + b) & 2))
+    lo &= ~LO_D;
+  tlb_write(s, PM4K, page_va(pg) + b * BLK, lo, lo + (4096 >> 12 << 6));
+}
+
 /* Page pg's entry as lo[] says: written (a new one if it has none) when
-   mapped, taken out of the TLB when not. Interrupts off (or at EXL). */
+   mapped, taken out of the TLB when not. With a trace, the entries of its
+   blocks: those in the TLB rewritten, no new ones (blk_fill). Interrupts
+   off (or at EXL). */
 static void tlb_sync(u32 pg) {
-  u32 lo = vm.lo[pg], s = vm.page_slot[pg];
-  if (!(lo & LO_V)) {
-    if (s) {
-      tlb_clear(s);
-      vm.slot_page[s] = 0;
-      vm.page_slot[pg] = 0;
+  u32 lo = vm.lo[pg];
+  for (u32 b = 0; b < vm.bpp; b++) {
+    u32 bi = pg * vm.bpp + b, s = vm.page_slot[bi];
+    if (!(lo & LO_V)) {
+      if (s) {
+        tlb_clear(s);
+        vm.slot_page[s] = 0;
+        vm.page_slot[bi] = 0;
+      }
+    } else if (vm.bpp > 1) {
+      if (s)
+        blk_write(s, pg, b);
+    } else {
+      if (!s) {
+        s = tlb_take();
+        vm.page_slot[bi] = (u8)s;
+        vm.slot_page[s] = (u16)(bi + 1);
+      }
+      tlb_write(s, PM16K, page_va(pg), lo, lo + (HALF >> 12 << 6));
     }
-    return;
   }
+}
+
+/* ---- the trace ------------------------------------------------------------------- */
+
+static void tr_push(u32 e) {
+  if (vm.tr.n < vm.tr.cap)
+    vm.tr.buf[vm.tr.n++] = e;
+  else if (vm.tr.cap)
+    vm.tr.lost++;
+}
+
+/* A touch of block bi: recorded once an interval, read or written.
+   Interrupts off (or at EXL). */
+static void tr_note(u32 bi, int write) {
+  u32 had = tr_seen(bi), bit = write ? 2u : 1u;
+  if (!(had & bit)) {
+    vm.tr.seen[bi] = (u8)((vm.tr.epoch & 63) << 2 | had | bit | 1);
+    tr_push((write ? (u32)MX_VM_TR_WRITE : (u32)MX_VM_TR_READ) << 30 | bi);
+  }
+}
+
+/* A touch of va (page pg, mapped): recorded, then its block into the TLB.
+   At EXL. */
+static void blk_fill(u32 pg, u32 va, int write) {
+  u32 b = (va - page_va(pg)) / BLK, bi = pg * BPP + b;
+  tr_note(bi, write);
+  u32 s = vm.page_slot[bi];
   if (!s) {
     s = tlb_take();
-    vm.page_slot[pg] = (u8)s;
-    vm.slot_page[s] = (u16)(pg + 1);
+    vm.page_slot[bi] = (u8)s;
+    vm.slot_page[s] = (u16)(bi + 1);
   }
-  tlb_write(s, PM16K, page_va(pg), lo, lo + (HALF >> 12 << 6));
+  blk_write(s, pg, b);
+}
+
+/* At each vblank: once an interval has passed, a tick, and the VM's
+   entries out of the TLB, so that each block touched in the next interval
+   is a refill. Interrupts off. */
+static void tr_tick(void) {
+  u32 c = mx_count();
+  vm.tr.cyc += c - vm.tr.t_last;
+  vm.tr.t_last = c;
+  u32 ms = vm.tr.ms;
+  while (vm.tr.cyc >= MX_EE_HZ / 1000) {
+    vm.tr.cyc -= MX_EE_HZ / 1000;
+    ms++;
+  }
+  vm.tr.ms = ms;
+  static u32 last;
+  if (ms - last < vm.tr.every_ms)
+    return;
+  last = ms;
+  for (u32 i = TLB_FIRST; i < TLB_N; i++) {
+    u32 q = vm.slot_page[i];
+    if (q && q != SLOT_ALIAS) {
+      tlb_clear(i);
+      vm.page_slot[q - 1] = 0;
+      vm.slot_page[i] = 0;
+    }
+  }
+  if (!(++vm.tr.epoch & 63))
+    __builtin_memset(vm.tr.seen, 0, (vm.npages + vm.nmap) * BPP);
+  tr_push((u32)MX_VM_TR_TICK << 30 | (ms & 0x3FFFFFFFu));
+}
+
+void mx__irq_vbon_hook(void (*fn)(void)); /* src/irq/irq.c */
+
+void mx_vm_trace_mark(u32 tag) {
+  if (!vm.tr.cap)
+    return;
+  int was = mx_di();
+  tr_push((u32)MX_VM_TR_MARK << 30 | (tag & 0x3FFFFFFFu));
+  mx_irq_restore(was);
+}
+
+void mx_vm_trace_restart(void) {
+  if (!vm.tr.cap)
+    return;
+  int was = mx_di();
+  vm.tr.n = vm.tr.lost = 0;
+  mx_irq_restore(was);
+}
+
+int mx_vm_trace_save(const char *path) {
+  if (!vm.tr.cap)
+    return -1;
+  int was = mx_di();
+  u32 n = vm.tr.n, lost = vm.tr.lost;
+  mx_irq_restore(was);
+  struct mx_vm_trace_head h = {MX_VM_TRACE_MAGIC, 1, PAGE, BLK, vm.npages, vm.nmap,
+                               vm.nframes, vm.tr.every_ms, n, lost};
+  int fd = mx_fio_open(path, MX_FIO_WRONLY | MX_FIO_CREAT | MX_FIO_TRUNC);
+  if (fd < 0)
+    return -1;
+  int r = mx_fio_write(fd, &h, sizeof h);
+  if (!r && n)
+    r = mx_fio_write(fd, vm.tr.buf, n * 4); /* the events before n stay as they are */
+  mx_fio_close(fd);
+  return r ? -1 : (int)n;
 }
 
 /* A miss in the BIOS's UCAB range: its entry back. */
@@ -230,6 +360,9 @@ static void map(u32 pg, int write) {
 static void unmap(u32 pg) {
   vm.lo[pg] = 0;
   tlb_sync(pg);
+  if (vm.tr.seen) /* the trace: touched again, recorded again */
+    for (u32 b = 0; b < BPP; b++)
+      vm.tr.seen[pg * BPP + b] = 0;
 }
 
 /* A free frame, marked taken, or -1. Interrupts off. */
@@ -319,6 +452,8 @@ int mx__vm_exception(struct mx__vm_x *x) {
       mx__exception_note = "VM: TLB modified on a page that is not resident";
       return VMX_FATAL;
     }
+    if (vm.bpp > 1)
+      blk_fill(pg, va, 1);
     vm.flags[pg] |= PG_DIRTY;
     vm.lo[pg] |= LO_D;
     tlb_sync(pg);
@@ -326,11 +461,16 @@ int mx__vm_exception(struct mx__vm_x *x) {
   }
   vm.st.refills++;
   if (vm.lo[pg] & LO_V) { /* mapped, only not in the TLB */
-    tlb_sync(pg);
+    if (vm.bpp > 1)
+      blk_fill(pg, va, code == 3);
+    else
+      tlb_sync(pg);
     return VMX_RETURN;
   }
   if (vm.frame_of[pg] && !(vm.flags[pg] & PG_BUSY)) { /* the clock took V away */
     map(pg, code == 3);
+    if (vm.bpp > 1)
+      blk_fill(pg, va, code == 3);
     return VMX_RETURN;
   }
   /* a new page or one in the swap file: in the thread */
@@ -903,6 +1043,10 @@ int mx_vm_pin(const void *p, u32 bytes, u32 flags) {
       vm.flags[pg] |= PG_DIRTY;
       map(pg, 1);
     }
+    if (vm.tr.seen) /* the trace: the blocks the DMAC or the IOP touches */
+      for (u32 b = 0; b < BPP; b++)
+        if (va + (b + 1) * BLK > lo && va + b * BLK < hi)
+          tr_note(pg * BPP + b, (flags & MX_VM_PIN_WRITE) != 0);
     mx_irq_restore(was);
   }
   unlock();
@@ -1169,10 +1313,13 @@ void mx__vm_report(void) {
   mx_vm_stats(&s);
   mx_printf("maxsdk: VM %u frames, %u faults: %u swap ins (%u ms), %u outs (%u ms), %u by the "
             "writer, %u drops, %u from files (%u ms), %u zero fills; lock waits %u ms; %u "
-            "file server calls\n",
+            "file server calls; %u TLB refills (about %u ms)\n",
             s.frames, s.faults, s.swap_ins, s.us_swap_in / 1000, s.swap_outs + s.writer_outs,
             s.us_swap_out / 1000, s.writer_outs, s.drops, s.file_ins, s.us_file_in / 1000,
-            s.zero_fills, s.us_lock / 1000, s.io_calls);
+            s.zero_fills, s.us_lock / 1000, s.io_calls, s.refills, s.refills / (MX_EE_HZ / 1000 / MX_VM_REFILL_CYCLES));
+  if (vm.tr.cap)
+    mx_printf("maxsdk: VM trace %u events (%u lost), every %u ms\n", vm.tr.n, vm.tr.lost,
+              vm.tr.every_ms);
 }
 
 void mx_vm_stats(struct mx_vm_stats *s) {
@@ -1214,13 +1361,16 @@ u32 mx__vm_check(void) {
   for (u32 s = TLB_FIRST; s < TLB_N && !r; s++) {
     u32 q = vm.slot_page[s];
     if (q && q != SLOT_ALIAS) {
+      u32 pg = (q - 1) / vm.bpp, b = (q - 1) % vm.bpp;
       if (vm.page_slot[q - 1] != s)
         r = 4u << 28 | s;
       else {
         u32 pm, hi, lo0, lo1;
         tlb_read(s, &pm, &hi, &lo0, &lo1);
-        if (pm != PM16K || (hi & ~0x1FFFu) != page_va(q - 1) ||
-            lo0 != vm.lo[q - 1])
+        if (vm.bpp > 1 ? pm != PM4K || (hi & ~0x1FFFu) != page_va(pg) + b * BLK ||
+                             (lo0 & ~LO_D) != ((vm.lo[pg] & ~LO_D) + (b * BLK >> 12 << 6)) ||
+                             (lo0 & LO_D & ~vm.lo[pg])
+                       : pm != PM16K || (hi & ~0x1FFFu) != page_va(pg) || lo0 != vm.lo[pg])
           r = 5u << 28 | s;
       }
     }
@@ -1268,15 +1418,24 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   u32 nmap = (cfg->map_size ? cfg->map_size : 64u << 20) / PAGE;
   if (nmap > (MX_VM_MAP_LIMIT - MX_VM_MAP_BASE) / PAGE)
     nmap = (MX_VM_MAP_LIMIT - MX_VM_MAP_BASE) / PAGE;
-  if (np + nmap > 0xFFFE)
-    nmap = 0xFFFE - np;
+  vm.bpp = cfg->trace ? BPP : 1; /* slot_page holds a block + 1 */
+  if ((np + nmap) * vm.bpp > 0xFFFE)
+    nmap = 0xFFFE / vm.bpp > np ? 0xFFFE / vm.bpp - np : 0;
   u32 nt = np + nmap; /* the tables: VM's pages, then the file window's */
   vm.lo = table(nt * 4);
   vm.frame_of = table(nt * 2);
   vm.slot_of = table(nt * 2);
   vm.flags = table(nt);
   vm.pins = table(nt);
-  vm.page_slot = table(nt);
+  vm.page_slot = table(nt * vm.bpp);
+  if (cfg->trace) {
+    vm.tr.seen = table(nt * BPP);
+    vm.tr.buf = mx_core_alloc(cfg->trace, 16);
+    if (!vm.tr.seen || !vm.tr.buf) {
+      mx_printf("mx_vm_init: no core memory for the trace (%u bytes)\n", cfg->trace);
+      return -1;
+    }
+  }
   u32 keep = cfg->core_heap ? cfg->core_heap : 1u << 20;
   u32 bytes;
   u8 *mem = mx__heap_take(keep, PAGE, &bytes);
@@ -1345,6 +1504,15 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
     mx_exception_init();
     mx_printf("mx_vm_init: TLB misses are not raised (PCSX2: run with the EE interpreter)\n");
     return -1;
+  }
+  if (cfg->trace) {
+    was = mx_di();
+    vm.tr.every_ms = cfg->trace_ms ? cfg->trace_ms : 100;
+    vm.tr.epoch = 1;
+    vm.tr.t_last = mx_count();
+    vm.tr.cap = cfg->trace / 4;
+    mx_irq_restore(was);
+    mx__irq_vbon_hook(tr_tick);
   }
   if (cfg->clean_frames && vm.fd >= 0)
     writer_start(cfg->clean_frames);

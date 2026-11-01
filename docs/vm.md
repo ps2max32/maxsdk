@@ -94,6 +94,32 @@ virtual memory at 0x0800_0000, in 32 KiB pages held in the physical memory left 
   GS readback) takes VM only in one piece: one tag a REF always, so the sizes of chains do not
   depend on where the data is.
 
+### The trace
+
+`mx_vm_config.trace` (bytes, core) records what a program touches, for `tools/vmsim.py`,
+which replays it with other page sizes, memory sizes and eviction policies:
+* The TLB then maps 8 KiB blocks (PageMask 4 KiB, 4 entries a page), so a refill says which
+  block was touched. The pager is unchanged (32 KiB pages, the same frames and clock); the
+  TLB holds 136 KiB instead of 544 KiB, so there are more refills.
+* Each interval (`trace_ms`, 100 ms; checked at each vblank) begins with a tick and the VM's
+  entries out of the TLB: the first touch of each block in an interval is a refill and is
+  recorded, read or written. Entries are written without D until a store to their block is
+  seen in that interval (on PCSX2, which ignores D, only a store that refills counts as one).
+  A page the pager unmaps (evicted, or the clock's second chance) is recorded again when
+  touched again in the same interval. Ranges pinned (`mx_vm_pin`: the DMAC's, the IOP's
+  file transfers) are recorded as touched.
+* The trace is a u32 per event (`struct mx_vm_trace_head`, `MX_VM_TR_*`): blocks read or
+  written, ticks (ms), and marks (`mx_vm_trace_mark`). `mx_vm_trace_restart` drops what was
+  recorded (a game's loading), `mx_vm_trace_save(path)` writes it. When the buffer is full,
+  recording stops (the head's `lost`).
+* `tools/vmsim.py <trace> --window A B` replays it (from its start, so memory is warm) and
+  counts between marks A and B: the working set of an interval at piece sizes of 8–256 KiB,
+  the faults, swap ins and outs of clock, LRU and OPT (Belady's: the fewest faults any policy
+  can have) at 8, 16 and 32 KiB pages in the same memory, their time by the costs below, and
+  how many of a 32 KiB page's blocks were touched and written while it was resident.
+* Replaying `vm18_trace` (PCSX2) with the clock at 32 KiB gives the run's swap ins exactly
+  (72); the writes differ, since PCSX2 writes every page out (no dirty tracking).
+
 ## Facts (PS2)
 
 | Fact | Value | Conditions | Source | Date |
@@ -147,6 +173,7 @@ interrupt in slots 30–31 (it stops when interrupts stay off), and at the end b
 | `vm15_overwrite` | `mx_fio_read` into VM pinned with `MX_VM_PIN_OVERWRITE`, 8 frames: a read at byte 100 over 5 pages in the swap file (4 not read in, the bytes around as they were), a short read over 4 pages (the rest of 2 restored from the swap file), reads into new pages (no zero fill; past a short read, zero) |
 | `vm16_lock` | in a program linked into VM: a static buffer locked and sent through `mx_paddr_of`; 3 pages of a mapped file locked, sent from 3 places, unmoved by 40 pages of heap writes; unlocked and dropped, locked again from the file; `mx_frame_unlock` holds the lock until the frame that REFs the range is done |
 | `vm17_writer` | the writer thread (`clean_frames` 4, 16 frames): 400 random whole-page writes and checks of 48 pages and a second thread, the tables checked every 50; most write outs by the writer, most evictions drops; `mx_core_stats` |
+| `vm18_trace` | the trace (8 frames, 64 KiB, 100 ms): known touches between marks recorded once an interval, read or written; 24 pages written and checked twice with 8 KiB TLB entries, `mx__vm_check`; the trace saved, read back and checked |
 
 Steps 1–15 pass on the PS2 (2026-11-01), step 16 on PCSX2 (not run on the PS2 yet), and Quake1 linked into VM (`MX_MEMORY=vm`, 600 demo frames at 53–72 fps) (`vm11_vmlink`'s first version, with 2650 swap
 transfers in step 4, ran past the 60 s timeout: about 15 a second through `host:`); step 8 in 44 runs of 45, the last 44 in a row (with the

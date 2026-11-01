@@ -67,7 +67,7 @@ void mx_prof_report(u32 top) {
     const struct mx_vm_stats *a = &vs[0], *z = &vs[1];
     mx_printf("prof: meanwhile VM %u faults, %u swap ins (%u ms), %u outs (%u ms), %u by the "
               "writer, %u drops, %u from files (%u ms), %u zero fills; IOP waits %u in %u ms, "
-              "the file server's %u in %u ms\n",
+              "the file server's %u in %u ms; %u TLB refills (about %u ms)\n",
               z->faults - a->faults,
               z->swap_ins - a->swap_ins, (z->us_swap_in - a->us_swap_in) / 1000,
               z->swap_outs + z->writer_outs - a->swap_outs - a->writer_outs,
@@ -75,7 +75,8 @@ void mx_prof_report(u32 top) {
               z->drops - a->drops, z->file_ins - a->file_ins,
               (z->us_file_in - a->us_file_in) / 1000, z->zero_fills - a->zero_fills,
               sw[1][0] - sw[0][0], (sw[1][1] - sw[0][1]) / 1000, sw[1][2] - sw[0][2],
-              (sw[1][3] - sw[0][3]) / 1000);
+              (sw[1][3] - sw[0][3]) / 1000, z->refills - a->refills,
+              (z->refills - a->refills) / (MX_EE_HZ / 1000 / MX_VM_REFILL_CYCLES));
   }
   /* the largest first, by taking the largest left each time */
   for (u32 k = 0; k < top; k++) {
