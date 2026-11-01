@@ -27,7 +27,7 @@ LIB_OBJS += $(patsubst %.vsm,$(OUT)/vu/%.o,$(notdir $(LIB_VSMS)))
 vpath %.vsm $(sort $(dir $(LIB_VSMS)))
 # IOP modules of ps2sdk that libmx loads (the sound driver, src/base/snd.c),
 # as data between the symbols <name>_irx and <name>_irx_end
-PS2SDK   ?= $(PS2MAX)/install/ps2sdk
+PS2SDK   ?= $(PS2MAX)/../ps2dev/install/ps2sdk
 LIB_IRX  := libsd audsrv
 LIB_OBJS += $(patsubst %,$(OUT)/irx/%.o,$(LIB_IRX))
 $(OUT)/irx/%.o: $(PS2SDK)/iop/irx/%.irx
