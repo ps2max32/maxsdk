@@ -81,6 +81,18 @@ void mx_vm_unmap_file(const void *p);
 #define MX_VM_PIN_OVERWRITE 4
 int mx_vm_pin(const void *p, u32 bytes, u32 flags);
 void mx_vm_unpin(const void *p, u32 bytes);
+/* Lock [p, p + bytes) for DMA while it is in use (an asset: a texture, a
+   model's streams, a range of a mapped file): resident, in one physical
+   piece, kept at its frames until unlocked, so DMA tags and chains may
+   point into it (mx_paddr_of, mx_paddr_range, mx_e_ref). A pin with
+   MX_VM_PIN_DMA; locks count. Returns 0, or -1 (no run of frames that
+   long: unlock something, or split the asset). Unlocked, the pages may be
+   evicted (a mapped file's dropped, others to the swap file); locked again
+   they may be at other frames, so chains built for them are built again.
+   A frame in flight may still read a range: mx_frame_unlock (<mx/frame.h>)
+   unlocks it once the frame is done. */
+MX_INLINE int mx_vm_lock(const void *p, u32 bytes) { return mx_vm_pin(p, bytes, MX_VM_PIN_DMA); }
+MX_INLINE void mx_vm_unlock(const void *p, u32 bytes) { mx_vm_unpin(p, bytes); }
 /* Before mx_vm_unpin, after a transfer into [p, p + bytes) pinned with
    MX_VM_PIN_OVERWRITE that wrote only its first done bytes: the rest of the
    pages it did not read in gets their contents back. */

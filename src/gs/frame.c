@@ -6,6 +6,7 @@
 #include <mx/tex.h>
 #include <mx/timer.h>
 #include <mx/trace.h>
+#include <mx/vm.h>
 #include <mx/vu.h>
 #include "frame_int.h"
 
@@ -306,7 +307,44 @@ int mx_frame_ready(void) {
   return f.novsync ? mx_gs.frames_done >= n - d + 1 : mx_gs.shown >= n - d + 2;
 }
 
+/* mx_frame_unlock: ranges to unlock and the frame after which */
+#define NUNLOCK 64
+static struct {
+  const void *p;
+  u32 bytes, frame;
+} unlocks[NUNLOCK];
+static u32 nunlock;
+
+static void unlock_done(void) {
+  u32 k = 0;
+  for (u32 i = 0; i < nunlock; i++) {
+    if (mx_gs.frames_done > unlocks[i].frame)
+      mx_vm_unlock(unlocks[i].p, unlocks[i].bytes);
+    else
+      unlocks[k++] = unlocks[i];
+  }
+  nunlock = k;
+}
+
+static int unlocks_full(u32 arg) {
+  (void)arg;
+  unlock_done();
+  return nunlock == NUNLOCK;
+}
+
+void mx_frame_unlock(const void *p, u32 bytes) {
+  if (!mx_is_vm(p))
+    return;
+  if (nunlock == NUNLOCK) {
+    kick(); /* what is built so far, so frames get done */
+    spin(unlocks_full, 0, "mx_frame_unlock: 64 ranges waiting");
+  }
+  unlocks[nunlock].p = p, unlocks[nunlock].bytes = bytes, unlocks[nunlock].frame = mx_gs.frames;
+  nunlock++;
+}
+
 u32 mx_frame_begin_n(void) {
+  unlock_done();
   if (!mx_frame_ready()) {
     /* the buffer of frame n - 2 is shown until frame n - 1 replaces it;
        push what is built so far so the GS has it meanwhile */

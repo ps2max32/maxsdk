@@ -96,6 +96,10 @@ void mx_frame_commit(u64 *end);
    change until the frame has passed mx_frame_done(). */
 void mx_frame_call(const struct mx_chain *ch);
 
+/* mx_vm_unlock of [p, p + bytes) once the frame being built has passed
+   mx_frame_done(): for VM data (<mx/vm.h>, mx_vm_lock) that this frame or
+   an earlier one in flight may still read. */
+void mx_frame_unlock(const void *p, u32 bytes);
 /* GS writes over PATH2: returns a cursor for qwc quadwords of GIF packets
    (tags included); commit them with mx_frame_commit. */
 u64 *mx_frame_direct(u32 qwc);

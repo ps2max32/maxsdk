@@ -61,13 +61,14 @@ MX_INLINE int mx__need_core(const void *p, const char *what) {
 }
 mx_paddr mx__vm_paddr(const void *p, u32 bytes);
 
-/* Core memory (the program, the core heap, the stack) or the scratchpad:
-   anything but VM, which ends the program with a report (a VM page is not
-   at one physical address). */
+/* Core memory (the program, the core heap, the stack), the scratchpad, or
+   pinned VM (mx_vm_pin, mx_vm_lock: its page stays at its frame); VM not
+   pinned ends the program with a report (it has no fixed physical
+   address). */
 MX_INLINE mx_paddr mx_paddr_of(const void *p) {
   uintptr_t a = (uintptr_t)p;
   if (__builtin_expect(mx_is_vm(p), 0))
-    mx__paddr_fault(p, 0);
+    return mx__vm_paddr(p, 1);
   if (mx_is_spr(p))
     return (mx_paddr){(u32)((a & 0x3FFFu) | 0x80000000u)};
   return (mx_paddr){(u32)(a & 0x0FFFFFFFu)};
