@@ -73,8 +73,18 @@ void mx_vm_unmap_file(const void *p);
    nothing to do. */
 #define MX_VM_PIN_WRITE 1 /* the DMAC or the IOP writes the memory */
 #define MX_VM_PIN_DMA 2   /* in one physical piece (mx_paddr_range works on it) */
+/* every byte will be written (with MX_VM_PIN_WRITE): pages that lie whole
+   in the range and are not resident get a frame without their contents (no
+   swap file read, no file read, no zero fill). If the transfer writes less,
+   mx_vm_overwrite_done puts the rest back; otherwise it is lost. Not with
+   MX_VM_PIN_DMA (those pages are read in). mx_fio_read uses it. */
+#define MX_VM_PIN_OVERWRITE 4
 int mx_vm_pin(const void *p, u32 bytes, u32 flags);
 void mx_vm_unpin(const void *p, u32 bytes);
+/* Before mx_vm_unpin, after a transfer into [p, p + bytes) pinned with
+   MX_VM_PIN_OVERWRITE that wrote only its first done bytes: the rest of the
+   pages it did not read in gets their contents back. */
+void mx_vm_overwrite_done(const void *p, u32 bytes, u32 done);
 /* Unpin once event e of a DMA queue has passed (the transfer that reads or
    writes the range is done): checked by the VM before it evicts, and by
    mx_vm_unpin_done. */
@@ -101,7 +111,9 @@ struct mx_vm_stats {
   u32 zero_fills; /* first touches */
   u32 faults;     /* page faults handled in the thread: new pages, the swap file */
   u32 swap_ins, swap_outs, drops; /* drops: clean pages evicted without I/O */
-  u32 file_ins;                   /* pages of a program linked into VM read from its ELF */
+  u32 file_ins;   /* pages read from files (a program linked into VM, mapped files) */
+  u32 overwrites; /* pages pinned to be overwritten: not read in (MX_VM_PIN_OVERWRITE) */
+  u32 restores;   /* of those, written short and read in after (mx_vm_overwrite_done) */
   u32 retries;                    /* swap I/O repeated (the file server did not answer) */
   u32 dirty_tracking;             /* 1: TLB modified exceptions (the PS2), 0: every
                                      mapped page counts as written (PCSX2) */

@@ -62,6 +62,7 @@
 #define PG_SWAP 8  /* its slot holds it */
 #define PG_FILE 16 /* a file holds it (the program's ELF until PG_SWAP, a mapped file) */
 #define NSEG 12    /* 4 segments of the program's ELF, 8 mapped files */
+#define PG_RAW 32  /* pinned to be overwritten whole: its frame not filled */
 
 static struct {
   int active;
@@ -740,8 +741,23 @@ int mx_vm_pin(const void *p, u32 bytes, u32 flags) {
     gather(a, n, (u32)f0);
     irq_check(0x41);
   }
+  u32 lo = (u32)(uintptr_t)p, hi = lo + bytes;
   for (u32 pg = a; pg <= b; pg++) {
-    fault_in(pg, (flags & MX_VM_PIN_WRITE) != 0);
+    u32 va = page_va(pg);
+    if ((flags & MX_VM_PIN_OVERWRITE) && va >= lo && va + PAGE <= hi && !vm.frame_of[pg]) {
+      /* overwritten whole: a frame, nothing read into it */
+      int was = mx_di();
+      int f = frame_take();
+      mx_irq_restore(was);
+      f = f >= 0 ? f : (int)evict();
+      was = mx_di();
+      frame_give(pg, (u32)f);
+      vm.flags[pg] |= PG_RAW;
+      map(pg, 1);
+      mx_irq_restore(was);
+      vm.st.overwrites++;
+    } else
+      fault_in(pg, (flags & MX_VM_PIN_WRITE) != 0);
     if (vm.pins[pg] == 255)
       vm_fatal("mx_vm_pin: pinned 255 times", pg);
     int was = mx_di();
@@ -757,13 +773,56 @@ int mx_vm_pin(const void *p, u32 bytes, u32 flags) {
   return 0;
 }
 
+/* After a transfer into [p, p + bytes) pinned with MX_VM_PIN_OVERWRITE
+   that wrote only its first done bytes: the rest of the pages not filled
+   gets their contents back (from the swap file or the file; zero for a new
+   page), through a frame taken for the time. */
+void mx_vm_overwrite_done(const void *p, u32 bytes, u32 done) {
+  if (!mx_is_vm(p) || !in_vm(p, bytes))
+    return;
+  u32 end = (u32)(uintptr_t)p + done;
+  lock();
+  for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b; pg++) {
+    if (!(vm.flags[pg] & PG_RAW))
+      continue;
+    u32 va = page_va(pg), from = end > va ? end - va : 0;
+    u8 *d = frame_ptr(vm.frame_of[pg] - 1u);
+    if (from < PAGE) {
+      if (vm.flags[pg] & (PG_SWAP | PG_FILE)) {
+        int was = mx_di();
+        int t = frame_take();
+        mx_irq_restore(was);
+        u32 tf = t >= 0 ? (u32)t : evict();
+        if (vm.flags[pg] & PG_SWAP)
+          swap_io(pg, tf, 0);
+        else
+          file_in(pg, tf);
+        __builtin_memcpy(d + from, frame_ptr(tf) + from, PAGE - from);
+        was = mx_di();
+        vm.page_of[tf] = 0;
+        vm.nfree++;
+        mx_irq_restore(was);
+        vm.st.restores++;
+      } else
+        __builtin_memset(d + from, 0, PAGE - from);
+      code_sync();
+    }
+    int was = mx_di();
+    vm.flags[pg] &= (u8)~PG_RAW;
+    mx_irq_restore(was);
+  }
+  unlock();
+}
+
 void mx_vm_unpin(const void *p, u32 bytes) {
   if (!mx_is_vm(p) || !in_vm(p, bytes))
     return;
   int was = mx_di();
   for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b; pg++)
-    if (vm.pins[pg] && !--vm.pins[pg])
+    if (vm.pins[pg] && !--vm.pins[pg]) {
       vm.st.pinned--;
+      vm.flags[pg] &= (u8)~PG_RAW; /* overwritten (or not: then its contents are lost) */
+    }
   mx_irq_restore(was);
 }
 

@@ -768,7 +768,8 @@ int mx_fio_read(int fd, void *data, u32 n) {
     return -1;
   u8 *d = data;
   int vm = mx_is_vm(d);
-  if (vm && mx_vm_pin(d, n, MX_VM_PIN_WRITE) < 0)
+  /* whole pages of the buffer not read in first: the read overwrites them */
+  if (vm && mx_vm_pin(d, n, MX_VM_PIN_WRITE | MX_VM_PIN_OVERWRITE) < 0)
     return -1;
   fio_lock();
   u32 total = 0;
@@ -791,8 +792,11 @@ int mx_fio_read(int fd, void *data, u32 n) {
   r = (int)total;
 out:
   fio_unlock();
-  if (vm)
+  if (vm) {
+    if (total < n) /* short: what the pin did not read in back */
+      mx_vm_overwrite_done(d, n, total);
     mx_vm_unpin(d, n);
+  }
   return r;
 }
 

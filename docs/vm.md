@@ -71,6 +71,12 @@ virtual memory at 0x0800_0000, in 32 KiB pages held in the physical memory left 
   `mx_dma_to_spr` send pinned VM in several pieces as a chain of REF tags (TTE off);
   `mx_dma_from_spr` moves one piece at a time; `mx_fio_read`/`mx_fio_write` pin the buffer and
   call the file server once a piece.
+* `MX_VM_PIN_OVERWRITE` (with `MX_VM_PIN_WRITE`): pages that lie whole in the range and are
+  not resident get a frame without their contents: no swap file read, file read or zero fill
+  for what the transfer overwrites anyway. `mx_fio_read` into VM pins so; when the read is
+  short (the end of the file), `mx_vm_overwrite_done` reads the rest of those pages back
+  through a frame taken for the time (zero for a page never written), so the bytes past the
+  read stay as they were. Stats: `overwrites`, `restores`.
 * Everything that has its own tags (`mx_e_ref`, `mx_pkt_ref`, mesh chains, queue segments, the
   GS readback) takes VM only in one piece: one tag a REF always, so the sizes of chains do not
   depend on where the data is.
@@ -125,8 +131,9 @@ interrupt in slots 30–31 (it stops when interrupts stay off), and at the end b
 | `vm12_elfpage` | a program linked into VM paged from its ELF: few pages read at `main`, a 128 KiB table and a 64 KiB array read when touched, evicted and read from the ELF again, half the array written and then from the swap file |
 | `vm13_guards` | in a program linked into VM, `MX_CORE_FN` handlers with `MX_CORE_DATA` data run (a timer, the vblank start); each guard refuses a VM handler or argument (with a test hook instead of the report): timer, INTC, DMAC, SIF server, a DMA queue's `on_done` |
 | `vm14_mapfile` | a 300 KiB file mapped with 8 frames and no swap file: in the file window, read twice (read again, dropped, never written out), random reads, a DMA pin and a VIF1 transfer of mapped data, a write pin refused, `mx_fio_write` from the mapping, two files mapped, unmapped and mapped again at the same places. `vm14_mapfile.elf store`: a store into the mapping, which ends the program (status 255) |
+| `vm15_overwrite` | `mx_fio_read` into VM pinned with `MX_VM_PIN_OVERWRITE`, 8 frames: a read at byte 100 over 5 pages in the swap file (4 not read in, the bytes around as they were), a short read over 4 pages (the rest of 2 restored from the swap file), reads into new pages (no zero fill; past a short read, zero) |
 
-Steps 1–14 pass on the PS2 (2026-11-01) (`vm11_vmlink`'s first version, with 2650 swap
+Steps 1–15 pass on the PS2 (2026-11-01) (`vm11_vmlink`'s first version, with 2650 swap
 transfers in step 4, ran past the 60 s timeout: about 15 a second through `host:`); step 8 in 44 runs of 45, the last 44 in a row (with the
 UCAB fix and the checks below). In the other one, the build before those, the file
 server on the IOP stopped answering after the gather's swap writes: the debug screen showed
