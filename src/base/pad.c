@@ -25,9 +25,9 @@ struct pad_record {
 };
 
 static struct mx_sif_client pad, pad2;
-static struct pad_record area[2][4] MX_ALIGNED(64); /* 2 records + spare per port */
-static s32 cmd[32] MX_ALIGNED(64);
-static s32 res[32] MX_ALIGNED(64);
+static struct pad_record area[2][4] MX_DMA_LINES; /* 2 records + spare per port */
+static s32 cmd[32] MX_DMA_LINES;
+static s32 res[32] MX_DMA_LINES;
 static int ready;
 static u32 prev[2];
 static u32 analog_polls[2];

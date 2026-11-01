@@ -125,17 +125,23 @@ u64 *mx_shader_e_idraw(u64 *c, const struct mx_shader *s, const void *const *str
   }
   /* the packets of mx_shader_e_ibatch, from what a draw has once: each
      input's UNPACK but for its count, its stream's DMA address (linear: the
-     batch's is first * bytes on) */
+     batch's is first * bytes on, so the stream is one physical piece as far
+     as the batches reach) */
   u32 base[MX_SHADER_MAX_IN], bytes[MX_SHADER_MAX_IN], code[MX_SHADER_MAX_IN];
+  u32 reach = 0; /* vertices */
+  for (u32 i = 0; i < n; i++) {
+    u32 e = b[i].first + ((b[i].nv + am) & ~am);
+    reach = e > reach ? e : reach;
+  }
   for (u32 i = 0; i < s->nin; i++) {
     const struct mx_shader_in *in = &s->in[i];
-    base[i] = mx_phys(streams[i]), bytes[i] = in->bytes;
+    base[i] = mx_paddr_range(streams[i], reach * in->bytes).v, bytes[i] = in->bytes;
     code[i] = mx_vif_unpack(in->fmt, s->in_at + i, 0,
                             MX_UNPACK_FLG | (in->usn ? MX_UNPACK_USN : 0) |
                                 (in->mask ? MX_UNPACK_MASK : 0));
   }
-  const u64 ref = mx_dmatag(MX_TAG_REF, 0, 0, 0), stcycl = mx_vif_stcycl(s->item_qw, 1);
-  const u64 counts_lo = mx_dmatag(MX_TAG_CNT, 1, 0, 0);
+  const u64 ref = mx_dmatag(MX_TAG_REF, 0, MX_PADDR_NONE, 0), stcycl = mx_vif_stcycl(s->item_qw, 1);
+  const u64 counts_lo = mx_dmatag(MX_TAG_CNT, 1, MX_PADDR_NONE, 0);
   const u64 counts_hi =
       (u64)mx_vif_stcycl(1, 1) | (u64)mx_vif_unpack(MX_UNPACK_V4_32, 0, 1, MX_UNPACK_FLG) << 32;
   const u64 idx_hi = (u64)mx_vif_stcycl(1, 1) |
@@ -154,7 +160,8 @@ u64 *mx_shader_e_idraw(u64 *c, const struct mx_shader *s, const void *const *str
       c[1] = stcycl | (u64)(code[j] | (m & 0xFF) << 16) << 32;
       c += 2;
     }
-    c = mx_e_qw(c, mx_dmatag(MX_TAG_REF, iq, k->idx, 0), idx_hi | (u64)((4 * iq) & 0xFF) << 48);
+    c = mx_e_qw(c, mx_dmatag(MX_TAG_REF, iq, mx_paddr_range(k->idx, iq * 16), 0),
+                idx_hi | (u64)((4 * iq) & 0xFF) << 48);
     c = mx_e_cnt(c, 0, 0, first && i == 0 ? mx_vif_mscal(s->entry) : mx_vif_mscnt());
   }
   return c;

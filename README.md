@@ -47,6 +47,12 @@ Apps on maxsdk live in their own repos: `ps2max/apps/model` (a glTF model, skinn
 drawn by HLSL shaders, supersampled), `ps2max/apps/procgen` (generated terrain), with the MXM
 model converter in `ps2max/libs/mxm`.
 
+DMA addresses have a type of their own (`mx_paddr`, `<mx/cpu.h>`): only `mx_paddr_of` (core memory,
+the scratchpad) and `mx_paddr_range` (also pinned virtual memory in one piece) make one, and
+`make check-phys` fails on any other. The DMA calls take pointers with sizes (`mx_dma_send`,
+`mx_dma_recv`, `mx_dmaq_send`, `mx_e_ref`); with virtual memory on they send pinned VM by
+scatter-gather or refuse it with a report, never from the wrong memory (`<mx/dma.h>`).
+
 Floating point: build with `-ffinite-math-only` (the Makefile does). The R5900 FPU has no INF/NaN,
 so clang only uses it for finite math, and otherwise calls soft-float helpers that libmx does not
 have.
@@ -77,6 +83,7 @@ the PS2; the measurements are in `docs/`. maxsdk is built with clang only.
 | `src/irq/`, `src/dma/` | interrupt dispatcher, DMA channels and the DMA engine |
 | `src/pkt/`, `src/gs/` | DMA/VIF/GIF packets, chains (`<mx/chain.h>`: built once, sent or called many times), GS setup and interrupts, the VIF packets of HLSL programs and their mesh chains (`shader.c`) |
 | `src/vu/` | VU control, kernels and streaming |
+| `src/vm/` | optional virtual memory (`<mx/vm.h>`, [docs/vm.md](docs/vm.md)): up to 128 MiB in 32 KiB pages, a swap file through the IOP; the core heap (`mx_core_alloc`, `mx_dma_alloc`) and the program break |
 | `src/gs/video.c`, `rt.c`, `display.c` | video modes (`<mx/video.h>`), render targets in either GS context, also read as textures (`<mx/rt.h>`), what the two read circuits show and how they merge, per frame (`<mx/display.h>`) |
 | `src/gs/frame3.c`, `src/vu/vu0r.c`, `vu0scei.vsm` | a second frame stream of GS packets over PATH3 next to VU1's (`mx_frame3_*` in `<mx/frame.h>`, GS context 2); the SCEI renderer on the EE and VU0 fed through VF registers into it (`<mx/vu0r.h>`) |
 | `src/gs/hud.c`, `src/vu/render.vsm` | on-screen text and boxes (`<mx/hud.h>`); the VU1 render kernel of the frame pipeline (`render_vu`) |

@@ -520,6 +520,17 @@ mx_bios_igs_put_imr:
 	.end mx_bios_igs_put_imr
 	.size mx_bios_igs_put_imr, .-mx_bios_igs_put_imr
 
+	.globl mx_bios_set_syscall
+	.type mx_bios_set_syscall, @function
+	.ent mx_bios_set_syscall
+mx_bios_set_syscall:
+	li $3, 116
+	syscall
+	jr $31
+	nop
+	.end mx_bios_set_syscall
+	.size mx_bios_set_syscall, .-mx_bios_set_syscall
+
 	.globl mx_bios_print
 	.type mx_bios_print, @function
 	.ent mx_bios_print

@@ -5,6 +5,7 @@
 #include <mx/irq.h>
 #include <mx/sif.h>
 #include <mx/tex.h>
+#include <mx/timer.h>
 #include <mx/trace.h>
 #include <mx/vif.h>
 #include "frame_int.h"
@@ -229,6 +230,31 @@ int mx_gs_init_video(const struct mx_video_mode *m) {
   return mx_video_set(m);
 }
 
+/* Both framebuffers and the Z buffer cleared (black), before they are
+   shown: VRAM holds what the loader left there. The GS interrupts are not
+   on yet: FINISH is polled in CSR. */
+static void clear_buffers(void) {
+  static u32 pk[128] MX_ALIGNED(64);
+  struct mx_pkt p;
+  mx_pkt_begin(&p, pk, sizeof pk, 0);
+  mx_pkt_cnt(&p, 0, 0);
+  for (int b = 0; b < 2; b++) {
+    mx_gs_draw_env(&p, b);
+    mx_gs_clear(&p, 0, 0, 0);
+  }
+  mx_gs_finish_ad(&p);
+  mx_pkt_end(&p, 0, 0);
+  mx_pkt_finish(&p);
+  mx_pkt_writeback(&p);
+  CSR = MX_BIT(GS_CSR_FINISH);
+  mx_dma_chain(MX_CH_GIF, mx_pkt_start(&p), 0);
+  mx_dma_wait(MX_CH_GIF);
+  u32 t0 = mx_count();
+  while (!(CSR & MX_BIT(GS_CSR_FINISH)) && mx_count() - t0 < MX_EE_HZ / 10)
+    ;
+  CSR = MX_BIT(GS_CSR_FINISH);
+}
+
 void mx_gs_init_mode(u32 w, u32 h, u32 flags) {
   /* interlaced NTSC or PAL. Up to 256 lines: FRAME mode, each field shows
      every line (both fields the same image, half a line apart); more: FIELD
@@ -250,6 +276,7 @@ void mx_gs_init_mode(u32 w, u32 h, u32 flags) {
     mx_display_init(&def[i], &mx_gs.rt[i]);
   }
   mx_gs_displays(def, 2);
+  clear_buffers();
   /* shown before the interrupts are on, as before */
   apply(&def[0]);
   irq_on();
@@ -395,7 +422,7 @@ int mx_gs_download(void *dst, u32 bp, u32 bw, u32 psm, u32 x, u32 y, u32 w, u32 
   MX_R32(MX_VIF_VIF1_STAT) = (u32)MX_BIT(VIF_STAT_FDR);
   MX_R64(MX_GS_BUSDIR) = 1;
   mx_dcache_invalidate(dst, bytes);
-  MX_DMA_REG(MX_CH_VIF1, MADR) = mx_phys(dst);
+  MX_DMA_REG(MX_CH_VIF1, MADR) = mx_paddr_range(dst, bytes).v; /* one piece: core or pinned */
   MX_DMA_REG(MX_CH_VIF1, QWC) = bytes / 16;
   mx_sync();
   MX_DMA_REG(MX_CH_VIF1, CHCR) = (u32)(MX_CHCR_NORMAL | MX_CHCR_TO_MEM | MX_CHCR_STR);

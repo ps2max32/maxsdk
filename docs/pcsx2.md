@@ -66,3 +66,14 @@ renderer (`Renderer = 13` in `[EmuCore/GS]` of the flatpak's `inis/PCSX2.ini`, s
 | The same with a `next` tag | not followed: the drain stops (STR 0, CIS set, ASP 0, TADR on the tag) | not followed: the drain holds at the tag (STR 1, TADR on it) | `probe/p18_mfifo_call.c` |
 | The same with a `ref` tag (the control) | followed, the ring drains | followed, the ring drains | `probe/p18_mfifo_call.c` |
 | `mx_fio_remove` of a `host:` file | ps2link removes it | the file is removed, but the answer is an error: PCSX2's host remove then lets the ROM's FILEIO answer too ("Unknown device 'host'") | maxsdk `tests/ps2/fio.c` |
+
+## TLB (virtual memory, `docs/vm.md`; PCSX2 2.5.x source `COP0.cpp`, `vtlb.cpp`, `R5900.cpp`)
+
+| Behaviour | PS2 | PCSX2 | Source |
+|---|---|---|---|
+| A load or store with no TLB entry | TLB refill exception (code 2/3) | recompiler: logs "TLB Miss", the load reads 0, the store is lost; interpreter: the exception (`PCSX2_EE=interp` in the `ps2-pcsx2-test` runner) | `probe/p19_tlb.c` |
+| An entry with an invalid (V = 0) half | an access hangs the PS2 | the half is unmapped: a refill exception (code 2/3) at the refill vector | `probe/p19_tlb.c inv` |
+| A store to an entry without D | TLB modified (code 1) | no exception, the store goes through (D is ignored) | `probe/p19_tlb.c` |
+| `tlbp` | finds the entry | finds nothing (`TLBP` compares the low 19 bits of EntryHi as the VPN2) | `probe/p19_tlb.c` |
+| `tlbwr` | Random entry between Wired and 47 | Random is never updated (0): `tlbwr` overwrites entry 0, the scratchpad's | `probe/p19_tlb.c` |
+| Data cache | write back: DMA from dirty lines reads stale memory | not emulated, unless `EnableEECache` (`PCSX2_EE=interp-cache`, very slow) | |

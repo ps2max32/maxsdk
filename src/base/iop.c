@@ -18,7 +18,7 @@
 #define HEAP_SID 0x80000003u
 
 static struct mx_sif_client heap;
-static u32 heap_arg[4] MX_ALIGNED(64);
+static u32 heap_arg[4] MX_DMA_LINES;
 
 static int heap_call(int fno, u32 *v) {
   if (!heap.server && (mx_sif_init() < 0 || mx_sif_bind(&heap, HEAP_SID) < 0))
@@ -44,7 +44,7 @@ int mx_iop_free(u32 iop) {
 /* Copy n bytes (any alignment) to IOP memory at iop (16-byte aligned), by a
    bounce buffer; the last block is padded with zeros. */
 static int iop_copy(u32 iop, const void *src, u32 n) {
-  static u8 bounce[2048] MX_ALIGNED(64);
+  static u8 bounce[2048] MX_DMA_LINES;
   const u8 *s = src;
   while (n) {
     u32 len = n < sizeof bounce ? n : sizeof bounce;
@@ -66,7 +66,7 @@ static int iop_copy(u32 iop, const void *src, u32 n) {
 /* Write n words at iop (4-byte aligned, within 32 bytes from its 16-byte
    block) in one DMA, so the IOP never runs half of them. */
 static int iop_write_words(u32 iop, const u32 *w, u32 n) {
-  static u32 blk[8] MX_ALIGNED(64);
+  static u32 blk[8] MX_DMA_LINES;
   u32 base = iop & ~15u, first = (iop - base) / 4;
   if ((iop & 3) || first + n > 8)
     return -1;
@@ -205,7 +205,7 @@ int mx_iop_patch_fileio(void) {
       0x03e00008, /* jr ra */
       0x27bd0010, /* addiu sp, sp, 16 */
   };
-  static u32 stub[20] MX_ALIGNED(64);
+  static u32 stub[20] MX_DMA_LINES;
   struct mx_iop_module m;
   if (!mx_iop_find_module("FILEIO_service", &m) || m.version != 0x101)
     return 1;
@@ -270,7 +270,7 @@ int mx_iop_patch_lmb(void) {
       0x03e00008, /* jr ra */
       0x27bd0028, /* addiu sp, 40 */
   };
-  static u32 stub[32] MX_ALIGNED(64); /* the code, then the result at + 96 */
+  static u32 stub[32] MX_DMA_LINES; /* the code, then the result at + 96 */
   u32 ex[16];
   if (mx_iop_find_exports("modload", ex, 16) < 16)
     return -1;
@@ -322,8 +322,8 @@ static struct {
   u32 args_len; /* out: the start result */
   char path[252];
   char args[252];
-} lmb_arg MX_ALIGNED(64);
-static s32 lmb_result[4] MX_ALIGNED(64);
+} lmb_arg MX_DMA_LINES;
+static s32 lmb_result[4] MX_DMA_LINES;
 
 int mx_iop_load_module_buffer(const void *buf, u32 size, const char *args, u32 args_len,
                               int *modres) {

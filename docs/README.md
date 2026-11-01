@@ -12,6 +12,7 @@ decision in maxsdk and in the compiler.
 | [memory.md](memory.md) | Caches, uncached/UCAB/SPR, cache operation costs |
 | [interrupts.md](interrupts.md) | Interrupt latency and BIOS dispatch costs |
 | [dma.md](dma.md) | DMAC: addresses, throughput, chain restart gaps, MFIFO |
+| [vm.md](vm.md) | Virtual memory: the TLB, the kernel's exception paths, paging, DMA from VM |
 | [vif.md](vif.md) | VIF codes: costs and behaviour |
 | [gif-gs.md](gif-gs.md) | GIF paths, GS SIGNAL/FINISH/LABEL, vsync |
 | [vu0.md](vu0.md), [vu1.md](vu1.md) | VU macro/micro mode, transfers, control |

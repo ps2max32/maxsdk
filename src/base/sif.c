@@ -5,11 +5,13 @@
 #include <mx/bios.h>
 #include <mx/bits.h>
 #include <mx/cpu.h>
+#include <mx/debug.h>
 #include <mx/hw/formats.h>
 #include <mx/hw/regs.h>
 #include <mx/iop.h>
 #include <mx/sif.h>
 #include <mx/string.h>
+#include <mx/vm.h>
 
 /* System command IDs */
 #define CMD_CHANGE_SADDR 0x80000000u
@@ -45,7 +47,7 @@
 #define FILEIO_DREAD 11
 
 #define RPC_PKT_SIZE 64
-#define NPKT 8
+#define NPKT 16
 
 struct cmd_hdr {
   u32 size; /* psize:8, dsize:24 */
@@ -61,10 +63,10 @@ struct sif_dma {
 
 /* Received packets land here by DMA from the IOP. Only touched through the
    uncached alias. */
-static u8 rx_buf[128] MX_ALIGNED(64);
+static u8 rx_buf[128] MX_DMA_LINES;
 /* Outgoing RPC packets, and replies to IOP requests (a small ring). */
-static u8 pkt_pool[NPKT][RPC_PKT_SIZE] MX_ALIGNED(64);
-static u8 reply_ring[NPKT][RPC_PKT_SIZE] MX_ALIGNED(64);
+static u8 pkt_pool[NPKT][RPC_PKT_SIZE] MX_DMA_LINES;
+static u8 reply_ring[NPKT][RPC_PKT_SIZE] MX_DMA_LINES;
 static volatile u32 pkt_busy;
 static u32 reply_idx;
 static u32 rpc_pid = 1;
@@ -85,7 +87,7 @@ static u32 send_cmd(int intr, u32 cid, void *pkt, u32 psize, const void *src, u3
   h[1] = dsize ? dest : 0;
   h[2] = cid;
   if (dsize) {
-    t[n].src = (u32)(uintptr_t)src;
+    t[n].src = mx_paddr_range(src, dsize).v;
     t[n].dest = dest;
     t[n].size = (s32)dsize;
     t[n].attr = 0;
@@ -97,12 +99,58 @@ static u32 send_cmd(int intr, u32 cid, void *pkt, u32 psize, const void *src, u3
   t[n].attr = DMA_ERT | DMA_INT_O;
   n++;
   mx_sync();
-  if (intr)
-    return mx_bios_isif_set_dma(t, n);
+  /* 0: the kernel's SIF DMA queue is full. A thread waits for room; an
+     interrupt handler tries a while and then gives up (returns 0): waiting
+     there with interrupts off hung the PS2, and the caller keeps the
+     command for later (an RDATA answer, defer_rdata). */
   u32 id;
+  if (intr) {
+    for (int i = 0; i < 2000; i++)
+      if ((id = mx_bios_isif_set_dma(t, n)))
+        return id;
+    return 0;
+  }
   while (!(id = mx_bios_sif_set_dma(t, n)))
     ;
   return id;
+}
+
+/* RDATA requests (the IOP takes EE memory: the data of a write) are
+   answered by the thread that waits for the call (wait_answer), in order,
+   not in the interrupt handler: the kernel's SIF DMA queue is used from
+   threads only (answers sent from the handler jammed the queue on the PS2:
+   docs/vm.md). Dropping one leaves the IOP waiting for good. */
+static struct {
+  u32 pkt_addr, client, src, dest, size;
+} deferred[NPKT];
+static volatile u32 ndeferred;
+
+static void send_rdata(int intr, const u32 *w) {
+  u8 *r = reply_ring[reply_idx++ % NPKT];
+  volatile u32 *rp = uw(r);
+  rp[5] = w[0];
+  rp[7] = w[1];
+  rp[8] = CMD_RPC_RDATA;
+  if (!send_cmd(intr, CMD_RPC_END, r, RPC_PKT_SIZE, (const void *)(uintptr_t)w[2], w[3], w[4]) &&
+      ndeferred < NPKT) {
+    for (int i = 0; i < 5; i++)
+      (&deferred[ndeferred].pkt_addr)[i] = w[i];
+    ndeferred++;
+  }
+}
+
+static void send_deferred(void) {
+  while (ndeferred) {
+    u32 w[5];
+    int was = mx_di();
+    for (int i = 0; i < 5; i++)
+      w[i] = (&deferred[0].pkt_addr)[i];
+    for (u32 k = 1; k < ndeferred; k++)
+      deferred[k - 1] = deferred[k];
+    ndeferred--;
+    mx_irq_restore(was);
+    send_rdata(0, w);
+  }
 }
 
 static void *rpc_alloc(void) {
@@ -145,7 +193,7 @@ static struct server {
   mx_sif_server_fn fn;
   void *arg;
 } servers[NSERVER];
-static u8 server_buf[NSERVER][MX_SIF_SERVER_BUF] MX_ALIGNED(64);
+static u8 server_buf[NSERVER][MX_SIF_SERVER_BUF] MX_DMA_LINES;
 
 static void serve(const u32 *pkt) {
   u8 *r = reply_ring[reply_idx++ % NPKT];
@@ -184,6 +232,10 @@ static int sif0_handler(int ch, void *arg, void *addr) {
   for (u32 i = 0; i < words; i++)
     pkt[i] = rx[i];
   rx[0] = 0;
+  /* the clear (an uncached store, maybe still in the write buffer) must be
+     done before SIF0 takes the next packet: landing after it, it would
+     wipe that packet's size, and the packet (say a READ's answer) is lost */
+  mx_sync();
   mx_bios_isif_set_dchain();
 
   switch (pkt[2]) {
@@ -201,21 +253,25 @@ static int sif0_handler(int ch, void *arg, void *addr) {
       c->buf = pkt[10];
       c->cbuf = pkt[11];
     }
-    /* the reply's packet address is the IOP's; free ours from the client */
+    /* the reply's packet address is the IOP's (a call's answer does not
+       name ours): free ours from the client. A call never gives up waiting
+       (wait_answer), so this is the answer to the client's current one */
     rpc_free(c->pkt);
     c->done = 1;
     break;
   }
   case CMD_RPC_RDATA: {
     /* The IOP wants EE memory (e.g. the data of a write): send it back with
-       an RPC_END. */
-    u8 *r = reply_ring[reply_idx++ % NPKT];
-    volatile u32 *rp = uw(r);
-    rp[5] = pkt[5];
-    rp[7] = pkt[7];
-    rp[8] = CMD_RPC_RDATA;
-    send_cmd(1, CMD_RPC_END, r, RPC_PKT_SIZE, (const void *)(uintptr_t)pkt[8], pkt[9],
-             pkt[10]);
+       an RPC_END (pkt_addr, client, source, destination, size). */
+    u32 w[5] = {pkt[5], pkt[7], pkt[8], pkt[9], pkt[10]};
+    /* answered by the thread waiting for the call that the IOP takes the
+       data for (wait_answer): the kernel's SIF DMA queue only from threads */
+    if (ndeferred < NPKT) {
+      for (int i = 0; i < 5; i++)
+        (&deferred[ndeferred].pkt_addr)[i] = w[i];
+      ndeferred++;
+    } else
+      send_rdata(1, w);
     break;
   }
   case CMD_RPC_BIND:
@@ -256,7 +312,7 @@ int mx_sif_init(void) {
   sif0_handler_id = mx_bios_add_dmac_handler(MX_DMAC_SIF0, sif0_handler, 0, 0);
   mx_bios_enable_dmac(MX_DMAC_SIF0);
 
-  static u8 init_pkt[32] MX_ALIGNED(64);
+  static u8 init_pkt[32] MX_DMA_LINES;
   iop_buf = (u32)mx_bios_sif_get_reg(SYSREG_SUBADDR);
   if (iop_buf) {
     /* The IOP side is already set up (by ps2link): tell it our receive
@@ -276,7 +332,7 @@ int mx_sif_init(void) {
   }
 
   if (!mx_bios_sif_get_reg(SYSREG_RPCINIT)) {
-    static u8 rpc_init_pkt[16] MX_ALIGNED(64);
+    static u8 rpc_init_pkt[16] MX_DMA_LINES;
     uw(rpc_init_pkt)[3] = 1;
     send_cmd(0, CMD_INIT_CMD, rpc_init_pkt, 16, 0, 0, 0);
     u32 t0 = mx_count();
@@ -289,13 +345,33 @@ int mx_sif_init(void) {
   return 0;
 }
 
-static int wait_done(struct mx_sif_client *c) {
+/* Wait for the answer to c's command; after about 2 s give up (-1) if
+   may_give_up (a bind: no server there), otherwise keep waiting: the IOP may
+   still read the call's packet and write its answer, so neither may be
+   reused before it answers (slow devices: a host: file over the network,
+   USB). */
+volatile u32 mx__sif_irq_lost;
+static int wait_answer(struct mx_sif_client *c, int may_give_up) {
+  u32 limit = may_give_up > 1 ? (u32)may_give_up : 600000000u;
   u32 t0 = mx_count();
-  while (!c->done)
-    if (mx_count() - t0 > 600000000u)
+  /* the answer comes by interrupt: waiting with them off hangs (it once
+     did, in the VM's gather on the PS2). Slot 29 of the debug screen
+     (<mx/debug.h>) shows the first time: 0x01000000 | Status. */
+  u32 st = mx_status();
+  if ((!(st & 1) || !(st >> 16 & 1)) && !mx__sif_irq_lost) {
+    mx__sif_irq_lost = 1u << 24 | (st & 0xFFFFFFu);
+    mx_dbg_word(29, mx__sif_irq_lost);
+  }
+  while (!c->done) {
+    if (ndeferred)
+      send_deferred();
+    if (may_give_up && mx_count() - t0 > limit)
       return -1;
+  }
   return 0;
 }
+
+static int wait_done(struct mx_sif_client *c) { return wait_answer(c, 0); }
 
 int mx_sif_bind(struct mx_sif_client *c, u32 sid) { return mx_sif_bind_tries(c, sid, 1000); }
 
@@ -309,7 +385,7 @@ int mx_sif_bind_tries(struct mx_sif_client *c, u32 sid, int n) {
     w[7] = (u32)(uintptr_t)c;
     w[8] = sid;
     send_cmd(0, CMD_RPC_BIND, p, RPC_PKT_SIZE, 0, 0, 0);
-    if (wait_done(c) < 0)
+    if (wait_answer(c, 1) < 0)
       return -1;
     if (c->server)
       return 0;
@@ -317,8 +393,20 @@ int mx_sif_bind_tries(struct mx_sif_client *c, u32 sid, int n) {
   return -1;
 }
 
+/* An RPC call; wait (cycles): 0 forever, otherwise give up after about
+   that long and return -2. A call given up leaves its client to its late
+   answer, if one comes (it frees the call's packet then): the caller must
+   use another client struct for its next call (fio_call). */
+static int sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,
+                    u32 rsize, u32 wait);
+
 int mx_sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,
                 u32 rsize) {
+  return sif_call(c, fno, send, ssize, recv, rsize, 0);
+}
+
+static int sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,
+                    u32 rsize, u32 wait) {
   u8 *p = rpc_alloc();
   volatile u32 *w = uw(p);
   c->pkt = p;
@@ -326,14 +414,16 @@ int mx_sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, v
   w[7] = (u32)(uintptr_t)c;
   w[8] = (u32)fno;
   w[9] = ssize;
-  w[10] = (u32)(uintptr_t)recv;
+  w[10] = rsize ? mx_paddr_range(recv, rsize).v : 0;
   w[11] = rsize;
   w[12] = 1; /* rmode: send RPC_END when done */
   w[13] = c->server;
   if (!mx_is_spr(send) && ((uintptr_t)send & 0xF0000000u) != 0x20000000u)
     mx_dcache_writeback(send, ssize);
   send_cmd(0, CMD_RPC_CALL, p, RPC_PKT_SIZE, send, c->buf, ssize);
-  return wait_done(c);
+  if (!wait)
+    return wait_done(c);
+  return wait_answer(c, (int)wait) < 0 ? -2 : 0;
 }
 
 /* ---- IOP memory ----------------------------------------------------------- */
@@ -342,7 +432,7 @@ int mx_sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, v
    by SIF DMA to dest and answers with an RPC_END (the client in word 7). The
    reads are of 16-byte aligned blocks into rd_buf. */
 static struct mx_sif_client rdc;
-static u8 rd_buf[512] MX_ALIGNED(64);
+static u8 rd_buf[512] MX_DMA_LINES;
 
 int mx_iop_read(u32 iop, void *dst, u32 size) {
   if (!mx_sif_ready() && mx_sif_init() < 0)
@@ -380,7 +470,7 @@ int mx_iop_write(u32 iop, const void *src, u32 size) {
     return -1;
   if (!mx_is_spr(src) && ((uintptr_t)src & 0xF0000000u) != 0x20000000u)
     mx_dcache_writeback(src, size);
-  struct sif_dma t = {(u32)(uintptr_t)src, iop, (s32)size, 0};
+  struct sif_dma t = {mx_paddr_range(src, size).v, iop, (s32)size, 0};
   mx_sync();
   u32 id;
   while (!(id = mx_bios_sif_set_dma(&t, 1)))
@@ -391,7 +481,7 @@ int mx_iop_write(u32 iop, const void *src, u32 size) {
 }
 
 int mx_iop_write_word(u32 iop, u32 value) {
-  static u32 blk[4] MX_ALIGNED(64);
+  static u32 blk[4] MX_DMA_LINES;
   if (iop & 3)
     return -1;
   u32 base = iop & ~15u;
@@ -419,8 +509,8 @@ struct lf_load_arg {
 };
 
 static struct mx_sif_client lf;
-static struct lf_load_arg lf_arg MX_ALIGNED(64);
-static s32 lf_result[4] MX_ALIGNED(64);
+static struct lf_load_arg lf_arg MX_DMA_LINES;
+static s32 lf_result[4] MX_DMA_LINES;
 
 int mx_iop_load_module(const char *path) {
   if ((!mx_sif_ready() && mx_sif_init() < 0) || (!lf.server && mx_sif_bind(&lf, LOADFILE_SID) < 0))
@@ -447,10 +537,39 @@ struct fio_write_arg {
   u8 aligned[16];
 };
 
-static struct mx_sif_client fio;
-static struct fio_write_arg wr_arg MX_ALIGNED(64);
-static u32 wr_result[4] MX_ALIGNED(64);
-static char wr_data[1024] MX_ALIGNED(64);
+/* The file server's clients: one at a time, the next one when a call gets
+   no answer (fio_call). */
+static struct mx_sif_client fio_pool[4];
+static struct mx_sif_client *fio_c = &fio_pool[0];
+#define fio (*fio_c)
+
+/* A call to the file server that gives up after 3 s and returns -2. The
+   IOP's file server drops what it sends when its SIF DMA queue is full (a
+   READ's data, or its answer, under load: the PS2 under ps2link): the call
+   then never ends. Its client is left to a late answer and the next call
+   uses another one, bound to the same server. Callers that can repeat the
+   call (the VM's swap file: a seek and a transfer) do. (Seen before the
+   answers' buffers got cache lines of their own, MX_DMA_LINES, docs/vm.md;
+   not seen since: kept as a fallback.) */
+static int fio_call(int fno, const void *send, u32 ssize, void *recv, u32 rsize) {
+  /* 12 s: the cycle counter wraps at 14.5 */
+  int r = sif_call(fio_c, fno, send, ssize, recv, rsize, 12u * 294912000u);
+  if (r == -2) {
+    /* the debug screen (<mx/debug.h>), slot 27: timeouts so far << 24 |
+       the function << 16 | RDATA answers waiting << 8 | packets in use */
+    static u32 timeouts;
+    mx_dbg_word(27, ++timeouts << 24 | (u32)(fno & 0xFF) << 16 | (ndeferred & 0xFF) << 8 |
+                        (u32)__builtin_popcount(pkt_busy));
+    struct mx_sif_client *n = &fio_pool[(u32)(fio_c - fio_pool + 1) % 4];
+    n->server = fio_c->server, n->buf = fio_c->buf, n->cbuf = fio_c->cbuf;
+    n->done = 0, n->pkt = 0;
+    fio_c = n;
+  }
+  return r;
+}
+static struct fio_write_arg wr_arg MX_DMA_LINES;
+static u32 wr_result[4] MX_DMA_LINES;
+static char wr_data[1024] MX_DMA_LINES;
 
 static int fio_bind(void) {
   if (!fio.server && (mx_sif_init() < 0 || mx_sif_bind(&fio, FILEIO_SID) < 0))
@@ -458,26 +577,102 @@ static int fio_bind(void) {
   return 0;
 }
 
+/* fio calls from more than one thread (the VM pager uses the file server
+   from the faulting thread): one at a time. Not from interrupt handlers or
+   with interrupts off (debug output there), which cannot wait. */
+static int fio_sema = -1;
+
+static void fio_lock(void) {
+  if (!mx_vm_active() || !(mx_status() & (1u << 16)))
+    return;
+  if (fio_sema < 0) {
+    struct {
+      s32 count, max_count, init_count, wait_threads;
+      u32 attr, option;
+    } p = {0, 1, 1, 0, 0, 0};
+    fio_sema = mx_bios_create_sema(&p);
+  }
+  mx_bios_wait_sema(fio_sema);
+}
+
+static void fio_unlock(void) {
+  if (fio_sema >= 0 && mx_vm_active() && (mx_status() & (1u << 16))) {
+    mx_bios_signal_sema(fio_sema);
+  }
+}
+
+/* The most one READ asks for: the file server's transfer buffer. */
+#define FIO_READ_CHUNK 0x4000u
+
+/* The most one WRITE sends from memory. */
+#define FIO_CHUNK 0x10000u
+
+/* One WRITE of n bytes that the IOP reads from pa (the CPU's view of them
+   at p): the bytes before the first quadword boundary go in the call (mis,
+   as ps2sdk's fioWrite), the rest the IOP takes from memory. Returns the
+   bytes written. */
+static int fio_write1(int fd, const u8 *p, mx_paddr pa, u32 n) {
+  struct fio_write_arg *a = MX_UNCACHED(&wr_arg);
+  u32 mis = (16 - (pa.v & 15)) & 15;
+  if (mis > n)
+    mis = n;
+  for (u32 i = 0; i < mis; i++)
+    a->aligned[i] = p[i];
+  if (!mx_is_spr(p) && ((uintptr_t)p & 0xF0000000u) != 0x20000000u)
+    mx_dcache_writeback(p, n);
+  a->fd = fd;
+  a->ptr = pa.v;
+  a->size = n;
+  a->mis = mis;
+  volatile s32 *r = (volatile s32 *)MX_UNCACHED(wr_result);
+  if (fio_call(FILEIO_WRITE, a, sizeof *a, (void *)r, 4) < 0)
+    return -1;
+  return r[0];
+}
+
+/* 0 if a WRITE wrote all n bytes, else -1. The tty (fds 0-2 under ps2link)
+   answers with other counts: only a failed call counts there. */
+static int written(int fd, int got, u32 n) {
+  if (got < 0)
+    return -1;
+  return fd <= 2 || got == (int)n ? 0 : -1;
+}
+
+/* Small writes (the tty) are copied, so the data may be anywhere and change
+   at once; large ones go from where they are (core memory or VM; the
+   scratchpad and uncached data are copied). VM is pinned for the call
+   first: a page fault under the lock would wait for the pager, which needs
+   the file server too. */
 int mx_fio_write(int fd, const void *data, u32 n) {
   if (fio_bind() < 0)
     return -1;
-  const char *s = data;
-  while (n) {
-    u32 len = n > sizeof wr_data ? sizeof wr_data : n;
-    char *d = MX_UNCACHED(wr_data);
-    for (u32 i = 0; i < len; i++)
-      d[i] = s[i];
-    struct fio_write_arg *a = MX_UNCACHED(&wr_arg);
-    a->fd = fd;
-    a->ptr = (u32)(uintptr_t)d;
-    a->size = len;
-    a->mis = 0;
-    if (mx_sif_call(&fio, FILEIO_WRITE, a, sizeof *a, MX_UNCACHED(wr_result), 4) < 0)
-      return -1;
-    s += len;
-    n -= len;
+  const u8 *s = data;
+  u32 n0 = n;
+  int vm = mx_is_vm(s), r = 0;
+  if (vm && mx_vm_pin(s, n, 0) < 0)
+    return -1;
+  fio_lock();
+  if (n >= 256 && !mx_is_spr(s) && ((uintptr_t)s & 0xF0000000u) != 0x20000000u) {
+    for (u32 done = 0; done < n && r == 0;) {
+      struct mx_vm_piece pc = mx_vm_first_piece(s + done, n - done > FIO_CHUNK ? FIO_CHUNK : n - done);
+      r = written(fd, fio_write1(fd, s + done, pc.addr, pc.bytes), pc.bytes);
+      done += pc.bytes;
+    }
+  } else {
+    while (n && r == 0) {
+      u32 len = n > sizeof wr_data ? sizeof wr_data : n;
+      char *d = MX_UNCACHED(wr_data);
+      for (u32 i = 0; i < len; i++)
+        d[i] = (char)s[i];
+      r = written(fd, fio_write1(fd, (const u8 *)d, mx_paddr_of(wr_data), len), len);
+      s += len;
+      n -= len;
+    }
   }
-  return 0;
+  fio_unlock();
+  if (vm)
+    mx_vm_unpin(data, n0);
+  return r;
 }
 
 int mx_tty_write(const char *s, u32 n) { return mx_fio_write(1, s, n); }
@@ -486,9 +681,9 @@ int mx_tty_write(const char *s, u32 n) { return mx_fio_write(1, s, n); }
 static struct {
   s32 flags;
   char path[256];
-} op_arg MX_ALIGNED(64);
+} op_arg MX_DMA_LINES;
 
-int mx_fio_open(const char *path, int flags) {
+static int fio_open_unlocked(const char *path, int flags) {
   if (fio_bind() < 0)
     return -1;
   __typeof__(op_arg) *a = MX_UNCACHED(&op_arg);
@@ -498,9 +693,16 @@ int mx_fio_open(const char *path, int flags) {
     a->path[i] = path[i];
   a->path[i] = 0;
   volatile s32 *r = (volatile s32 *)MX_UNCACHED(wr_result);
-  if (mx_sif_call(&fio, FILEIO_OPEN, a, sizeof *a, (void *)r, 4) < 0)
+  if (fio_call(FILEIO_OPEN, a, sizeof *a, (void *)r, 4) < 0)
     return -1;
   return r[0];
+}
+
+int mx_fio_open(const char *path, int flags) {
+  fio_lock();
+  int r = fio_open_unlocked(path, flags);
+  fio_unlock();
+  return r;
 }
 
 /* READ: the IOP sends the 16-byte aligned middle of the data by SIF DMA to
@@ -518,11 +720,12 @@ static struct {
   u32 ptr;
   s32 size;
   u32 read_data;
-} rd_arg MX_ALIGNED(64);
-static struct fio_read_data rd_data MX_ALIGNED(64);
+} rd_arg MX_DMA_LINES;
+static struct fio_read_data rd_data MX_DMA_LINES;
 
-/* One READ of at most n bytes; returns the bytes read. */
-static int fio_read1(int fd, u8 *d, u32 n) {
+/* One READ of at most n bytes into pa (the CPU's view of them at d);
+   returns the bytes read. */
+static int fio_read1(int fd, u8 *d, mx_paddr pa, u32 n) {
   /* the IOP's DMA must not meet dirty lines, nor the EE stale ones after it */
   mx_dcache_writeback(d, n);
   mx_dcache_invalidate(d, n);
@@ -530,21 +733,22 @@ static int fio_read1(int fd, u8 *d, u32 n) {
   rd->size1 = rd->size2 = 0;
   __typeof__(rd_arg) *a = MX_UNCACHED(&rd_arg);
   a->fd = fd;
-  a->ptr = (u32)(uintptr_t)d;
+  a->ptr = pa.v;
   a->size = (s32)n;
-  a->read_data = (u32)(uintptr_t)&rd_data;
+  a->read_data = mx_paddr_of(&rd_data).v;
   volatile s32 *r = (volatile s32 *)MX_UNCACHED(wr_result);
-  if (mx_sif_call(&fio, FILEIO_READ, a, sizeof *a, (void *)r, 4) < 0)
+  if (fio_call(FILEIO_READ, a, sizeof *a, (void *)r, 4) < 0)
     return -1;
   int got = r[0];
   mx_dcache_invalidate(d, n);
   if (got > 0) {
-    u8 *end = d + got, *d1 = (u8 *)(uintptr_t)rd->dest1, *d2 = (u8 *)(uintptr_t)rd->dest2;
-    for (u32 i = 0; i < rd->size1 && i < 16 && d1 + i < end; i++)
-      d1[i] = rd->buf1[i];
-    if (d2 >= d && d2 + rd->size2 <= end)
+    /* the parts' addresses are physical, like ptr: as offsets into d */
+    u32 o1 = rd->dest1 - pa.v, o2 = rd->dest2 - pa.v;
+    for (u32 i = 0; i < rd->size1 && i < 16 && o1 + i < (u32)got; i++)
+      d[o1 + i] = rd->buf1[i];
+    if (o2 + rd->size2 <= (u32)got)
       for (u32 i = 0; i < rd->size2 && i < 16; i++)
-        d2[i] = rd->buf2[i];
+        d[o2 + i] = rd->buf2[i];
   }
   return got;
 }
@@ -553,34 +757,48 @@ int mx_fio_read(int fd, void *data, u32 n) {
   if (fio_bind() < 0)
     return -1;
   u8 *d = data;
+  int vm = mx_is_vm(d);
+  if (vm && mx_vm_pin(d, n, MX_VM_PIN_WRITE) < 0)
+    return -1;
+  fio_lock();
   u32 total = 0;
-  while (n) {
-    u32 len = n > 0x10000 ? 0x10000 : n;
-    int got = fio_read1(fd, d, len);
-    if (got < 0)
-      return total ? (int)total : got;
+  int r = 0;
+  while (total < n) {
+    /* at most the file server's transfer buffer a READ (16 KiB): reads it
+       had to send in two pieces stalled after the first under ps2link */
+    u32 len = n - total > FIO_READ_CHUNK ? FIO_READ_CHUNK : n - total;
+    struct mx_vm_piece pc = mx_vm_first_piece(d + total, len);
+    len = pc.bytes;
+    int got = fio_read1(fd, d + total, pc.addr, len);
+    if (got < 0) {
+      r = total ? (int)total : got;
+      goto out;
+    }
     total += (u32)got;
     if ((u32)got < len)
       break; /* the end of the file */
-    d += len;
-    n -= len;
   }
-  return (int)total;
+  r = (int)total;
+out:
+  fio_unlock();
+  if (vm)
+    mx_vm_unpin(d, n);
+  return r;
 }
 
 static int fio_lseek1(int fd, s32 offset, int whence) {
-  static s32 ls_arg[4] MX_ALIGNED(64);
+  static s32 ls_arg[4] MX_DMA_LINES;
   volatile s32 *a = (volatile s32 *)MX_UNCACHED(ls_arg);
   a[0] = fd;
   a[1] = offset;
   a[2] = whence;
   volatile s32 *r = (volatile s32 *)MX_UNCACHED(wr_result);
-  if (mx_sif_call(&fio, FILEIO_LSEEK, (void *)a, 16, (void *)r, 4) < 0)
+  if (fio_call(FILEIO_LSEEK, (void *)a, 16, (void *)r, 4) < 0)
     return -1;
   return r[0];
 }
 
-int mx_fio_lseek(int fd, s32 offset, int whence) {
+static int fio_lseek_unlocked(int fd, s32 offset, int whence) {
   if (fio_bind() < 0)
     return -1;
   /* ps2client (ps2link's host) takes a negative offset from the current
@@ -598,23 +816,37 @@ int mx_fio_lseek(int fd, s32 offset, int whence) {
   return fio_lseek1(fd, offset, whence);
 }
 
-int mx_fio_close(int fd) {
+int mx_fio_lseek(int fd, s32 offset, int whence) {
+  fio_lock();
+  int r = fio_lseek_unlocked(fd, offset, whence);
+  fio_unlock();
+  return r;
+}
+
+static int fio_close_unlocked(int fd) {
   if (fio_bind() < 0)
     return -1;
-  static s32 cl_arg[4] MX_ALIGNED(64);
+  static s32 cl_arg[4] MX_DMA_LINES;
   volatile s32 *a = (volatile s32 *)MX_UNCACHED(cl_arg);
   a[0] = fd;
   volatile s32 *r = (volatile s32 *)MX_UNCACHED(wr_result);
-  if (mx_sif_call(&fio, FILEIO_CLOSE, (void *)a, 16, (void *)r, 4) < 0)
+  if (fio_call(FILEIO_CLOSE, (void *)a, 16, (void *)r, 4) < 0)
     return -1;
   return r[0];
+}
+
+int mx_fio_close(int fd) {
+  fio_lock();
+  int r = fio_close_unlocked(fd);
+  fio_unlock();
+  return r;
 }
 
 /* DOPEN: the path (at a 16-byte boundary); DREAD: the IOP sends the entry
    (io_dirent_t: its stat, 40 bytes, then the name) by SIF DMA to buf. FILEIO
    1.1's DREAD starts that DMA with interrupts on: patched before the first
    DOPEN (mx_iop_patch_fileio). */
-int mx_fio_dopen(const char *path) {
+static int fio_dopen_unlocked(const char *path) {
   if (fio_bind() < 0)
     return -1;
   static int patched;
@@ -622,19 +854,26 @@ int mx_fio_dopen(const char *path) {
     patched = 1;
     mx_iop_patch_fileio();
   }
-  static char dp_arg[256] MX_ALIGNED(64);
+  static char dp_arg[256] MX_DMA_LINES;
   char *a = MX_UNCACHED(dp_arg);
   u32 i = 0;
   for (; path[i] && i < sizeof dp_arg - 1; i++)
     a[i] = path[i];
   a[i] = 0;
   volatile s32 *r = (volatile s32 *)MX_UNCACHED(wr_result);
-  if (mx_sif_call(&fio, FILEIO_DOPEN, a, sizeof dp_arg, (void *)r, 4) < 0)
+  if (fio_call(FILEIO_DOPEN, a, sizeof dp_arg, (void *)r, 4) < 0)
     return -1;
   return r[0];
 }
 
-int mx_fio_dread(int fd, char *name, u32 room, u32 *size) {
+int mx_fio_dopen(const char *path) {
+  fio_lock();
+  int r = fio_dopen_unlocked(path);
+  fio_unlock();
+  return r;
+}
+
+static int fio_dread_unlocked(int fd, char *name, u32 room, u32 *size) {
   if (fio_bind() < 0)
     return -1;
   static struct {
@@ -643,15 +882,15 @@ int mx_fio_dread(int fd, char *name, u32 room, u32 *size) {
     u32 hisize;
     char name[256];
     u32 unknown;
-  } de MX_ALIGNED(64);
-  static s32 dr_arg[4] MX_ALIGNED(64);
+  } de MX_DMA_LINES;
+  static s32 dr_arg[4] MX_DMA_LINES;
   mx_dcache_writeback(&de, sizeof de); /* no dirty lines for the DMA to meet */
   mx_dcache_invalidate(&de, sizeof de);
   volatile s32 *a = (volatile s32 *)MX_UNCACHED(dr_arg);
   a[0] = fd;
   a[1] = (s32)(uintptr_t)&de;
   volatile s32 *r = (volatile s32 *)MX_UNCACHED(wr_result);
-  if (mx_sif_call(&fio, FILEIO_DREAD, (void *)a, 16, (void *)r, 4) < 0)
+  if (fio_call(FILEIO_DREAD, (void *)a, 16, (void *)r, 4) < 0)
     return -1;
   if (r[0] <= 0)
     return r[0];
@@ -666,21 +905,35 @@ int mx_fio_dread(int fd, char *name, u32 room, u32 *size) {
   return r[0];
 }
 
-int mx_fio_dclose(int fd) {
+int mx_fio_dread(int fd, char *name, u32 room, u32 *size) {
+  fio_lock();
+  int r = fio_dread_unlocked(fd, name, room, size);
+  fio_unlock();
+  return r;
+}
+
+static int fio_dclose_unlocked(int fd) {
   if (fio_bind() < 0)
     return -1;
-  static s32 dc_arg[4] MX_ALIGNED(64);
+  static s32 dc_arg[4] MX_DMA_LINES;
   volatile s32 *a = (volatile s32 *)MX_UNCACHED(dc_arg);
   a[0] = fd;
   volatile s32 *r = (volatile s32 *)MX_UNCACHED(wr_result);
-  if (mx_sif_call(&fio, FILEIO_DCLOSE, (void *)a, 16, (void *)r, 4) < 0)
+  if (fio_call(FILEIO_DCLOSE, (void *)a, 16, (void *)r, 4) < 0)
     return -1;
   return r[0];
 }
 
+int mx_fio_dclose(int fd) {
+  fio_lock();
+  int r = fio_dclose_unlocked(fd);
+  fio_unlock();
+  return r;
+}
+
 /* REMOVE, MKDIR and RMDIR: the path (the ROM's MKDIR takes no mode). FILEIO
    1.1's REMOVE goes on into MKDIR: patched first (mx_iop_patch_fileio). */
-static int fio_path_call(int fn, const char *path) {
+static int fio_path_call_unlocked(int fn, const char *path) {
   if (fio_bind() < 0)
     return -1;
   static int patched;
@@ -688,16 +941,23 @@ static int fio_path_call(int fn, const char *path) {
     patched = 1;
     mx_iop_patch_fileio();
   }
-  static char pa_arg[256] MX_ALIGNED(64);
+  static char pa_arg[256] MX_DMA_LINES;
   char *a = MX_UNCACHED(pa_arg);
   u32 i = 0;
   for (; path[i] && i < sizeof pa_arg - 1; i++)
     a[i] = path[i];
   a[i] = 0;
   volatile s32 *r = (volatile s32 *)MX_UNCACHED(wr_result);
-  if (mx_sif_call(&fio, (u32)fn, a, sizeof pa_arg, (void *)r, 4) < 0)
+  if (fio_call((u32)fn, a, sizeof pa_arg, (void *)r, 4) < 0)
     return -1;
   return r[0];
+}
+
+static int fio_path_call(int fn, const char *path) {
+  fio_lock();
+  int r = fio_path_call_unlocked(fn, path);
+  fio_unlock();
+  return r;
 }
 
 int mx_fio_remove(const char *path) { return fio_path_call(FILEIO_REMOVE, path); }

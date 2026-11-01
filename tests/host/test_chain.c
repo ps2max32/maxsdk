@@ -35,7 +35,7 @@ static void chain_tags(void) {
   mx_e_call_chain(call, &ch);
   CHECK_EQ(tag_id(call), MX_TAG_CALL);
   CHECK_EQ(tag_qwc(call), 0);
-  CHECK_EQ(call[0] >> 32, mx_phys(mem));
+  CHECK_EQ(call[0] >> 32, mx_paddr_of(mem).v);
   CHECK_EQ(call[1], 0);
 
   /* an empty chain: only its ret */

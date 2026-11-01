@@ -33,10 +33,10 @@
 extern const u8 libsd_irx[], libsd_irx_end[], audsrv_irx[], audsrv_irx_end[];
 
 static struct mx_sif_client srv;
-static u32 sbuf[(QUEUE_MAX + 16) / 4] MX_ALIGNED(64);
-static u32 arg[4] MX_ALIGNED(64);
-static u32 res[4] MX_ALIGNED(64);
-static u8 bounce[CHUNK] MX_ALIGNED(64);
+static u32 sbuf[(QUEUE_MAX + 16) / 4] MX_DMA_LINES;
+static u32 arg[4] MX_DMA_LINES;
+static u32 res[4] MX_DMA_LINES;
+static u8 bounce[CHUNK] MX_DMA_LINES;
 static volatile u32 callbacks;
 static int ready;
 

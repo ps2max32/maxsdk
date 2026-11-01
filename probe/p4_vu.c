@@ -130,7 +130,7 @@ static void unpack_formats(void) {
     u32 v[REPS];
     for (int r = 0; r < REPS; r++) {
       u32 t0 = mx_count();
-      mx_dma_normal(MX_CH_VIF1, pk, (u32)qwc);
+      mx_dma_send(MX_CH_VIF1, pk, (u32)qwc);
       mx_dma_wait(MX_CH_VIF1);
       while (MX_R32(MX_VIF_VIF1_STAT) & 0x1F000003u)
         ;

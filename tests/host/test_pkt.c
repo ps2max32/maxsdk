@@ -4,9 +4,22 @@
 #include "test.h"
 #include <mx/dma.h>
 #include <mx/pkt.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 void mx_dcache_writeback(const void *p, u32 size) { (void)p, (void)size; }
+/* No VM on the host: a VM address here is a test's mistake. */
+mx_paddr mx__vm_paddr(const void *p, u32 bytes) {
+  (void)bytes;
+  fprintf(stderr, "VM address %p in a host test\n", p);
+  abort();
+}
+void mx__paddr_fault(const void *p, u32 bytes) {
+  (void)bytes;
+  fprintf(stderr, "VM address %p in a host test\n", p);
+  abort();
+}
 
 static u32 buf[256] __attribute__((aligned(16)));
 

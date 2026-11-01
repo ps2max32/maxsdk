@@ -59,11 +59,11 @@ static void spr_dest_chain(void) {
   volatile u64 *s = (volatile u64 *)(SPR + 0x2000);
   memset(buf2, 0, sizeof buf2);
   mx_dcache_writeback(buf2, sizeof buf2);
-  s[0] = mx_dmatag(MX_TAG_CNT, 2, buf2, 0);
+  s[0] = mx_dmatag(MX_TAG_CNT, 2, mx_paddr_of(buf2), 0);
   s[1] = 0;
   for (int i = 0; i < 4; i++)
     s[2 + i] = 0xC0DE000000000000ull + (u64)i;
-  s[6] = mx_dmatag(MX_TAG_END, 1, &buf2[64], 0);
+  s[6] = mx_dmatag(MX_TAG_END, 1, mx_paddr_of(&buf2[64]), 0);
   s[7] = 0;
   s[8] = 0x1111222233334444ull;
   s[9] = 0x5555666677778888ull;
@@ -77,7 +77,7 @@ static void spr_dest_chain(void) {
 
 /* REF tag to n quadwords of data, with STCYCL + UNPACK to addr in the tag. */
 static int ref_unpack(u64 *t, const void *d, int n, int addr) {
-  t[0] = mx_dmatag(MX_TAG_REF, (u32)n, d, 0);
+  t[0] = mx_dmatag(MX_TAG_REF, (u32)n, mx_paddr_of(d), 0);
   t[1] = STCYCL_1_1 | (u64)UNPACK_V4_32(n, addr) << 32;
   return 2;
 }
@@ -86,7 +86,7 @@ static void vif_chain(int ch, volatile u32 *vumem, int addr) {
   fill(data, 16, 0x30000000u + (u32)ch);
   mx_dcache_writeback(data, sizeof data);
   int k = ref_unpack(tags, data, 4, addr);
-  tags[k] = mx_dmatag(MX_TAG_END, 0, 0, 0);
+  tags[k] = mx_dmatag(MX_TAG_END, 0, MX_PADDR_NONE, 0);
   tags[k + 1] = 0;
   mx_dcache_writeback(tags, sizeof tags);
   mx_dma_chain(ch, tags, 1);
@@ -108,7 +108,7 @@ static void vif_normal(int ch, volatile u32 *vumem, int addr) {
   p[3] = UNPACK_V4_32(2, addr);
   fill(p + 4, 8, 0x40000000u + (u32)ch);
   mx_dcache_writeback(buf, 64);
-  mx_dma_normal(ch, buf, 3);
+  mx_dma_send(ch, buf, 3);
   CHECK(mx_dma_wait(ch) == 0);
   CHECK_EQ(vumem[addr * 4 + 7], p[4 + 7]);
 }
@@ -127,7 +127,7 @@ static void engine(int ch, volatile u32 *vumem) {
   for (int i = 0; i < NSEG; i++) {
     u64 *t = &tags[i * 4];
     ref_unpack(t, &data[i * 4], 1, 100 + i);
-    t[2] = mx_dmatag(MX_TAG_END, 0, 0, 0);
+    t[2] = mx_dmatag(MX_TAG_END, 0, MX_PADDR_NONE, 0);
     t[3] = 0;
     mx_dcache_writeback(t, 32);
     last = mx_dmaq_chain(&q, t, 1);
@@ -158,7 +158,7 @@ static void mfifo(void) {
     volatile u32 *s = (volatile u32 *)(SPR + (i & 1) * 0x2000);
     if (i >= 2)
       mx_mfifo_push_wait();
-    u64 tag = mx_dmatag(MX_TAG_CNT, 3, 0, 0);
+    u64 tag = mx_dmatag(MX_TAG_CNT, 3, MX_PADDR_NONE, 0);
     s[0] = (u32)tag;
     s[1] = (u32)(tag >> 32);
     s[2] = s[3] = 0;
@@ -197,9 +197,9 @@ static void stall(void) {
     s[4 + w] = 0x70000000u | (u32)w;
   mx_dma_stall(MX_STALL_SRC_FROMSPR, MX_STALL_DRAIN_VIF1, buf);
   /* drain in source chain mode: refs packets are stall controlled */
-  tags[0] = mx_dmatag(MX_TAG_REFS, 8, buf, 0);
+  tags[0] = mx_dmatag(MX_TAG_REFS, 8, mx_paddr_of(buf), 0);
   tags[1] = 0;
-  tags[2] = mx_dmatag(MX_TAG_END, 0, 0, 0);
+  tags[2] = mx_dmatag(MX_TAG_END, 0, MX_PADDR_NONE, 0);
   tags[3] = 0;
   mx_dcache_writeback(tags, 32);
   mx_dma_chain(MX_CH_VIF1, tags, 0); /* stalls: nothing written yet */

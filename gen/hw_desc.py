@@ -294,6 +294,7 @@ SYSCALLS = [
     ("mx_bios_gs_get_imr", 0x70, "unsigned long long (void)"),
     ("mx_bios_gs_put_imr", 0x71, "unsigned long long (unsigned long long imr)"),
     ("mx_bios_igs_put_imr", -0x71, "unsigned long long (unsigned long long imr)"),
+    ("mx_bios_set_syscall", 0x74, "void (int number, void *handler)"),
     ("mx_bios_print", 0x75, "void (const char *fmt, ...)"),
     ("mx_bios_sif_dma_stat", 0x76, "int (unsigned id)"),
     ("mx_bios_sif_set_dma", 0x77, "unsigned (void *transfers, int count)"),

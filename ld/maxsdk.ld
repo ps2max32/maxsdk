@@ -42,10 +42,14 @@ SECTIONS {
 
   /* Packet data: aligned to a cache line, so a write back never touches a
      neighbour. */
-  .mx.packets : ALIGN(64) { *(.mx.packets .mx.packets.*) } >ram
+  .mx.packets : ALIGN(64) { *(.mx.packets .mx.packets.*) . = ALIGN(64); } >ram
 
   .bss (NOLOAD) : ALIGN(128) {
     __bss_start = .;
+    /* MX_DMA_LINES (<mx/cpu.h>): each variable on lines of its own, the
+       last one too */
+    *(.bss.mx.lines)
+    . = ALIGN(64);
     *(.sbss .sbss.*) *(.scommon)
     *(.bss .bss.*) *(COMMON)
     . = ALIGN(16);

@@ -4,6 +4,7 @@
 #include <mx/irq.h>
 #include <mx/timer.h>
 #include <mx/trace.h>
+#include <mx/vm.h>
 #include <mx/vu.h>
 
 const u32 mx_dma_base[10] = {
@@ -31,39 +32,113 @@ int mx_dma_wait(int ch) {
   return 0;
 }
 
-void mx_dma_normal(int ch, const void *addr, u32 qwc) {
-  MX_DMA_REG(ch, MADR) = mx_phys(addr);
+/* ---- VM in pieces (scatter-gather) ---------------------------------------- */
+
+/* The REF chains of mx_dma_send / mx_dma_to_spr for VM in more than one
+   piece: one buffer per channel that can read a source chain, reused by
+   the channel's next transfer. */
+#define SG_MAX 64
+static u64 sg_tags[10][SG_MAX + 1][2] MX_ALIGNED(64);
+
+/* The pieces of [mem, mem + qwc * 16), pinned VM. */
+static u32 pieces(const void *mem, u32 qwc, struct mx_vm_piece *pc) {
+  return mx_vm_pieces(mem, qwc * 16, pc, SG_MAX);
+}
+
+/* Build the chain for channel ch: one REF a piece, then an END. */
+static mx_paddr sg_chain(int ch, const struct mx_vm_piece *pc, u32 n) {
+  u64(*t)[2] = sg_tags[ch];
+  for (u32 i = 0; i < n; i++) {
+    t[i][0] = mx_dmatag(MX_TAG_REF, pc[i].bytes / 16, pc[i].addr, 0);
+    t[i][1] = 0;
+  }
+  t[n][0] = mx_dmatag(MX_TAG_END, 0, MX_PADDR_NONE, 0);
+  t[n][1] = 0;
+  mx_dcache_writeback(t, (n + 1) * 16);
+  return mx_paddr_of(t);
+}
+
+void mx_dma_send(int ch, const void *mem, u32 qwc) {
+  if (mx_is_vm(mem)) {
+    struct mx_vm_piece pc[SG_MAX];
+    u32 n = pieces(mem, qwc, pc);
+    if (n > 1) {
+      MX_DMA_REG(ch, QWC) = 0;
+      MX_DMA_REG(ch, TADR) = sg_chain(ch, pc, n).v;
+      start(ch, MX_CHCR_CHAIN | MX_CHCR_FROM_MEM);
+      return;
+    }
+  }
+  MX_DMA_REG(ch, MADR) = mx_paddr_range(mem, qwc * 16).v;
   MX_DMA_REG(ch, QWC) = qwc;
-  start(ch, MX_CHCR_NORMAL | (ch == MX_CH_FROMIPU ? MX_CHCR_TO_MEM : MX_CHCR_FROM_MEM));
+  start(ch, MX_CHCR_NORMAL | MX_CHCR_FROM_MEM);
+}
+
+void mx_dma_recv(int ch, void *mem, u32 qwc) {
+  MX_DMA_REG(ch, MADR) = mx_paddr_range(mem, qwc * 16).v;
+  MX_DMA_REG(ch, QWC) = qwc;
+  start(ch, MX_CHCR_NORMAL | MX_CHCR_TO_MEM);
 }
 
 void mx_dma_chain(int ch, const void *tags, int tte) {
   MX_DMA_REG(ch, QWC) = 0;
-  MX_DMA_REG(ch, TADR) = mx_phys(tags);
+  MX_DMA_REG(ch, TADR) = mx_paddr_of(tags).v;
   start(ch, MX_CHCR_CHAIN | MX_CHCR_FROM_MEM | (tte ? MX_CHCR_TTE : 0));
 }
 
 void mx_dma_to_spr(void *spr, const void *mem, u32 qwc) {
-  MX_DMA_REG(MX_CH_TOSPR, MADR) = mx_phys(mem);
   MX_DMA_REG(MX_CH_TOSPR, SADR) = (u32)(uintptr_t)spr & 0x3FF0u;
+  if (mx_is_vm(mem)) {
+    struct mx_vm_piece pc[SG_MAX];
+    u32 n = pieces(mem, qwc, pc);
+    if (n > 1) {
+      MX_DMA_REG(MX_CH_TOSPR, QWC) = 0;
+      MX_DMA_REG(MX_CH_TOSPR, TADR) = sg_chain(MX_CH_TOSPR, pc, n).v;
+      start(MX_CH_TOSPR, MX_CHCR_CHAIN);
+      return;
+    }
+  }
+  MX_DMA_REG(MX_CH_TOSPR, MADR) = mx_paddr_range(mem, qwc * 16).v;
   MX_DMA_REG(MX_CH_TOSPR, QWC) = qwc;
   start(MX_CH_TOSPR, MX_CHCR_NORMAL);
 }
 
-void mx_dma_from_spr(void *mem, const void *spr, u32 qwc) {
-  MX_DMA_REG(MX_CH_FROMSPR, MADR) = mx_phys(mem);
-  MX_DMA_REG(MX_CH_FROMSPR, SADR) = (u32)(uintptr_t)spr & 0x3FF0u;
+static void from_spr(mx_paddr mem, u32 spr, u32 qwc) {
+  MX_DMA_REG(MX_CH_FROMSPR, MADR) = mem.v;
+  MX_DMA_REG(MX_CH_FROMSPR, SADR) = spr & 0x3FF0u;
   MX_DMA_REG(MX_CH_FROMSPR, QWC) = qwc;
   start(MX_CH_FROMSPR, MX_CHCR_NORMAL);
+}
+
+void mx_dma_from_spr(void *mem, const void *spr, u32 qwc) {
+  u32 s = (u32)(uintptr_t)spr;
+  if (mx_is_vm(mem) && qwc) {
+    struct mx_vm_piece pc[SG_MAX];
+    u32 n = pieces(mem, qwc, pc);
+    for (u32 i = 0; i + 1 < n; i++) {
+      from_spr(pc[i].addr, s, pc[i].bytes / 16);
+      s += pc[i].bytes;
+      mx_dma_wait(MX_CH_FROMSPR);
+    }
+    from_spr(pc[n - 1].addr, s, pc[n - 1].bytes / 16);
+    return;
+  }
+  from_spr(mx_paddr_of(mem), s, qwc);
 }
 
 static void set_sqwc(u32 tqwc, u32 sqwc) {
   MX_R32(MX_D_SQWC) = (u32)(MX_SET(D_SQWC_SQWC, sqwc) | MX_SET(D_SQWC_TQWC, tqwc));
 }
 
+/* The memory an interleaved transfer touches: qwc quadwords moved, sqwc
+   skipped after each tqwc. */
+static u32 interleave_bytes(u32 qwc, u32 tqwc, u32 sqwc) {
+  return (qwc + (qwc - 1) / tqwc * sqwc) * 16;
+}
+
 void mx_dma_to_spr_interleave(void *spr, const void *mem, u32 qwc, u32 tqwc, u32 sqwc) {
   set_sqwc(tqwc, sqwc);
-  MX_DMA_REG(MX_CH_TOSPR, MADR) = mx_phys(mem);
+  MX_DMA_REG(MX_CH_TOSPR, MADR) = mx_paddr_range(mem, interleave_bytes(qwc, tqwc, sqwc)).v;
   MX_DMA_REG(MX_CH_TOSPR, SADR) = (u32)(uintptr_t)spr & 0x3FF0u;
   MX_DMA_REG(MX_CH_TOSPR, QWC) = qwc;
   start(MX_CH_TOSPR, MX_CHCR_INTERLEAVE);
@@ -71,7 +146,7 @@ void mx_dma_to_spr_interleave(void *spr, const void *mem, u32 qwc, u32 tqwc, u32
 
 void mx_dma_from_spr_interleave(void *mem, const void *spr, u32 qwc, u32 tqwc, u32 sqwc) {
   set_sqwc(tqwc, sqwc);
-  MX_DMA_REG(MX_CH_FROMSPR, MADR) = mx_phys(mem);
+  MX_DMA_REG(MX_CH_FROMSPR, MADR) = mx_paddr_range(mem, interleave_bytes(qwc, tqwc, sqwc)).v;
   MX_DMA_REG(MX_CH_FROMSPR, SADR) = (u32)(uintptr_t)spr & 0x3FF0u;
   MX_DMA_REG(MX_CH_FROMSPR, QWC) = qwc;
   start(MX_CH_FROMSPR, MX_CHCR_INTERLEAVE);
@@ -88,7 +163,7 @@ void mx_dma_stall(int src, int drain, const void *startp) {
   c &= ~(u32)(MX_BIT(D_CTRL_STS) | MX_BIT(D_CTRL_STD));
   c |= (u32)(MX_SET(D_CTRL_STS, src) | MX_SET(D_CTRL_STD, drain));
   if (startp)
-    MX_R32(MX_D_STADR) = mx_phys(startp);
+    MX_R32(MX_D_STADR) = mx_paddr_of(startp).v;
   MX_R32(MX_D_CTRL) = c;
 }
 
@@ -99,9 +174,11 @@ static struct {
   u32 ring, size; /* physical start, bytes */
 } mf;
 
+/* the ring is in core memory: the DMAC wraps it by physical address */
+
 void mx_mfifo_init(int drain_ch, void *ring, u32 size, int tte) {
   mf.drain = drain_ch;
-  mf.ring = mx_phys(ring);
+  mf.ring = mx_paddr_of(ring).v;
   mf.size = size;
   MX_R32(MX_D_RBOR) = mf.ring;
   MX_R32(MX_D_RBSR) = size - 16;
@@ -159,9 +236,9 @@ static void q_start(struct mx_dmaq *q, struct mx_dma_seg *s) {
   int ch = q->ch;
   if (s->chcr & MX_CHCR_CHAIN) {
     MX_DMA_REG(ch, QWC) = 0;
-    MX_DMA_REG(ch, TADR) = s->addr;
+    MX_DMA_REG(ch, TADR) = s->addr.v;
   } else {
-    MX_DMA_REG(ch, MADR) = s->addr;
+    MX_DMA_REG(ch, MADR) = s->addr.v;
     MX_DMA_REG(ch, QWC) = s->qwc;
   }
   start(ch, s->chcr);
@@ -209,7 +286,7 @@ void mx_dmaq_release(struct mx_dmaq *q) {
 }
 
 /* Queue a segment; the queue has a free slot. */
-static mx_event q_put(struct mx_dmaq *q, u32 chcr, u32 addr, u32 qwc) {
+static mx_event q_put(struct mx_dmaq *q, u32 chcr, mx_paddr addr, u32 qwc) {
   int was = mx_di();
   u32 t = q->tail;
   struct mx_dma_seg *s = &q->seg[t % MX_DMAQ_LEN];
@@ -226,7 +303,7 @@ static mx_event q_put(struct mx_dmaq *q, u32 chcr, u32 addr, u32 qwc) {
   return e;
 }
 
-static mx_event q_submit(struct mx_dmaq *q, u32 chcr, u32 addr, u32 qwc) {
+static mx_event q_submit(struct mx_dmaq *q, u32 chcr, mx_paddr addr, u32 qwc) {
   /* wait for a free slot */
   while (q->tail - q->head >= MX_DMAQ_LEN)
     ;
@@ -238,21 +315,21 @@ static u32 chain_chcr(int tte) {
 }
 
 mx_event mx_dmaq_chain(struct mx_dmaq *q, const void *tags, int tte) {
-  return q_submit(q, chain_chcr(tte), mx_phys(tags), 0);
+  return q_submit(q, chain_chcr(tte), mx_paddr_of(tags), 0);
 }
 
 int mx_dmaq_try_chain(struct mx_dmaq *q, const void *tags, int tte, mx_event *e) {
   /* in an interrupt handler only the handler itself frees slots */
   if (q->tail - q->head >= MX_DMAQ_LEN)
     return -1;
-  mx_event ev = q_put(q, chain_chcr(tte), mx_phys(tags), 0);
+  mx_event ev = q_put(q, chain_chcr(tte), mx_paddr_of(tags), 0);
   if (e)
     *e = ev;
   return 0;
 }
 
-mx_event mx_dmaq_normal(struct mx_dmaq *q, const void *addr, u32 qwc) {
-  return q_submit(q, MX_CHCR_NORMAL | MX_CHCR_FROM_MEM, mx_phys(addr), qwc);
+mx_event mx_dmaq_send(struct mx_dmaq *q, const void *mem, u32 qwc) {
+  return q_submit(q, MX_CHCR_NORMAL | MX_CHCR_FROM_MEM, mx_paddr_range(mem, qwc * 16), qwc);
 }
 
 void mx_event_wait(mx_event e) {

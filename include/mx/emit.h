@@ -30,26 +30,29 @@ MX_INLINE u64 *mx_e_w4(u64 *c, u32 w0, u32 w1, u32 w2, u32 w3) {
 
 /* A DMA tag; c0, c1 are the VIF codes in its upper half (0 for GIF). qwc is
    the size of the data that follows (cnt/end) or at addr (ref/refs). */
-MX_INLINE u64 *mx_e_tag(u64 *c, u32 id, u32 qwc, const void *addr, u32 c0, u32 c1) {
+MX_INLINE u64 *mx_e_tag(u64 *c, u32 id, u32 qwc, mx_paddr addr, u32 c0, u32 c1) {
   return mx_e_qw(c, mx_dmatag(id, qwc, addr, 0), (u64)c0 | (u64)c1 << 32);
 }
 MX_INLINE u64 *mx_e_cnt(u64 *c, u32 qwc, u32 c0, u32 c1) {
-  return mx_e_tag(c, MX_TAG_CNT, qwc, 0, c0, c1);
+  return mx_e_tag(c, MX_TAG_CNT, qwc, MX_PADDR_NONE, c0, c1);
 }
 MX_INLINE u64 *mx_e_end(u64 *c, u32 qwc, u32 c0, u32 c1) {
-  return mx_e_tag(c, MX_TAG_END, qwc, 0, c0, c1);
+  return mx_e_tag(c, MX_TAG_END, qwc, MX_PADDR_NONE, c0, c1);
 }
+/* qwc quadwords at data: core memory, the scratchpad, or VM pinned in one
+   piece (MX_VM_PIN_DMA); one tag always. */
 MX_INLINE u64 *mx_e_ref(u64 *c, const void *data, u32 qwc, u32 c0, u32 c1) {
-  return mx_e_tag(c, MX_TAG_REF, qwc, data, c0, c1);
+  return mx_e_tag(c, MX_TAG_REF, qwc, mx_paddr_range(data, qwc * 16), c0, c1);
 }
+/* next and call go to tags in core memory. */
 MX_INLINE u64 *mx_e_next(u64 *c, const void *next, u32 qwc, u32 c0, u32 c1) {
-  return mx_e_tag(c, MX_TAG_NEXT, qwc, next, c0, c1);
+  return mx_e_tag(c, MX_TAG_NEXT, qwc, mx_paddr_of(next), c0, c1);
 }
 MX_INLINE u64 *mx_e_call(u64 *c, const void *chain, u32 qwc, u32 c0, u32 c1) {
-  return mx_e_tag(c, MX_TAG_CALL, qwc, chain, c0, c1);
+  return mx_e_tag(c, MX_TAG_CALL, qwc, mx_paddr_of(chain), c0, c1);
 }
 MX_INLINE u64 *mx_e_ret(u64 *c, u32 qwc, u32 c0, u32 c1) {
-  return mx_e_tag(c, MX_TAG_RET, qwc, 0, c0, c1);
+  return mx_e_tag(c, MX_TAG_RET, qwc, MX_PADDR_NONE, c0, c1);
 }
 /* Fill in the QWC of a cnt/end/next tag at tag once its data ends at c. */
 MX_INLINE void mx_e_close(u64 *tag, const u64 *c) {

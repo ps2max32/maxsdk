@@ -230,10 +230,21 @@ check-deps: all
 	  grep -E " (SifInitRpc|sceSifInitRpc|_ps2sdk_|InitMainThread|_InitSys|_libcglue)"
 	@echo "check-deps: no ps2sdk"
 
+# DMA addresses only from <mx/cpu.h> (mx_paddr_of, mx_paddr_range): no
+# hand-made physical address (an address masked to 28/29 bits, an mx_paddr
+# built from a number) anywhere else. exception.c masks kernel segments to
+# read memory, not for the DMAC.
+PHYS_SRCS = $(filter-out $(HERE)/include/mx/cpu.h $(HERE)/src/base/exception.c,\
+              $(wildcard $(HERE)/src/*/*.[chS] $(HERE)/include/mx/*.h $(HERE)/tests/ps2/*.c \
+                         $(HERE)/probe/*.c $(HERE)/examples/*/*.c $(HERE)/tutorials/*/*.c))
+check-phys:
+	@! grep -nE "0x0[fF]{7}u?\b|0x1[fF]{7}u?\b|\bmx_phys\(|\(mx_paddr\)\{[^0}]" $(PHYS_SRCS)
+	@echo "check-phys: DMA addresses only from mx_paddr_of / mx_paddr_range"
+
 gen:
 	python3 -I -B $(HERE)/gen/gen.py
 
 clean:
 	rm -rf $(OUT)
 
-.PHONY: all lib batch libc picolibc test-host check-deps gen clean
+.PHONY: all lib batch libc picolibc test-host check-deps check-phys gen clean

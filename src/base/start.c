@@ -4,6 +4,7 @@
 #include <mx/cpu.h>
 #include <mx/debug.h>
 #include <mx/mx.h>
+#include <mx/vm.h>
 #include <mx/vu.h>
 
 #define MX_MAX_ARGS 16
@@ -55,6 +56,9 @@ void mx__main(void) {
   mx_vif_reset(0);
   mx_vif_reset(1);
   mx_ei();
+  /* VM before the constructors, so their malloc is in it already */
+  if (&mx_vm_config && mx_vm_init(&mx_vm_config) < 0)
+    mx_printf("maxsdk: mx_vm_config is set, but VM could not be turned on\n");
 
   for (void (**f)(void) = __init_array_start; f < __init_array_end; f++)
     (*f)();

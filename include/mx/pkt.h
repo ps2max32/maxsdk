@@ -36,10 +36,12 @@ void mx_pkt_writeback(const struct mx_pkt *p);
 /* Open a cnt packet: the data that follows is sent. c0, c1: VIF codes in the
    tag (MX_PKT_VIF), otherwise ignored. */
 void mx_pkt_cnt(struct mx_pkt *p, u32 c0, u32 c1);
-/* ref (or refs: stall controlled) packet of qwc quadwords at data. */
+/* ref (or refs: stall controlled) packet of qwc quadwords at data (core,
+   the scratchpad, or VM pinned in one piece). */
 void mx_pkt_ref(struct mx_pkt *p, const void *data, u32 qwc, u32 c0, u32 c1);
 void mx_pkt_refs(struct mx_pkt *p, const void *data, u32 qwc, u32 c0, u32 c1);
-/* call a sub-chain (which ends with mx_pkt_ret), ret, next */
+/* call a sub-chain (which ends with mx_pkt_ret), ret, next; chains are in
+   core memory */
 void mx_pkt_call(struct mx_pkt *p, const void *chain, u32 c0, u32 c1);
 void mx_pkt_ret(struct mx_pkt *p, u32 c0, u32 c1);
 void mx_pkt_next(struct mx_pkt *p, const void *next, u32 c0, u32 c1);

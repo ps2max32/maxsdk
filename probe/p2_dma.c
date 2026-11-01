@@ -70,7 +70,7 @@ static void engine_gap(void) {
   u32 single[REPS], queued[REPS], swgap[REPS];
   for (int r = 0; r < REPS; r++) {
     u32 t0 = mx_count();
-    mx_dma_normal(MX_CH_VIF1, big, NSEG * SEGQ);
+    mx_dma_send(MX_CH_VIF1, big, NSEG * SEGQ);
     mx_dma_wait(MX_CH_VIF1);
     single[r] = mx_count() - t0;
   }
@@ -82,7 +82,7 @@ static void engine_gap(void) {
     u32 t0 = mx_count();
     mx_event e = {0, 0};
     for (int i = 0; i < NSEG; i++)
-      e = mx_dmaq_normal(&q, big + i * SEGQ * 16, SEGQ);
+      e = mx_dmaq_send(&q, big + i * SEGQ * 16, SEGQ);
     mx_event_wait(e);
     queued[r] = mx_count() - t0;
     mx_trace_enable(0);
@@ -197,7 +197,7 @@ static void throughput(void) {
   for (int ch = 0; ch < 2; ch++) {
     for (int r = 0; r < REPS; r++) {
       u32 t0 = mx_count();
-      mx_dma_normal(ch, big, 1024);
+      mx_dma_send(ch, big, 1024);
       mx_dma_wait(ch);
       v[r] = (mx_count() - t0) * 100 / 1024;
     }
@@ -208,7 +208,7 @@ static void throughput(void) {
   memset(SPR, 0, 16384);
   for (int r = 0; r < REPS; r++) {
     u32 t0 = mx_count();
-    mx_dma_normal(MX_CH_VIF1, SPR, 1024);
+    mx_dma_send(MX_CH_VIF1, SPR, 1024);
     mx_dma_wait(MX_CH_VIF1);
     v[r] = (mx_count() - t0) * 100 / 1024;
   }
@@ -221,7 +221,7 @@ static void mfifo(void) {
   /* 8 packets of a cnt tag + 63 qw of VIF NOPs in SPR, pushed 16 times each */
   volatile u64 *s = (volatile u64 *)SPR;
   for (int p = 0; p < 8; p++) {
-    s[p * 128] = mx_dmatag(MX_TAG_CNT, 63, 0, 0);
+    s[p * 128] = mx_dmatag(MX_TAG_CNT, 63, MX_PADDR_NONE, 0);
     for (int i = 1; i < 128; i++)
       s[p * 128 + i] = 0;
   }
@@ -248,9 +248,9 @@ static void vif0_uncached_tags(void) {
   for (int mode = 0; mode < 2; mode++) {
     u64 *t = mode ? MX_UNCACHED(tags) : tags;
     VU0_MEM[4 * 20] = 0;
-    t[0] = mx_dmatag(MX_TAG_REF, 1, data, 0);
+    t[0] = mx_dmatag(MX_TAG_REF, 1, mx_paddr_of(data), 0);
     t[1] = 0x01000101u | (u64)(0x6C010000u | 20) << 32;
-    t[2] = mx_dmatag(MX_TAG_END, 0, 0, 0);
+    t[2] = mx_dmatag(MX_TAG_END, 0, MX_PADDR_NONE, 0);
     t[3] = 0;
     if (!mode)
       mx_dcache_writeback(tags, 32);

@@ -71,7 +71,7 @@ static void spin(void *arg) {
    a lower-priority thread counts meanwhile */
 static void fence_sleep(int main_prio) {
   for (int i = 0; i < 16; i++) {
-    chain[i][0] = mx_dmatag(MX_TAG_REFE, 1024, nops, 0);
+    chain[i][0] = mx_dmatag(MX_TAG_REFE, 1024, mx_paddr_of(nops), 0);
     chain[i][1] = 0;
   }
   mx_dcache_writeback(chain, sizeof chain);

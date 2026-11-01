@@ -67,7 +67,7 @@ static void emit_cost(void) {
     q[r] = (mx_count() - t0) * 100 / 102;
 
     t0 = mx_count();
-    t = (u64 *)SPR, c = qw_sd(t, mx_dmatag(MX_TAG_END, 0, 0, 0), 0);
+    t = (u64 *)SPR, c = qw_sd(t, mx_dmatag(MX_TAG_END, 0, MX_PADDR_NONE, 0), 0);
     c = qw_sd(c, mx_giftag(100, 1, -1, MX_GIF_FLG_PACKED, 1), MX_GIF_REG_AD);
     for (u32 i = 0; i < 100; i++)
       c = qw_sd(c, i * 0x01010101ull, MX_GS_REG_RGBAQ);
@@ -286,7 +286,7 @@ static void stall_normal(void) {
   for (int w = 0; w < 28; w++)
     s[4 + w] = 0x70000000u | (u32)w;
   mx_dma_stall(MX_STALL_SRC_FROMSPR, MX_STALL_DRAIN_VIF1, buf);
-  mx_dma_normal(MX_CH_VIF1, buf, 8);
+  mx_dma_send(MX_CH_VIF1, buf, 8);
   mx_delay_us(100);
   int early = mx_dma_busy(MX_CH_VIF1);
   mx_dma_from_spr(buf, (const void *)s, 8);
@@ -328,7 +328,7 @@ static void cycle_steal(void) {
     u32 ee[REPS], dma[REPS];
     for (int r = 0; r < REPS; r++) {
       u32 t0 = mx_count();
-      mx_dma_normal(MX_CH_VIF1, big, 1024);
+      mx_dma_send(MX_CH_VIF1, big, 1024);
       ee[r] = ee_stores();
       mx_dma_wait(MX_CH_VIF1);
       dma[r] = mx_count() - t0;
@@ -361,7 +361,7 @@ static void together(void) {
       if (k == 0 || k == 3)
         mx_dma_to_spr(SPR, big + 16 * 1024, 1024);
       if (k == 1 || k == 3)
-        mx_dma_normal(MX_CH_VIF1, big, 1024);
+        mx_dma_send(MX_CH_VIF1, big, 1024);
       if (k == 2 || k == 3)
         mx_dma_chain(MX_CH_GIF, pk, 0);
       u32 end[3] = {0, 0, 0}, left = k == 3 ? 3 : 1;
@@ -417,7 +417,7 @@ static void sampling(void) {
   mx_trace_sample(16000);
   u32 t0 = mx_count();
   while (mx_count() - t0 < MX_EE_HZ / 100) {
-    mx_dma_normal(MX_CH_VIF1, big, 4096);
+    mx_dma_send(MX_CH_VIF1, big, 4096);
     mx_dma_wait(MX_CH_VIF1);
   }
   u32 busy[MX_TS_N];

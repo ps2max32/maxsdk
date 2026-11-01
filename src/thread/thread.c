@@ -1,5 +1,6 @@
 #include <mx/bios.h>
 #include <mx/cpu.h>
+#include <mx/debug.h>
 #include <mx/thread.h>
 
 /* EE kernel structures (EE Kernel Reference: CreateThread, ReferThreadStatus,
@@ -52,6 +53,14 @@ static void entry(void *p) {
 }
 
 int mx_thread_start(void (*fn)(void *), void *arg, void *stack, u32 bytes, int prio) {
+  /* a stack in VM would page-fault where nothing can wait (the kernel's
+     thread switch, the VM's own fault path): core only */
+  if (mx_is_vm(stack)) {
+    mx_printf("mx_thread_start: the stack %p is VM; thread stacks must be core memory "
+              "(mx_core_alloc)\n",
+              stack);
+    return -1;
+  }
   /* the start record lives at the bottom of the thread's stack */
   struct start *s = stack;
   s->fn = fn;

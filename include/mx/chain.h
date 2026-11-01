@@ -30,8 +30,12 @@ struct mx_pbuf {
   int overflow; /* a reserve did not fit */
 };
 
-/* mem: quadword aligned. */
+/* mem: quadword aligned, in core memory or the scratchpad (the DMAC
+   follows a chain's tags by physical address: not VM, which ends the
+   program with a report). */
 MX_INLINE void mx_pbuf_init(struct mx_pbuf *b, void *mem, u32 bytes) {
+  if (mx_is_vm(mem))
+    mx__paddr_fault(mem, bytes);
   b->base = b->cur = (u64 *)mem;
   b->end = b->base + bytes / 16 * 2;
   b->overflow = 0;

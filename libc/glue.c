@@ -14,8 +14,6 @@
 #include <mx/debug.h>
 
 void mx_exit(int status) __attribute__((noreturn));
-void *mx_heap_start(void);
-void *mx_heap_end(void);
 
 /* ---- stdio ---------------------------------------------------------------- */
 
@@ -94,16 +92,13 @@ clock_t times(struct tms *t) {
 
 /* ---- heap and exit ----------------------------------------------------------- */
 
+/* The break of <mx/vm.h>: VM when VM is on, physical memory otherwise. */
+void *mx_sbrk(s32 incr);
+
 void *sbrk(ptrdiff_t incr) {
-  static char *brk;
-  if (!brk)
-    brk = (char *)(((unsigned long)mx_heap_start() + 15) & ~15ul);
-  if (incr < 0 || brk + incr > (char *)mx_heap_end()) {
+  void *p = mx_sbrk((s32)incr);
+  if (p == (void *)-1)
     errno = ENOMEM;
-    return (void *)-1;
-  }
-  char *p = brk;
-  brk += incr;
   return p;
 }
 

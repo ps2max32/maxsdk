@@ -186,17 +186,17 @@ __attribute__((noinline)) static void macro_4(f32x4 *__restrict o, s8x4 *__restr
 static void chunk_in(u32 c) {
   MX_DMA_REG(MX_CH_TOSPR, SADR) = (u32)(c & 1) * CH_BYTES;
   MX_DMA_REG(MX_CH_TOSPR, QWC) = 0;
-  MX_DMA_REG(MX_CH_TOSPR, TADR) = mx_phys(in_tags[c]);
+  MX_DMA_REG(MX_CH_TOSPR, TADR) = mx_paddr_of(in_tags[c]).v;
   mx_sync();
   MX_DMA_REG(MX_CH_TOSPR, CHCR) = MX_CHCR_CHAIN | MX_CHCR_STR;
 }
 static void make_in_tags(void) {
   for (u32 c = 0; c < N / C; c++) {
     u32 f = c * C;
-    in_tags[c][0] = (u64x2){mx_dmatag(MX_TAG_REF, 6 * C / 16, pos + 3 * f, 0), 0};
-    in_tags[c][1] = (u64x2){mx_dmatag(MX_TAG_REF, 4 * C / 16, &nrm[f], 0), 0};
-    in_tags[c][2] = (u64x2){mx_dmatag(MX_TAG_REF, 4 * C / 16, &jnt[f], 0), 0};
-    in_tags[c][3] = (u64x2){mx_dmatag(MX_TAG_REFE, 4 * C / 16, &wgt[f], 0), 0};
+    in_tags[c][0] = (u64x2){mx_dmatag(MX_TAG_REF, 6 * C / 16, mx_paddr_of(pos + 3 * f), 0), 0};
+    in_tags[c][1] = (u64x2){mx_dmatag(MX_TAG_REF, 4 * C / 16, mx_paddr_of(&nrm[f]), 0), 0};
+    in_tags[c][2] = (u64x2){mx_dmatag(MX_TAG_REF, 4 * C / 16, mx_paddr_of(&jnt[f]), 0), 0};
+    in_tags[c][3] = (u64x2){mx_dmatag(MX_TAG_REFE, 4 * C / 16, mx_paddr_of(&wgt[f]), 0), 0};
   }
   mx_dcache_writeback(in_tags, sizeof in_tags);
 }
@@ -206,8 +206,8 @@ static u8 *out_buf(u32 c) { return SPR_OUT + (c & 3) * OUT_BYTES; }
 static void chunk_out(u32 c, f32x4 *o, s8x4 *om) {
   u8 *b = out_buf(c);
   mx_dma_wait(MX_CH_FROMSPR);
-  *(u64x2 *)b = (u64x2){mx_dmatag(MX_TAG_CNT, C, o + c * C, 0), 0};
-  *(u64x2 *)(b + 16 + 16 * C) = (u64x2){mx_dmatag(MX_TAG_END, C / 4, om + c * C, 0), 0};
+  *(u64x2 *)b = (u64x2){mx_dmatag(MX_TAG_CNT, C, mx_paddr_of(o + c * C), 0), 0};
+  *(u64x2 *)(b + 16 + 16 * C) = (u64x2){mx_dmatag(MX_TAG_END, C / 4, mx_paddr_of(om + c * C), 0), 0};
   mx_dma_from_spr_chain(b);
 }
 #define R_MEM(i, r) R_TO(&o[i], r)

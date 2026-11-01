@@ -23,6 +23,8 @@ _Static_assert(__builtin_offsetof(struct mx_exception_state, hi) == 536, "except
 _Static_assert(__builtin_offsetof(struct mx_exception_state, fpr) == 560, "exception.S offsets");
 
 struct mx_exception_state mx__exception_state MX_ALIGNED(16);
+/* Set by whoever sends an exception here with more to say (the VM). */
+const char *mx__exception_note;
 u8 mx__exception_stack[8192] MX_ALIGNED(16);
 
 extern const u32 __text_start[], __text_end[];
@@ -76,6 +78,8 @@ void mx__exception_report(void) {
             "%08x\n",
             code, code < 14 ? names[code] : "?", s->cause >> 31 ? " in a branch delay slot" : "",
             s->epc, s->badvaddr, s->badpaddr, s->status, s->cause);
+  if (mx__exception_note)
+    mx_printf("  %s\n", mx__exception_note);
   for (int i = 0; i < 32; i += 4)
     mx_printf("  %s %08x  %s %08x  %s %08x  %s %08x\n", reg_names[i], (u32)s->gpr[i][0],
               reg_names[i + 1], (u32)s->gpr[i + 1][0], reg_names[i + 2], (u32)s->gpr[i + 2][0],

@@ -24,7 +24,7 @@ static void close_tag(struct mx_pkt *p) {
   p->tag = 0;
 }
 
-static void tag(struct mx_pkt *p, u32 id, u32 qwc, const void *addr, u32 c0, u32 c1, int open) {
+static void tag(struct mx_pkt *p, u32 id, u32 qwc, mx_paddr addr, u32 c0, u32 c1, int open) {
   if (p->flags & MX_PKT_RAW)
     return;
   close_tag(p);
@@ -39,21 +39,21 @@ static void tag(struct mx_pkt *p, u32 id, u32 qwc, const void *addr, u32 c0, u32
     p->tag = t;
 }
 
-void mx_pkt_cnt(struct mx_pkt *p, u32 c0, u32 c1) { tag(p, MX_TAG_CNT, 0, 0, c0, c1, 1); }
-void mx_pkt_end(struct mx_pkt *p, u32 c0, u32 c1) { tag(p, MX_TAG_END, 0, 0, c0, c1, 1); }
-void mx_pkt_ret(struct mx_pkt *p, u32 c0, u32 c1) { tag(p, MX_TAG_RET, 0, 0, c0, c1, 1); }
+void mx_pkt_cnt(struct mx_pkt *p, u32 c0, u32 c1) { tag(p, MX_TAG_CNT, 0, MX_PADDR_NONE, c0, c1, 1); }
+void mx_pkt_end(struct mx_pkt *p, u32 c0, u32 c1) { tag(p, MX_TAG_END, 0, MX_PADDR_NONE, c0, c1, 1); }
+void mx_pkt_ret(struct mx_pkt *p, u32 c0, u32 c1) { tag(p, MX_TAG_RET, 0, MX_PADDR_NONE, c0, c1, 1); }
 
 void mx_pkt_ref(struct mx_pkt *p, const void *data, u32 qwc, u32 c0, u32 c1) {
-  tag(p, MX_TAG_REF, qwc, data, c0, c1, 0);
+  tag(p, MX_TAG_REF, qwc, mx_paddr_range(data, qwc * 16), c0, c1, 0);
 }
 void mx_pkt_refs(struct mx_pkt *p, const void *data, u32 qwc, u32 c0, u32 c1) {
-  tag(p, MX_TAG_REFS, qwc, data, c0, c1, 0);
+  tag(p, MX_TAG_REFS, qwc, mx_paddr_range(data, qwc * 16), c0, c1, 0);
 }
 void mx_pkt_call(struct mx_pkt *p, const void *chain, u32 c0, u32 c1) {
-  tag(p, MX_TAG_CALL, 0, chain, c0, c1, 1);
+  tag(p, MX_TAG_CALL, 0, mx_paddr_of(chain), c0, c1, 1);
 }
 void mx_pkt_next(struct mx_pkt *p, const void *next, u32 c0, u32 c1) {
-  tag(p, MX_TAG_NEXT, 0, next, c0, c1, 1);
+  tag(p, MX_TAG_NEXT, 0, mx_paddr_of(next), c0, c1, 1);
 }
 
 void mx_pkt_irq(struct mx_pkt *p) {

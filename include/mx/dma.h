@@ -4,10 +4,20 @@
 /* DMAC: channels in every mode, and the DMA engine that keeps channels
    running from interrupt-refilled queues.
 
-   Addresses passed here are ordinary pointers (cached, uncached, UCAB or
-   scratchpad); they are converted with mx_phys(). Data in cached memory must
-   be written back first (mx_dcache_writeback), or built through an uncached
-   pointer. */
+   Addresses passed here are ordinary pointers (cached, uncached, UCAB,
+   scratchpad or virtual memory) with the size of what they point at; the
+   DMAC's own addresses are mx_paddr (<mx/cpu.h>). Data in cached memory
+   must be written back first (mx_dcache_writeback), or built through an
+   uncached pointer.
+
+   Virtual memory (<mx/vm.h>) reaches the DMAC only pinned (mx_vm_pin):
+   - mx_dma_send, mx_dma_to_spr and mx_dma_from_spr take it scattered over
+     any frames (scatter-gather: a chain of REF tags, or one transfer a
+     piece);
+   - everything else (tags, chains, rings, queue segments, the other
+     directions) only in one physical piece (MX_VM_PIN_DMA).
+   Anything else ends the program with a report, never a transfer from the
+   wrong memory. */
 
 #include <mx/bits.h>
 #include <mx/cpu.h>
@@ -42,10 +52,11 @@ extern const u32 mx_dma_base[10];
 
 /* ---- DMA tags (source chain) ------------------------------------------- */
 
-MX_INLINE u64 mx_dmatag(u32 id, u32 qwc, const void *addr, int irq) {
+MX_INLINE u64 mx_dmatag(u32 id, u32 qwc, mx_paddr addr, int irq) {
   return MX_SET(DMATAG_QWC, qwc) | MX_SET(DMATAG_ID, id) | MX_SET(DMATAG_IRQ, irq) |
-         ((u64)(addr ? mx_phys(addr) : 0) << 32);
+         ((u64)addr.v << 32);
 }
+#define MX_PADDR_NONE ((mx_paddr){0})
 
 /* ---- Channels ---------------------------------------------------------- */
 
@@ -56,13 +67,19 @@ MX_INLINE int mx_dma_busy(int ch) { return (MX_DMA_REG(ch, CHCR) & MX_CHCR_STR) 
 /* Poll until channel ch has stopped. Returns 0, or -1 after ~1 s. */
 int mx_dma_wait(int ch);
 
-/* Normal mode: qwc quadwords from addr to the peripheral (VIF0/VIF1/GIF/
-   toIPU) or from the peripheral to addr (fromIPU). */
-void mx_dma_normal(int ch, const void *addr, u32 qwc);
-/* Source chain mode starting at the tag at tags. With tte, the upper 64 bits
-   of each tag (VIF codes) are sent too (VIF0/VIF1). */
+/* qwc quadwords from memory to the peripheral (VIF0/VIF1/GIF/toIPU):
+   normal mode, or for VM in more than one piece a chain of REF tags (TTE
+   off) in a buffer of the channel's, which the next send on the channel
+   reuses (so wait for the channel first, as for any transfer). */
+void mx_dma_send(int ch, const void *mem, u32 qwc);
+/* qwc quadwords from the peripheral (fromIPU) to memory, normal mode. */
+void mx_dma_recv(int ch, void *mem, u32 qwc);
+/* Source chain mode starting at the tag at tags (core memory). With tte,
+   the upper 64 bits of each tag (VIF codes) are sent too (VIF0/VIF1). */
 void mx_dma_chain(int ch, const void *tags, int tte);
-/* Scratchpad <-> memory, normal mode. */
+/* Scratchpad <-> memory. Normal mode; VM in more than one piece: toSPR by a
+   chain of REF tags, fromSPR one transfer a piece (all but the last waited
+   for here). */
 void mx_dma_to_spr(void *spr, const void *mem, u32 qwc);
 void mx_dma_from_spr(void *mem, const void *spr, u32 qwc);
 /* Interleave: move tqwc quadwords, skip sqwc, until qwc are moved. */
@@ -101,9 +118,9 @@ void mx_mfifo_stop(void);
 #define MX_DMAQ_LEN 64
 
 struct mx_dma_seg {
-  u32 chcr; /* mode bits (CHAIN/NORMAL, TTE, DIR) without STR */
-  u32 addr; /* TADR (chain) or MADR (normal), physical */
-  u32 qwc;  /* normal mode */
+  u32 chcr;      /* mode bits (CHAIN/NORMAL, TTE, DIR) without STR */
+  mx_paddr addr; /* TADR (chain) or MADR (normal) */
+  u32 qwc;       /* normal mode */
 };
 
 /* An event: the queue's done counter passing seq. */
@@ -132,10 +149,11 @@ struct mx_dmaq {
 /* Take over channel ch: its end interrupt starts the next queued segment. */
 void mx_dmaq_init(struct mx_dmaq *q, int ch);
 void mx_dmaq_release(struct mx_dmaq *q);
-/* Queue a source chain (tags must be complete) / a normal transfer. Returns
-   at once; the event passes when that segment has been transferred. */
+/* Queue a source chain (tags must be complete, in core memory) / a
+   memory -> peripheral transfer (core, or VM in one piece). Returns at
+   once; the event passes when that segment has been transferred. */
 mx_event mx_dmaq_chain(struct mx_dmaq *q, const void *tags, int tte);
-mx_event mx_dmaq_normal(struct mx_dmaq *q, const void *addr, u32 qwc);
+mx_event mx_dmaq_send(struct mx_dmaq *q, const void *mem, u32 qwc);
 /* mx_dmaq_chain without waiting for a free slot, so it can be called from
    an interrupt handler (e.g. a scanline trigger). Returns 0 (the event in
    *e, if e), or -1 if the queue is full. */

@@ -28,6 +28,30 @@ void mx_debug_write(const char *s, u32 n);
    before main. */
 void mx_exception_init(void);
 
+/* The debug screen: where a program is when it hangs, on the TV, for when no
+   text comes back. A background colour and 32 hex words (8 lines of 4,
+   slot 0 at the top left), written straight to the GS registers and the
+   GIF FIFO: after mx_dbg_screen() they work with interrupts off, in
+   interrupt handlers and exception handlers (no DMA, no interrupts, no
+   allocation). A word is not drawn while the GIF channel runs (it waits
+   up to 30 ms) or PATH3 is masked. */
+
+/* Show the debug screen instead of the picture (mx_gs_init(640, 448) first
+   if the GS is not set up). Thread code, once. */
+void mx_dbg_screen(void);
+/* The background colour, 0xBBGGRR. */
+void mx_dbg_color(u32 rgb);
+/* Hex word v in slot 0..31. */
+void mx_dbg_word(u32 slot, u32 v);
+/* Step n: slot 0, and a background colour of 8 that it picks
+   (n & 7: red, green, blue, olive, purple, teal, grey, orange; dark, so
+   the words stay readable). */
+void mx_dbg_step(u32 n);
+/* A heartbeat from the vblank-end interrupt: slot 31 counts up about 4
+   times a second and slot 30 is where the program was (the EPC of that
+   interrupt). It stops when interrupts stay off. Thread code. */
+void mx_dbg_heartbeat(int on);
+
 int mx_printf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 int mx_vprintf(const char *fmt, va_list ap);
 int mx_snprintf(char *buf, u32 size, const char *fmt, ...) __attribute__((format(printf, 3, 4)));

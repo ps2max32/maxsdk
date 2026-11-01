@@ -364,7 +364,7 @@ static void finish(void) {
     mx_dma_wait(MX_CH_FROMSPR);
     for (int d = 0; d < 2; d++) {
       u64 *t = (u64 *)((uintptr_t)f.rec_at[d] | 0x20000000u);
-      t[0] = mx_dmatag(MX_TAG_RET, 0, 0, 0);
+      t[0] = mx_dmatag(MX_TAG_RET, 0, MX_PADDR_NONE, 0);
       t[1] = 0;
     }
     mx__hires_end(f.rec_at[0] + 16, f.rec_at[1] + 16, f.rec_full);

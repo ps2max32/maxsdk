@@ -64,3 +64,17 @@
 Consequences: poll the VIF MARK to wait for a batch (D13); put many batches in one chain
 with a MARK each instead of a queue segment per batch; the EE's uncached stores and VIF1 DMA from
 memory slow each other a lot, so build packets in SPR, not uncached memory, while DMA runs.
+
+## Addresses and virtual memory (2026-10-31)
+
+* The DMAC's addresses are `mx_paddr` (`<mx/cpu.h>`): `mx_paddr_of` (core memory, the
+  scratchpad) and `mx_paddr_range` (also VM pinned in one piece) are the only ways to make one;
+  `make check-phys` fails on hand-made ones. A VM pointer where only core memory is allowed (tags,
+  chains, call targets, the MFIFO ring, the stall address, `mx_pbuf_init`) ends the program with
+  a report.
+* Scatter-gather from VM (`docs/vm.md`): on the PS2 a VIF1 packet in VM (STCYCL + UNPACK V4-32
+  of 200 quadwords) sent by `mx_dma_send` as a chain of REF tags, one a physical piece, the UNPACK's
+  data across two page boundaries: VU1 data memory right; a GIF packet (A+D, then IMAGE of 16 KiB)
+  the same way, read back by `mx_gs_download`: right; toSPR by a REF chain and fromSPR a piece at a
+  time, 12 KiB over a page boundary: right. So VIF UNPACK and GIF IMAGE go on across DMA tags.
+  `tests/ps2/vm.c`, PS2 and PCSX2.

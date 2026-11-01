@@ -15,7 +15,7 @@
 #include <mx/vu.h>
 
 /* Create and start a thread running fn(arg) on the stack [stack, stack +
-   bytes) at priority prio (1..127; the main thread's is mx_thread_prio of
+   bytes) (core memory: not VM, <mx/vm.h>) at priority prio (1..127; the main thread's is mx_thread_prio of
    mx_thread_self()). Returns the thread id, or < 0. Returning from fn ends
    the thread. */
 int mx_thread_start(void (*fn)(void *), void *arg, void *stack, u32 bytes, int prio);

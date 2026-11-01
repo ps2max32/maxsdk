@@ -16,9 +16,10 @@ void mx_dcache_writeback(const void *p, u32 size) {
   /* as many lines as the cache has or more: all of the cache, by index
      (64 sets of 2 ways) */
   if (size >= MX_DCACHE_BYTES) {
-    __asm__ volatile("sync.l" : : : "memory");
+    /* each CACHE directly between two SYNCs (EE Core User's Manual 1.3:
+       not after a branch, nor before one) */
     for (uintptr_t a = 0x80000000u; a < 0x80000000u + MX_DCACHE_BYTES / 2; a += MX_DCACHE_LINE)
-      __asm__ volatile("cache 0x14, 0(%0)\n\tsync.l\n\tcache 0x14, 1(%0)\n\tsync.l"
+      __asm__ volatile("sync.l\n\tcache 0x14, 0(%0)\n\tsync.l\n\tcache 0x14, 1(%0)\n\tsync.l"
                        : : "r"(a) : "memory");
     return;
   }

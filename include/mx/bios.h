@@ -57,6 +57,7 @@ void mx_bios_iflush_cache(int op);
 unsigned long long mx_bios_gs_get_imr(void);
 unsigned long long mx_bios_gs_put_imr(unsigned long long imr);
 unsigned long long mx_bios_igs_put_imr(unsigned long long imr);
+void mx_bios_set_syscall(int number, void *handler);
 void mx_bios_print(const char *fmt, ...);
 int mx_bios_sif_dma_stat(unsigned id);
 unsigned mx_bios_sif_set_dma(void *transfers, int count);

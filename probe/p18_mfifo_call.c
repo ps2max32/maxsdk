@@ -28,9 +28,9 @@ static u64 *unpack1(u64 *c, u32 at, u32 v) {
 
 static void vu1_clear(void) {
   u64 t[2 * 2] MX_ALIGNED(64);
-  t[0] = mx_dmatag(MX_TAG_REF, 16, zero, 0);
+  t[0] = mx_dmatag(MX_TAG_REF, 16, mx_paddr_of(zero), 0);
   t[1] = (u64)mx_vif_stcycl(1, 1) | (u64)mx_vif_unpack(MX_UNPACK_V4_32, 0, 16, 0) << 32;
-  t[2] = mx_dmatag(MX_TAG_END, 0, 0, 0);
+  t[2] = mx_dmatag(MX_TAG_END, 0, MX_PADDR_NONE, 0);
   t[3] = 0;
   mx_dcache_writeback(t, sizeof t);
   mx_dma_chain(MX_CH_VIF1, t, 1);
@@ -44,9 +44,9 @@ static void run(const char *name, u32 id) {
   u64 *c = SPR;
   c = unpack1(c, 0, 0xA0);
   if (id == MX_TAG_REF) /* the chain's UNPACK quadword, by ref */
-    c = mx_e_tag(c, MX_TAG_REF, 1, chain + 2, chain[1], chain[1] >> 32);
+    c = mx_e_tag(c, MX_TAG_REF, 1, mx_paddr_of(chain + 2), chain[1], chain[1] >> 32);
   else
-    c = mx_e_tag(c, id, 0, chain, 0, 0);
+    c = mx_e_tag(c, id, 0, mx_paddr_of(chain), 0, 0);
   c = unpack1(c, 1, 0xA1);
   c = mx_e_cnt(c, 0, 0, 0); /* not a ref last (manual 5.5) */
   mx_mfifo_push(SPR, (u32)(c - SPR) / 2);
@@ -69,12 +69,12 @@ static void run(const char *name, u32 id) {
             "(ring %08x, chain %08x) CIS %u VIF1_STAT %08x\n",
             name, vu[0][0] == 0xA0 ? "yes" : "no", vu[10][0] == 0x10 ? "yes" : "no",
             vu[1][0] == 0xA1 ? "yes" : "no", drained, chcr, (u32)MX_GET(DMA_CHCR_ASP, chcr),
-            (u32)MX_GET(DMA_CHCR_STR, chcr), tadr, mx_phys(ring), mx_phys(chain), cis, vstat);
+            (u32)MX_GET(DMA_CHCR_STR, chcr), tadr, mx_paddr_of(ring).v, mx_paddr_of(chain).v, cis, vstat);
 }
 
 int main(void) {
   u64 *c = unpack1(chain, 10, 0x10);
-  mx_e_tag(c, MX_TAG_RET, 0, 0, 0, 0);
+  mx_e_tag(c, MX_TAG_RET, 0, MX_PADDR_NONE, 0, 0);
   mx_dcache_writeback(chain, sizeof chain);
   mx_vu_reset(2);
   run("ref", MX_TAG_REF);
