@@ -85,7 +85,7 @@ $(MX_LOADER): $(HERE)/loader/mxload.c $(LIB) $(CRT0) $(HDRS) $(MX_LD)
 	$(call link,$@,--defsym=__mx_base=$(MXLOAD_BASE) $(CRT0) $(OUT)/loader/mxload.o $(LIB))
 
 # tests linked into VM (ld/maxsdk-vm.ld), started by mxload.elf
-$(OUT)/tests/vm11_vmlink.elf $(OUT)/tests/vm12_elfpage.elf: MX_MEMORY = vm
+$(OUT)/tests/vm11_vmlink.elf $(OUT)/tests/vm12_elfpage.elf $(OUT)/tests/vm13_guards.elf: MX_MEMORY = vm
 
 # Each test, probe or example is one C file, linked with crt0 and libmx only
 # (libmx has the compiler helper functions; no libgcc).

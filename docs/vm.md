@@ -42,6 +42,10 @@ virtual memory at 0x0800_0000, in 32 KiB pages held in the physical memory left 
   same I-cache index, so the frame's lines of the page before would still hit.
 * Keep core: interrupt handlers and what they read, thread stacks, what the DMAC follows,
   code that runs with interrupts off and may meet a page that is not resident.
+  `mx_irq_dmac`, `mx_irq_intc`, `mx_timer_periodic`, `mx_sif_serve` (the handler and its
+  argument) and a DMA queue's `on_done` end the program with a report when given VM
+  (`mx__need_core`, `<mx/cpu.h>`); thread stacks already did (`mx_thread_start`). What the
+  handler reads further on is not checked.
 
 ### DMA and the IOP
 
@@ -108,8 +112,9 @@ interrupt in slots 30–31 (it stops when interrupts stay off), and at the end b
 | `vm10_mxload` | started by `mxload.elf` (`loader/mxload.c`), a physical program: argv (argv[0] its own path), .data, .rodata and a 256 KiB .bss, interrupts, `host:` I/O after the hand-over. Run as `mxload.elf host:vm10_mxload.elf a bc`; on PCSX2, which passes no arguments, they are in `host:mxload.txt` |
 | `vm11_vmlink` | a program linked into VM (`MX_MEMORY=vm`, `ld/maxsdk-vm.ld`), started by mxload, with 16 frames and a swap file: its own code and data in VM, maxsdk and `MX_CORE_FN`/`MX_CORE_DATA` in core, core calling VM, four functions on pages of their own at one I-cache index called between rounds of heap writes (their frames reused for each other's code), a thread whose function is in VM |
 | `vm12_elfpage` | a program linked into VM paged from its ELF: few pages read at `main`, a 128 KiB table and a 64 KiB array read when touched, evicted and read from the ELF again, half the array written and then from the swap file |
+| `vm13_guards` | in a program linked into VM, `MX_CORE_FN` handlers with `MX_CORE_DATA` data run (a timer, the vblank start); each guard refuses a VM handler or argument (with a test hook instead of the report): timer, INTC, DMAC, SIF server, a DMA queue's `on_done` |
 
-Steps 1–12 pass on the PS2 (2026-11-01) (`vm11_vmlink`'s first version, with 2650 swap
+Steps 1–13 pass on the PS2 (2026-11-01) (`vm11_vmlink`'s first version, with 2650 swap
 transfers in step 4, ran past the 60 s timeout: about 15 a second through `host:`); step 8 in 44 runs of 45, the last 44 in a row (with the
 UCAB fix and the checks below). In the other one, the build before those, the file
 server on the IOP stopped answering after the gather's swap writes: the debug screen showed

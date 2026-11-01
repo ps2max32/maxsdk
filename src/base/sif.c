@@ -285,6 +285,9 @@ static int sif0_handler(int ch, void *arg, void *addr) {
 }
 
 int mx_sif_serve(u32 sid, mx_sif_server_fn fn, void *arg) {
+  if (mx__need_core((const void *)fn, "mx_sif_serve: the server") ||
+      mx__need_core(arg, "mx_sif_serve: the server's argument"))
+    return -1;
   for (int i = 0; i < NSERVER; i++) {
     if (!servers[i].fn || servers[i].sid == sid) {
       servers[i].arg = arg;

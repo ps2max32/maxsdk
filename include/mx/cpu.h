@@ -35,6 +35,23 @@ typedef struct {
 } mx_paddr;
 
 void mx__paddr_fault(const void *p, u32 bytes) __attribute__((noreturn));
+
+/* What runs or is read in an interrupt handler (the handler, its argument,
+   a DMA queue) must be core: a VM page that is not resident cannot be
+   brought in with interrupts off. In a program linked into VM, the
+   program's own functions and data are VM unless marked MX_CORE_FN /
+   MX_CORE_DATA. VM ends the program with a report naming what; with
+   mx__core_fault_hook set (tests), the hook is called instead and the call
+   is refused (returns -1). */
+extern void (*mx__core_fault_hook)(const void *p, const char *what);
+void mx__core_fault(const void *p, const char *what);
+MX_INLINE int mx__need_core(const void *p, const char *what) {
+  if (__builtin_expect(mx_is_vm(p), 0)) {
+    mx__core_fault(p, what);
+    return -1;
+  }
+  return 0;
+}
 mx_paddr mx__vm_paddr(const void *p, u32 bytes);
 
 /* Core memory (the program, the core heap, the stack) or the scratchpad:

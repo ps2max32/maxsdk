@@ -27,6 +27,9 @@ static void timer_irq(void *arg) {
 }
 
 void mx_timer_periodic(int t, u32 period, mx_irq_fn fn, void *arg) {
+  if (mx__need_core((const void *)fn, "mx_timer_periodic: the handler") ||
+      mx__need_core(arg, "mx_timer_periodic: the handler's argument"))
+    return;
   u32 b = tbase[t];
   MX_R32(b + MX_TIMER_MODE_OFFSET) = 0;
   tslot[t].fn = fn;

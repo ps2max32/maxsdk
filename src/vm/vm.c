@@ -834,6 +834,20 @@ void mx__paddr_fault(const void *p, u32 bytes) {
   mx_exit(255);
 }
 
+void (*mx__core_fault_hook)(const void *p, const char *what);
+
+void mx__core_fault(const void *p, const char *what) {
+  if (mx__core_fault_hook) {
+    mx__core_fault_hook(p, what);
+    return;
+  }
+  mx_printf("\nVM: %s at %p is VM: what an interrupt handler runs or reads must be core "
+            "(MX_CORE_FN, MX_CORE_DATA, mx_core_alloc; <mx/cpu.h>)\n",
+            what, p);
+  MX_TEST_END(255);
+  mx_exit(255);
+}
+
 /* ---- set up ---------------------------------------------------------------------- */
 
 void mx_vm_stats(struct mx_vm_stats *s) {

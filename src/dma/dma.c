@@ -304,6 +304,9 @@ static mx_event q_put(struct mx_dmaq *q, u32 chcr, mx_paddr addr, u32 qwc) {
 }
 
 static mx_event q_submit(struct mx_dmaq *q, u32 chcr, mx_paddr addr, u32 qwc) {
+  if (mx__need_core((const void *)q->on_done, "a DMA queue's on_done") ||
+      mx__need_core(q->on_done_arg, "a DMA queue's on_done_arg"))
+    q->on_done = 0, q->on_done_arg = 0; /* refused (tests) */
   /* wait for a free slot */
   while (q->tail - q->head >= MX_DMAQ_LEN)
     ;

@@ -40,6 +40,9 @@ static int intc_entry(int cause, void *a, void *addr) {
 }
 
 void mx_irq_dmac(int ch, mx_irq_fn fn, void *arg) {
+  if (mx__need_core((const void *)fn, "mx_irq_dmac: the handler") ||
+      mx__need_core(arg, "mx_irq_dmac: the handler's argument"))
+    return;
   struct slot *s = &dmac[ch];
   int was = mx_di();
   s->fn = fn;
@@ -54,6 +57,9 @@ void mx_irq_dmac(int ch, mx_irq_fn fn, void *arg) {
 }
 
 void mx_irq_intc(int cause, mx_irq_fn fn, void *arg) {
+  if (mx__need_core((const void *)fn, "mx_irq_intc: the handler") ||
+      mx__need_core(arg, "mx_irq_intc: the handler's argument"))
+    return;
   struct slot *s = &intc[cause];
   int was = mx_di();
   s->fn = fn;
