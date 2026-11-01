@@ -47,6 +47,17 @@ virtual memory at 0x0800_0000, in 32 KiB pages held in the physical memory left 
   (`mx__need_core`, `<mx/cpu.h>`); thread stacks already did (`mx_thread_start`). What the
   handler reads further on is not checked.
 
+### Mapped files
+
+* `mx_vm_map_file(path, &size)` maps a file read-only into the file window at 0x4000_0000
+  (`MX_VM_MAP_BASE`, unmapped by the BIOS; `mx_vm_config.map_size`, 64 MiB by default):
+  its pages follow VM's in the pager's tables, are read from the file when first touched,
+  share the frames, and are never written: evicted, they are dropped and read again, so no
+  swap file is needed and a level's data costs no swap traffic. A store into one ends the
+  program with a report; a pin for writing is refused; pins for DMA work as for VM.
+* Up to 8 files at once (with the program's ELF segments, 12 file entries). The window is
+  given out from its start; unmapped space comes back once everything after it is unmapped.
+
 ### DMA and the IOP
 
 * A physical address is a type of its own, `mx_paddr`, made only by `mx_paddr_of` (core or the
@@ -113,8 +124,9 @@ interrupt in slots 30–31 (it stops when interrupts stay off), and at the end b
 | `vm11_vmlink` | a program linked into VM (`MX_MEMORY=vm`, `ld/maxsdk-vm.ld`), started by mxload, with 16 frames and a swap file: its own code and data in VM, maxsdk and `MX_CORE_FN`/`MX_CORE_DATA` in core, core calling VM, four functions on pages of their own at one I-cache index called between rounds of heap writes (their frames reused for each other's code), a thread whose function is in VM |
 | `vm12_elfpage` | a program linked into VM paged from its ELF: few pages read at `main`, a 128 KiB table and a 64 KiB array read when touched, evicted and read from the ELF again, half the array written and then from the swap file |
 | `vm13_guards` | in a program linked into VM, `MX_CORE_FN` handlers with `MX_CORE_DATA` data run (a timer, the vblank start); each guard refuses a VM handler or argument (with a test hook instead of the report): timer, INTC, DMAC, SIF server, a DMA queue's `on_done` |
+| `vm14_mapfile` | a 300 KiB file mapped with 8 frames and no swap file: in the file window, read twice (read again, dropped, never written out), random reads, a DMA pin and a VIF1 transfer of mapped data, a write pin refused, `mx_fio_write` from the mapping, two files mapped, unmapped and mapped again at the same places. `vm14_mapfile.elf store`: a store into the mapping, which ends the program (status 255) |
 
-Steps 1–13 pass on the PS2 (2026-11-01) (`vm11_vmlink`'s first version, with 2650 swap
+Steps 1–14 pass on the PS2 (2026-11-01) (`vm11_vmlink`'s first version, with 2650 swap
 transfers in step 4, ran past the 60 s timeout: about 15 a second through `host:`); step 8 in 44 runs of 45, the last 44 in a row (with the
 UCAB fix and the checks below). In the other one, the build before those, the file
 server on the IOP stopped answering after the gather's swap writes: the debug screen showed

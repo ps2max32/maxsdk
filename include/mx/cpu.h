@@ -24,7 +24,14 @@ MX_INLINE int mx_is_spr(const void *p) { return ((uintptr_t)p & 0xF0000000u) == 
    uncached alias (MX_UNCACHED) is not mapped. */
 #define MX_VM_BASE 0x08000000u
 #define MX_VM_LIMIT 0x10000000u
-MX_INLINE int mx_is_vm(const void *p) { return ((uintptr_t)p >> 27) == 1; }
+/* the file window (mx_vm_map_file): unmapped by the BIOS */
+#define MX_VM_MAP_BASE 0x40000000u
+#define MX_VM_MAP_LIMIT 0x70000000u
+/* VM or the file window: paged, not at one physical address */
+MX_INLINE int mx_is_vm(const void *p) {
+  uintptr_t a = (uintptr_t)p;
+  return (a >> 27) == 1 || a - MX_VM_MAP_BASE < MX_VM_MAP_LIMIT - MX_VM_MAP_BASE;
+}
 
 /* An address as the DMAC sees it (MADR, TADR, a tag's ADDR): physical, or
    an SPR offset with the SPR bit set. A type of its own, so a pointer is

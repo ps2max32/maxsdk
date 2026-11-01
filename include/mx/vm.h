@@ -36,6 +36,7 @@ struct mx_vm_config {
   u32 size;      /* bytes of VM; 0: 128 MiB */
   u32 core_heap; /* bytes kept for mx_core_alloc; 0: 1 MiB */
   u32 frames;    /* bytes of physical memory for pages; 0: the rest */
+  u32 map_size;  /* bytes of the file window (mx_vm_map_file); 0: 64 MiB */
 };
 
 /* A program that defines this gets VM before its static constructors run
@@ -49,6 +50,19 @@ int mx_vm_init(const struct mx_vm_config *cfg);
 int mx_vm_active(void);
 MX_INLINE void *mx_vm_base(void) { return (void *)(uintptr_t)MX_VM_BASE; }
 u32 mx_vm_size(void);
+
+/* ---- mapped files ---------------------------------------------------------------- */
+
+/* Map file path, read-only, into the file window (MX_VM_MAP_BASE,
+   0x4000_0000, mx_vm_config.map_size): its pages are read when first
+   touched and share the frames with VM, but are never written: evicted,
+   they are dropped and read again (no swap file needed). A store into one
+   ends the program with a report. The file stays open until unmapped. Up
+   to 8 files; the window is given out from its start, and space comes
+   back when the last mapping goes. Thread code. Returns the address (*size
+   the file's bytes), or 0. */
+const void *mx_vm_map_file(const char *path, u32 *size);
+void mx_vm_unmap_file(const void *p);
 
 /* ---- DMA and the IOP --------------------------------------------------------- */
 
