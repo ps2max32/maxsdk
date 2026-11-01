@@ -36,6 +36,8 @@
 #include <mx/debug.h>
 #include <mx/mx.h>
 #include <mx/sif.h>
+#include <mx/thread.h>
+#include <mx/timer.h>
 #include <mx/vm.h>
 
 #include "vm_int.h"
@@ -85,6 +87,9 @@ static struct {
   struct mx_vm_stats st;
   u32 modified_seen;
   int code; /* the program runs code from VM (src/vm/image.c) */
+  int wsema;        /* wakes the writer thread; -1: none */
+  int swapsema;     /* the swap file's seek and transfer (swap_io) */
+  u32 clean_frames; /* what it keeps free or clean */
   /* pages read from files (PG_FILE): the segments of a program linked
      into VM (its ELF) and the mapped files; fd -1: a free entry */
   u32 nseg;
@@ -389,7 +394,32 @@ static void irq_check(u32 where) {
   }
 }
 
+extern volatile u32 mx__fio_calls;
+
+/* time and file server calls of the pager's I/O, into *us and io_calls
+   (the calls of another thread meanwhile count too) */
+struct io_mark {
+  u32 t0, c0;
+};
+static struct io_mark io_begin(void) { return (struct io_mark){mx_count(), mx__fio_calls}; }
+static void io_end(struct io_mark m, u32 *us) {
+  *us += (mx_count() - m.t0) / (MX_EE_HZ / 1000000u);
+  vm.st.io_calls += mx__fio_calls - m.c0;
+}
+
+/* The swap file's seek and transfer go together: the writer thread and a
+   faulting thread may both use it (each call of the file server is one at
+   a time, a seek and the transfer after it are not). */
+static void swap_io1(u32 pg, u32 f, int out);
 static void swap_io(u32 pg, u32 f, int out) {
+  struct io_mark m = io_begin();
+  mx_bios_wait_sema(vm.swapsema);
+  swap_io1(pg, f, out);
+  mx_bios_signal_sema(vm.swapsema);
+  io_end(m, out ? &vm.st.us_swap_out : &vm.st.us_swap_in);
+}
+
+static void swap_io1(u32 pg, u32 f, int out) {
   irq_check(0x10);
   u32 slot = vm.slot_of[pg] - 1u;
   volatile u32 *lg = &mx__vm_swaplog[mx__vm_swapn++ & 7];
@@ -420,7 +450,14 @@ static void swap_io(u32 pg, u32 f, int out) {
 
 /* Page pg (PG_FILE) into frame f from its file (the program's ELF, a
    mapped file): the file's bytes of the page, the rest zero. */
+static void file_in1(u32 pg, u32 f);
 static void file_in(u32 pg, u32 f) {
+  struct io_mark m = io_begin();
+  file_in1(pg, f);
+  io_end(m, &vm.st.us_file_in);
+}
+
+static void file_in1(u32 pg, u32 f) {
   irq_check(0x18);
   u32 i = 0;
   while (i < vm.nseg && !(vm.seg[i].fd >= 0 && pg - vm.seg[i].pg < vm.seg[i].npg))
@@ -496,11 +533,103 @@ static void write_out(u32 pg, u32 f) {
   vm.flags[pg] |= PG_SWAP;
 }
 
+/* ---- the writer thread (mx_vm_config.clean_frames) ------------------------ */
+
+static void lock(void);
+static void unlock(void);
+
+/* Frames free, or holding a page that can go without a write. The lock is
+   held. */
+static u32 clean_count(void) {
+  u32 n = vm.nfree;
+  for (u32 f = 0; f < vm.nframes; f++) {
+    int q = page_in(f);
+    if (q >= 0 && !(vm.flags[q] & (PG_DIRTY | PG_BUSY)) && !vm.pins[q])
+      n++;
+  }
+  return n;
+}
+
+/* A dirty page to write ahead: the next ones of the clock's hand, unused
+   ones first; -1 if none. The lock is held. */
+static int dirty_candidate(void) {
+  for (int pass = 0; pass < 2; pass++)
+    for (u32 n = 0; n < vm.nframes; n++) {
+      u32 f = (vm.hand + n) % vm.nframes;
+      int q = page_in(f);
+      if (q >= 0 && (vm.flags[q] & PG_DIRTY) && !(vm.flags[q] & PG_BUSY) && !vm.pins[q] &&
+          (pass || !(vm.flags[q] & PG_REF)))
+        return q;
+    }
+  return -1;
+}
+
+static u8 wstack[8192] MX_ALIGNED(16);
+
+static void writer(void *arg) {
+  (void)arg;
+  for (;;) {
+    mx_bios_wait_sema(vm.wsema);
+    lock();
+    while (clean_count() < vm.clean_frames) {
+      int q = dirty_candidate();
+      if (q < 0)
+        break;
+      u32 pg = (u32)q, f = vm.frame_of[pg] - 1u;
+      /* pinned for the write (not evicted, not moved); clean from now: a
+         store meanwhile makes it dirty again (TLB modified; on PCSX2, which
+         ignores D, it is unmapped and dirty when mapped again) */
+      int was = mx_di();
+      vm.pins[pg]++;
+      vm.flags[pg] &= (u8)~PG_DIRTY;
+      if (vm.dbit) {
+        vm.lo[pg] &= ~LO_D;
+        tlb_sync(pg);
+      } else
+        unmap(pg);
+      mx_irq_restore(was);
+      if (!vm.slot_of[pg])
+        vm.slot_of[pg] = (u16)++vm.nslots;
+      unlock();
+      swap_io(pg, f, 1);
+      lock();
+      was = mx_di();
+      vm.pins[pg]--;
+      vm.flags[pg] |= PG_SWAP;
+      mx_irq_restore(was);
+      vm.st.writer_outs++;
+    }
+    unlock();
+  }
+}
+
+static void writer_start(u32 clean) {
+  int me = mx_thread_self(), prio = mx_thread_prio(me);
+  if (prio < 1) {
+    mx_printf("mx_vm_init: clean_frames: the thread is at priority %d, the writer cannot run "
+              "above it; no writer\n",
+              prio);
+    return;
+  }
+  struct {
+    s32 count, max_count, init_count, wait_threads;
+    u32 attr, option;
+  } sp = {0, 1, 0, 0, 0, 0};
+  vm.wsema = mx_bios_create_sema(&sp);
+  vm.clean_frames = clean < vm.nframes / 2 ? clean : vm.nframes / 2;
+  if (vm.wsema < 0 || mx_thread_start(writer, 0, wstack, sizeof wstack, prio - 1) < 0) {
+    mx_printf("mx_vm_init: clean_frames: the writer thread did not start\n");
+    vm.wsema = -1;
+  }
+}
+
 /* Take a frame by the clock: a page used since the last pass loses V (and
    is kept), the first one not used goes (written out if dirty). Returns
    the frame, marked taken. The lock is held. */
 static u32 evict(void) {
   mx_vm_unpin_done();
+  if (vm.wsema >= 0)
+    mx_bios_signal_sema(vm.wsema); /* a frame goes: the writer cleans the next ones */
   for (u32 n = 0; n < 3 * vm.nframes; n++) {
     int was = mx_di();
     int f = frame_take(); /* freed meanwhile */
@@ -574,7 +703,11 @@ static void fault_in(u32 pg, int write) {
   place(pg, f >= 0 ? (u32)f : evict(), write);
 }
 
-static void lock(void) { mx_bios_wait_sema(vm.lock); }
+static void lock(void) {
+  u32 t0 = mx_count();
+  mx_bios_wait_sema(vm.lock);
+  vm.st.us_lock += (mx_count() - t0) / (MX_EE_HZ / 1000000u);
+}
 static void unlock(void) { mx_bios_signal_sema(vm.lock); }
 
 /* Debugging (the same): where the slow path is: 1 entered, 2 has the
@@ -1156,6 +1289,8 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
     u32 attr, option;
   } sp = {0, 1, 1, 0, 0, 0};
   vm.lock = mx_bios_create_sema(&sp);
+  vm.swapsema = mx_bios_create_sema(&sp);
+  vm.wsema = -1;
 
   /* the TLB: the BIOS's UCAB entries are put back on a miss */
   int was = mx_di();
@@ -1197,5 +1332,7 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
     mx_printf("mx_vm_init: TLB misses are not raised (PCSX2: run with the EE interpreter)\n");
     return -1;
   }
+  if (cfg->clean_frames && vm.fd >= 0)
+    writer_start(cfg->clean_frames);
   return 0;
 }

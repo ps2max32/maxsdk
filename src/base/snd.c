@@ -9,6 +9,8 @@
 #include <mx/iop.h>
 #include <mx/sif.h>
 #include <mx/snd.h>
+#include <mx/string.h>
+#include <mx/timer.h>
 
 #define AUDSRV_SID 0x870884eu
 #define AUDSRV_INIT 0x0000
@@ -33,7 +35,11 @@
 extern const u8 libsd_irx[], libsd_irx_end[], audsrv_irx[], audsrv_irx_end[];
 
 static struct mx_sif_client srv;
+/* the stream's calls (PLAY_AUDIO, AVAILABLE) run without waiting
+   (mx_sif_call_async), one at a time */
 static u32 sbuf[(QUEUE_MAX + 16) / 4] MX_DMA_LINES;
+static u32 sres[4] MX_DMA_LINES;
+static u32 sarg[4] MX_DMA_LINES;
 static u32 arg[4] MX_DMA_LINES;
 static u32 res[4] MX_DMA_LINES;
 static u8 bounce[CHUNK] MX_DMA_LINES;
@@ -45,7 +51,10 @@ static void callback(int fno, void *arg) {
   callbacks++;
 }
 
+static void drain(void);
+
 static int call(int fno, u32 a, u32 b, u32 c) {
+  drain(); /* the stream's calls first: they use the same server */
   volatile u32 *w = MX_UNCACHED(arg);
   volatile u32 *r = MX_UNCACHED(res);
   w[0] = a;
@@ -86,13 +95,87 @@ int mx_snd_init(void) {
 
 /* ---- the PCM stream ---------------------------------------------------------- */
 
+static u32 byte_rate = 48000 * 4; /* of the stream's format: bytes played a second */
+
 int mx_snd_stream_format(u32 rate, int bits, int channels) {
-  return call(AUDSRV_SET_FORMAT, rate, (u32)bits, (u32)channels) == 0 ? 0 : -1;
+  if (call(AUDSRV_SET_FORMAT, rate, (u32)bits, (u32)channels) != 0)
+    return -1;
+  byte_rate = rate * (u32)(bits / 8) * (u32)channels;
+  return 0;
+}
+
+/* The stream's calls are not waited for, so a frame's room and queue cost
+   no round trip to the IOP. audsrv's server takes one call at a time (all
+   its clients share its receive buffer), so one is in flight at most: the
+   PLAY_AUDIO of the last queue, or an AVAILABLE. The room is estimated from
+   the last AVAILABLE answer: plus what the stream played since, less one
+   feed block, less what was queued since. audsrv moves its ring's read
+   position a feed block (512 samples at 48 kHz) at a time, as it renders
+   one ahead, so the room grows in steps; the real room is never less than
+   that. Played at 63/64 of the byte rate (the EE's clock and the SPU2's
+   differ), capped at the most AVAILABLE ever answered. Every RESYNC calls
+   an AVAILABLE is asked again; a queue meanwhile takes nothing, the next one
+   does. Bytes audsrv does not take are lost (the caller counted them as
+   queued), so the estimate errs low; too low starves the ring, and audsrv
+   plays on regardless (its read position then runs past the write
+   position, and its AVAILABLE answers wrap). */
+#define RESYNC 15
+enum { NONE, PLAY, AVAIL };
+static struct mx_sif_client sc; /* a copy of srv */
+static int flight, have_room;
+static u32 ans_room, ans_t, queued_since, ring, since_sync;
+volatile u32 mx__snd_short; /* bytes audsrv did not take (the estimate was off) */
+
+static void answer(s32 n) {
+  ans_room = n < 0 ? 0 : (u32)n; /* nothing was queued meanwhile: one call in flight */
+  ring = ans_room > ring ? ans_room : ring;
+  ans_t = mx_count();
+  queued_since = 0;
+  have_room = 1;
+  since_sync = 0;
+}
+
+/* the call in flight, if answered (or wait: it is waited for) */
+static void collect(int wait) {
+  if (flight == NONE || (!wait && !sc.done))
+    return;
+  mx_sif_wait(&sc);
+  volatile u32 *r = MX_UNCACHED(sres);
+  if (flight == PLAY) {
+    if (r[0] < sbuf[0])
+      mx__snd_short += sbuf[0] - r[0];
+  } else
+    answer((s32)r[0]);
+  flight = NONE;
+}
+
+static void drain(void) {
+  collect(1);
+  have_room = 0; /* a call of another kind may change the room */
+}
+
+static u32 estimate(void) {
+  u32 dt = mx_count() - ans_t; /* < 14.5 s: an AVAILABLE every RESYNC calls */
+  u32 rate = byte_rate - byte_rate / 64, feed = 512u * byte_rate / 48000u;
+  u64 played = (u64)dt * rate / MX_EE_HZ;
+  u64 room = ans_room + (played > feed ? played - feed : 0);
+  room = room > queued_since ? room - queued_since : 0;
+  return room > ring ? ring : (u32)room;
 }
 
 u32 mx_snd_stream_room(void) {
-  int n = call(AUDSRV_AVAILABLE, 0, 0, 0);
-  return n < 0 ? 0 : (u32)n;
+  collect(0);
+  if (!have_room)
+    answer(call(AUDSRV_AVAILABLE, 0, 0, 0)); /* the first: waited for */
+  if (!sc.server)
+    sc.server = srv.server, sc.buf = srv.buf, sc.cbuf = srv.cbuf;
+  if (flight == NONE && ++since_sync >= RESYNC) {
+    flight = AVAIL;
+    mx_sif_call_async(&sc, AUDSRV_AVAILABLE, MX_UNCACHED(sarg), 16, MX_UNCACHED(sres), 4);
+  }
+  if (flight == AVAIL)
+    return 0; /* until it answers */
+  return estimate();
 }
 
 u32 mx_snd_stream_queued(void) {
@@ -101,29 +184,22 @@ u32 mx_snd_stream_queued(void) {
 }
 
 /* Word 0 the byte count, the data after it; audsrv answers with the bytes
-   it took (it takes no more than there is room for). */
+   it took. At most the room estimate is sent, in one call. */
 u32 mx_snd_stream_queue(const void *data, u32 bytes) {
-  const u8 *s = data;
-  u32 sent = 0;
-  while (bytes) {
-    u32 n = bytes < QUEUE_MAX ? bytes : QUEUE_MAX;
-    sbuf[0] = n;
-    u8 *d = (u8 *)&sbuf[1];
-    for (u32 i = 0; i < n; i++)
-      d[i] = s[i];
-    volatile u32 *r = MX_UNCACHED(res);
-    if (mx_sif_call(&srv, AUDSRV_PLAY_AUDIO, sbuf, (n + 4 + 15) & ~15u, (void *)r, 4) < 0)
-      break;
-    int took = (int)r[0];
-    if (took <= 0)
-      break;
-    sent += (u32)took;
-    if ((u32)took < n)
-      break;
-    s += n;
-    bytes -= n;
-  }
-  return sent;
+  u32 room = mx_snd_stream_room();
+  if (flight == PLAY)
+    collect(1); /* the last queue's call (answered long ago, normally) */
+  if (flight != NONE || !room || !bytes)
+    return 0;
+  u32 n = bytes < QUEUE_MAX ? bytes : QUEUE_MAX;
+  if (n > room)
+    n = room;
+  sbuf[0] = n;
+  memcpy(&sbuf[1], data, n);
+  flight = PLAY;
+  mx_sif_call_async(&sc, AUDSRV_PLAY_AUDIO, sbuf, (n + 4 + 15) & ~15u, MX_UNCACHED(sres), 4);
+  queued_since += n;
+  return n;
 }
 
 void mx_snd_stream_stop(void) { call(AUDSRV_STOP_AUDIO, 0, 0, 0); }

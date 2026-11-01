@@ -14,6 +14,8 @@ struct mx_sif_client {
   u32 buf;    /* IOP receive buffer of the server */
   u32 cbuf;
   void *pkt; /* our packet of the request in flight */
+  int sema;  /* + 1: a semaphore to sleep on while waiting (0: none yet) */
+  volatile int sleeping;
 };
 
 /* Returns 0 on success, < 0 if the IOP side does not answer. */
@@ -28,9 +30,21 @@ int mx_sif_bind(struct mx_sif_client *c, u32 sid);
 /* The same, giving up after n tries (0 if the server is not registered). */
 int mx_sif_bind_tries(struct mx_sif_client *c, u32 sid, int n);
 /* Call function fno of a bound server. send/recv must be 16-byte aligned;
-   recv is written by DMA, so it should be an uncached pointer. Blocks. */
+   recv is written by DMA, so it should be an uncached pointer. Blocks: a
+   thread with interrupts on sleeps until the answer (other threads run),
+   otherwise it spins. A server takes one call at a time: its clients share
+   its receive buffer. */
 int mx_sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,
                 u32 rsize);
+/* The same without waiting: send and recv must stay as they are (send not
+   written, recv not read) until the answer, which sets c->done; then
+   mx_sif_wait(c) returns at once. Still one call at a time per server, of
+   all its clients together: another call before the answer overwrites the
+   server's receive buffer (audsrv then hangs). */
+void mx_sif_call_async(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,
+                       u32 rsize);
+int mx_sif_wait(struct mx_sif_client *c);
+MX_INLINE int mx_sif_done(const struct mx_sif_client *c) { return c->done; }
 
 /* An EE RPC server for an IOP module that calls back (e.g. audsrv): binds
    to sid are answered, and each call runs fn(fno, arg) in the SIF interrupt

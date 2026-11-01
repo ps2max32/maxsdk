@@ -37,6 +37,11 @@ struct mx_vm_config {
   u32 core_heap; /* bytes kept for mx_core_alloc; 0: 1 MiB */
   u32 frames;    /* bytes of physical memory for pages; 0: the rest */
   u32 map_size;  /* bytes of the file window (mx_vm_map_file); 0: 64 MiB */
+  u32 clean_frames; /* 0, or a writer thread keeps that many frames free or
+                       clean (their pages written to the swap file ahead),
+                       so a page fault reads and does not write first. It
+                       runs above the priority of the thread that calls
+                       mx_vm_init and sleeps in its I/O */
 };
 
 /* A program that defines this gets VM before its static constructors run
@@ -126,6 +131,11 @@ struct mx_vm_stats {
   u32 file_ins;   /* pages read from files (a program linked into VM, mapped files) */
   u32 overwrites; /* pages pinned to be overwritten: not read in (MX_VM_PIN_OVERWRITE) */
   u32 restores;   /* of those, written short and read in after (mx_vm_overwrite_done) */
+  /* time (µs) the pager spent in the file server, by what for, and its calls */
+  u32 us_swap_in, us_swap_out, us_file_in;
+  u32 us_lock;  /* waiting for the VM lock (another thread's fault or pin) */
+  u32 io_calls; /* file server calls of the pager (seeks, reads, writes) */
+  u32 writer_outs; /* pages the writer thread wrote ahead (clean_frames) */
   u32 retries;                    /* swap I/O repeated (the file server did not answer) */
   u32 dirty_tracking;             /* 1: TLB modified exceptions (the PS2), 0: every
                                      mapped page counts as written (PCSX2) */
@@ -138,6 +148,13 @@ void mx_vm_stats(struct mx_vm_stats *s);
    handlers, thread stacks. align: a power of two (16 at least). */
 void *mx_core_alloc(u32 bytes, u32 align);
 void mx_core_free(void *p);
+/* How full the core heap is (to size mx_vm_config.core_heap): bytes it can
+   reach in all (with VM on: what it was given), in use (headers included),
+   and the largest allocation (16-byte aligned) that fits now. */
+struct mx_core_stats {
+  u32 total, used, largest_free;
+};
+void mx_core_stats(struct mx_core_stats *s);
 /* DMA buffers: core, aligned to a cache line (a write back never touches a
    neighbour). */
 MX_INLINE void *mx_dma_alloc(u32 bytes) { return mx_core_alloc((bytes + 63) & ~63u, 64); }

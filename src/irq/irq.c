@@ -28,6 +28,10 @@ static int dmac_entry(int ch, void *a, void *addr) {
    BIOS's third argument), for mx_prof */
 volatile u32 mx__irq_epc;
 
+/* the SDK's own work at each vblank start, next to the slot's handler
+   (the SIF waits' timeouts, src/base/sif.c) */
+static void (*vbon_hook)(void);
+
 static int intc_entry(int cause, void *a, void *addr) {
   (void)a;
   mx__irq_epc = (u32)(uintptr_t)addr;
@@ -36,7 +40,18 @@ static int intc_entry(int cause, void *a, void *addr) {
   s->count++;
   if (s->fn)
     s->fn(s->arg);
+  if (cause == MX_INTC_VBON && vbon_hook)
+    vbon_hook();
   return 0;
+}
+
+void mx__irq_vbon_hook(void (*fn)(void)) {
+  struct slot *s = &intc[MX_INTC_VBON];
+  vbon_hook = fn;
+  if (fn && !s->bios_id)
+    s->bios_id = mx_bios_add_intc_handler(MX_INTC_VBON, intc_entry, 0, 0);
+  if (fn)
+    mx_bios_enable_intc(MX_INTC_VBON);
 }
 
 void mx_irq_dmac(int ch, mx_irq_fn fn, void *arg) {
@@ -69,11 +84,12 @@ void mx_irq_intc(int cause, mx_irq_fn fn, void *arg) {
     s->bios_id = mx_bios_add_intc_handler(cause, intc_entry, 0, 0);
   if (fn)
     mx_bios_enable_intc(cause);
-  else
+  else if (!(cause == MX_INTC_VBON && vbon_hook))
     mx_bios_disable_intc(cause);
 }
 
 void mx_irq_exit(void) {
+  vbon_hook = 0;
   for (int i = 0; i < 10; i++)
     if (dmac[i].bios_id) {
       mx_bios_disable_dmac(i);

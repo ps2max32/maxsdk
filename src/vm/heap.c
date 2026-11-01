@@ -75,6 +75,24 @@ void *mx_core_alloc(u32 bytes, u32 align) {
   return user_ptr(b, align);
 }
 
+void mx_core_stats(struct mx_core_stats *s) {
+  heap_setup();
+  u8 *floor = core_floor ? core_floor : brk_lo;
+  int was = mx_di();
+  u32 used = 0, largest = (u32)(core_lo - floor), total = (u32)(top - floor);
+  for (struct blk *b = (struct blk *)core_lo; (u8 *)b < top; b = next_blk(b)) {
+    if (b->used)
+      used += b->size;
+    else if (b->size > largest)
+      largest = b->size;
+  }
+  mx_irq_restore(was);
+  /* a block's header and alignment come out of what it can hold */
+  s->total = total;
+  s->used = used;
+  s->largest_free = largest > sizeof(struct blk) + 4 ? largest - (u32)sizeof(struct blk) - 4 : 0;
+}
+
 void mx_core_free(void *p) {
   if (!p)
     return;

@@ -17,7 +17,9 @@ virtual memory at 0x0800_0000, in 32 KiB pages held in the physical memory left 
 | Page fault | A new page (zero fill) or one in the swap file continues in the faulting thread: the registers are copied onto its stack, the exception returns into `mx__vm_slow` with the thread's interrupts, which takes the VM lock (a BIOS semaphore: other threads run meanwhile), zero-fills, or evicts and reads, then resumes by a negative syscall whose handler (at EXL = 1) restores everything and returns to the instruction. A fault with interrupts off, in the BIOS, or on a VM stack ends the program with a report: touch VM that may not be resident only from thread code with interrupts on (pin what an interrupt handler reads). |
 | Eviction | The clock (second chance) over the frames: a used page is taken out of the TLB and kept; an unused one goes, written to its swap slot if dirty, dropped if clean. Pinned and busy pages are skipped. |
 | Dirty tracking | Clean pages are mapped without D: the first store raises TLB modified (code 1) and marks the page. `mx_vm_init` tests it: on PCSX2, which ignores D, every mapped page counts as dirty. |
-| Swap file | Through the IOP file server (`host:`, `mass:`, …), opened read-write and truncated; slots are given out in order, so the file only grows at its end; one 32 KiB read or write a page. |
+| Swap file | Through the IOP file server (`host:`, `mass:`, …), opened read-write and truncated; slots are given out in order, so the file only grows at its end, and a page keeps its slot. A swap in is a seek and two 16 KiB READs, a write out a seek and one WRITE; a seek to where the file already is costs no call (`src/base/sif.c` keeps each descriptor's position). The seek and the transfer hold a lock of their own (the writer thread and a faulting thread share the file). |
+| Writer thread | `mx_vm_config.clean_frames` (0: none): a thread above the priority of the one that called `mx_vm_init` keeps that many frames free or clean. It writes dirty pages ahead of the clock's hand (unused ones first), pinned for the write; the page is clean from the start of the write, and a store meanwhile makes it dirty again (TLB modified; on PCSX2, which ignores D, the page is unmapped and dirty when mapped again). Faults then find clean victims and only read. It sleeps in its I/O (below), so the program runs meanwhile. |
+| Waits for the IOP | A thread waiting for an answer (file server, audsrv) sleeps on its client's semaphore, so other threads run: woken by the answer, by an RDATA request to send, and at each vblank start (to give up after its time). With interrupts off or in a handler it spins. |
 | DMA | The DMAC sees physical addresses only (`<mx/dma.h>`, below). |
 
 ### Programs linked into VM
@@ -144,6 +146,7 @@ interrupt in slots 30–31 (it stops when interrupts stay off), and at the end b
 | `vm14_mapfile` | a 300 KiB file mapped with 8 frames and no swap file: in the file window, read twice (read again, dropped, never written out), random reads, a DMA pin and a VIF1 transfer of mapped data, a write pin refused, `mx_fio_write` from the mapping, two files mapped, unmapped and mapped again at the same places. `vm14_mapfile.elf store`: a store into the mapping, which ends the program (status 255) |
 | `vm15_overwrite` | `mx_fio_read` into VM pinned with `MX_VM_PIN_OVERWRITE`, 8 frames: a read at byte 100 over 5 pages in the swap file (4 not read in, the bytes around as they were), a short read over 4 pages (the rest of 2 restored from the swap file), reads into new pages (no zero fill; past a short read, zero) |
 | `vm16_lock` | in a program linked into VM: a static buffer locked and sent through `mx_paddr_of`; 3 pages of a mapped file locked, sent from 3 places, unmoved by 40 pages of heap writes; unlocked and dropped, locked again from the file; `mx_frame_unlock` holds the lock until the frame that REFs the range is done |
+| `vm17_writer` | the writer thread (`clean_frames` 4, 16 frames): 400 random whole-page writes and checks of 48 pages and a second thread, the tables checked every 50; most write outs by the writer, most evictions drops; `mx_core_stats` |
 
 Steps 1–15 pass on the PS2 (2026-11-01), step 16 on PCSX2 (not run on the PS2 yet), and Quake1 linked into VM (`MX_MEMORY=vm`, 600 demo frames at 53–72 fps) (`vm11_vmlink`'s first version, with 2650 swap
 transfers in step 4, ran past the 60 s timeout: about 15 a second through `host:`); step 8 in 44 runs of 45, the last 44 in a row (with the
@@ -167,8 +170,31 @@ the debug screen now counts those timeouts in slot 27 (`src/base/sif.c`, `fio_ca
 | Reading 4 MiB resident VM vs core | 2903409 vs 2708231 cycles (VM 1.07 ×) |
 | VIF1 64 KiB: VM pinned / VM in one piece (`MX_VM_PIN_DMA`) / core | 20598 / 20262 / 19677 cycles (the pinned range was one piece already) |
 
+What one call of the IOP costs (`probe/p21_iolat.c`, swap file on `host:`, 2026-11-01; the
+same with waits that spin, and 3–5% more while a sound stream plays):
+
+| Call | Time |
+|---|---|
+| seek | 1.0 ms |
+| READ 16 KiB / 32 KiB (one call: ps2link takes it) | 7.8 / 15.5 ms (about 2 MB/s) |
+| WRITE 32 KiB | 40.5 ms (about 0.8 MB/s) |
+| audsrv room (`mx_snd_stream_room`, estimated, no call) | 4 µs |
+
+So a swap in costs about 17 ms and a write out about 41 ms: a fault that evicts a dirty page
+about 58 ms. Writes are the expensive part; the writer thread (`clean_frames`) takes them out
+of the faults when the IOP has time between them (it does one transfer at a time: a program
+that pages without pause, such as `vm17_writer` on the PS2, keeps it busy and the writer
+cannot get ahead).
+
 A swap file on `host:` costs milliseconds a fault: use VM for data that is touched rarely
-(levels not in play, caches), not for what a frame reads.
+(levels not in play, caches), not for what a frame reads. Data a frame reads (sound
+samples being mixed, the level in play) can be kept resident with `mx_vm_pin` or
+`mx_vm_lock`: each pinned page is a frame taken from the pager for as long. Pager time
+shows in `mx_vm_stats` (`us_swap_in`, `us_swap_out`, `us_file_in`, `us_lock`, `io_calls`,
+`writer_outs`); `probe/p21_iolat.c` measures what each call of the IOP costs.
+
+The IOP's file manager has 16 descriptors, 3 of them for stdio; a program linked into VM
+holds 2 (its ELF and the swap file), and each mapped file one.
 
 ## PCSX2
 

@@ -153,6 +153,11 @@ int main(void) {
   mx_vm_stats(&s);
   mx_printf("vm7: %u swap ins, %u outs, %u drops, %u faults, %u retries, %u refills\n",
             s.swap_ins, s.swap_outs, s.drops, s.faults, s.retries, s.refills);
+  mx_printf("vm7: %u file server calls (%u.%02u a transfer); ms in swap ins %u, outs %u, "
+            "the VM lock %u\n",
+            s.io_calls, s.io_calls / (s.swap_ins + s.swap_outs),
+            s.io_calls * 100 / (s.swap_ins + s.swap_outs) % 100, s.us_swap_in / 1000,
+            s.us_swap_out / 1000, s.us_lock / 1000);
   mx_dbg_heartbeat(0);
   return t_done("vm7");
 }

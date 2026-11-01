@@ -139,6 +139,20 @@ static void send_rdata(int intr, const u32 *w) {
   }
 }
 
+/* Threads sleeping in wait_answer, woken by their answer (RPC_END), by a
+   deferred RDATA (any of them sends it), and at each vblank start (to see
+   whether they give up). */
+#define NSLEEP 8
+static struct mx_sif_client *volatile sleepers[NSLEEP];
+
+static void wake_sleepers(void) {
+  for (int i = 0; i < NSLEEP; i++) {
+    struct mx_sif_client *c = sleepers[i];
+    if (c && c->sleeping)
+      mx_bios_isignal_sema(c->sema - 1);
+  }
+}
+
 static void send_deferred(void) {
   while (ndeferred) {
     u32 w[5];
@@ -258,6 +272,8 @@ static int sif0_handler(int ch, void *arg, void *addr) {
        (wait_answer), so this is the answer to the client's current one */
     rpc_free(c->pkt);
     c->done = 1;
+    if (c->sleeping)
+      mx_bios_isignal_sema(c->sema - 1);
     break;
   }
   case CMD_RPC_RDATA: {
@@ -270,6 +286,7 @@ static int sif0_handler(int ch, void *arg, void *addr) {
       for (int i = 0; i < 5; i++)
         (&deferred[ndeferred].pkt_addr)[i] = w[i];
       ndeferred++;
+      wake_sleepers();
     } else
       send_rdata(1, w);
     break;
@@ -361,6 +378,62 @@ int mx_sif_init(void) {
    reused before it answers (slow devices: a host: file over the network,
    USB). */
 volatile u32 mx__sif_irq_lost;
+
+void mx__irq_vbon_hook(void (*fn)(void));
+
+/* Wait for c's answer asleep (other threads run meanwhile), in thread code
+   with interrupts on (the BIOS's semaphores; IE, EIE, not EXL). Returns 1
+   with *r the result (0, or -1: gave up after limit cycles from t0, unless
+   limit is 0), or 0 if it cannot sleep here (the caller spins). */
+int mx__sif_spin; /* probes: wait spinning, as before sleeping waits */
+static int sleep_wait(struct mx_sif_client *c, u32 limit, u32 t0, int *r) {
+  u32 st = mx_status();
+  if ((st & 0x10003u) != 0x10001u || mx__sif_spin)
+    return 0;
+  if (!c->sema) {
+    struct {
+      s32 count, max_count, init_count, wait_threads;
+      u32 attr, option;
+    } p = {0, 1, 0, 0, 0, 0};
+    int id = mx_bios_create_sema(&p);
+    if (id < 0)
+      return 0;
+    c->sema = id + 1;
+  }
+  static int hooked;
+  if (!hooked) {
+    hooked = 1;
+    mx__irq_vbon_hook(wake_sleepers);
+  }
+  int slot = -1, was = mx_di();
+  for (int i = 0; i < NSLEEP && slot < 0; i++)
+    if (!sleepers[i])
+      sleepers[i] = c, slot = i;
+  if (slot >= 0)
+    c->sleeping = 1;
+  mx_irq_restore(was);
+  if (slot < 0)
+    return 0;
+  *r = 0;
+  for (;;) {
+    if (ndeferred)
+      send_deferred();
+    if (c->done)
+      break;
+    if (limit && mx_count() - t0 > limit) {
+      *r = -1;
+      break;
+    }
+    mx_bios_wait_sema(c->sema - 1);
+  }
+  was = mx_di();
+  c->sleeping = 0;
+  sleepers[slot] = 0;
+  mx_irq_restore(was);
+  mx_bios_poll_sema(c->sema - 1); /* a wake that came after the answer */
+  return 1;
+}
+
 static int wait_answer(struct mx_sif_client *c, int may_give_up) {
   u32 limit = may_give_up > 1 ? (u32)may_give_up : 600000000u;
   u32 t0 = mx_count();
@@ -372,6 +445,9 @@ static int wait_answer(struct mx_sif_client *c, int may_give_up) {
     mx__sif_irq_lost = 1u << 24 | (st & 0xFFFFFFu);
     mx_dbg_word(29, mx__sif_irq_lost);
   }
+  int r;
+  if (sleep_wait(c, may_give_up ? limit : 0, t0, &r))
+    return r;
   while (!c->done) {
     if (ndeferred)
       send_deferred();
@@ -415,8 +491,26 @@ int mx_sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, v
   return sif_call(c, fno, send, ssize, recv, rsize, 0);
 }
 
+static void sif_send_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize,
+                          void *recv, u32 rsize);
+
+void mx_sif_call_async(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,
+                       u32 rsize) {
+  sif_send_call(c, fno, send, ssize, recv, rsize);
+}
+
+int mx_sif_wait(struct mx_sif_client *c) { return wait_done(c); }
+
 static int sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,
                     u32 rsize, u32 wait) {
+  sif_send_call(c, fno, send, ssize, recv, rsize);
+  if (!wait)
+    return wait_done(c);
+  return wait_answer(c, (int)wait) < 0 ? -2 : 0;
+}
+
+static void sif_send_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize,
+                          void *recv, u32 rsize) {
   u8 *p = rpc_alloc();
   volatile u32 *w = uw(p);
   c->pkt = p;
@@ -431,9 +525,6 @@ static int sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssiz
   if (!mx_is_spr(send) && ((uintptr_t)send & 0xF0000000u) != 0x20000000u)
     mx_dcache_writeback(send, ssize);
   send_cmd(0, CMD_RPC_CALL, p, RPC_PKT_SIZE, send, c->buf, ssize);
-  if (!wait)
-    return wait_done(c);
-  return wait_answer(c, (int)wait) < 0 ? -2 : 0;
 }
 
 /* ---- IOP memory ----------------------------------------------------------- */
@@ -561,7 +652,11 @@ static struct mx_sif_client *fio_c = &fio_pool[0];
    call (the VM's swap file: a seek and a transfer) do. (Seen before the
    answers' buffers got cache lines of their own, MX_DMA_LINES, docs/vm.md;
    not seen since: kept as a fallback.) */
+/* file server calls so far (the VM's statistics count its own) */
+volatile u32 mx__fio_calls;
+
 static int fio_call(int fno, const void *send, u32 ssize, void *recv, u32 rsize) {
+  mx__fio_calls++;
   /* 12 s: the cycle counter wraps at 14.5 */
   int r = sif_call(fio_c, fno, send, ssize, recv, rsize, 12u * 294912000u);
   if (r == -2) {
@@ -613,6 +708,8 @@ static void fio_unlock(void) {
 
 /* The most one READ asks for: the file server's transfer buffer. */
 #define FIO_READ_CHUNK 0x4000u
+/* the same, changed by probes (probe/p21_iolat.c) */
+u32 mx__fio_read_chunk = FIO_READ_CHUNK;
 
 /* The most one WRITE sends from memory. */
 #define FIO_CHUNK 0x10000u
@@ -648,6 +745,21 @@ static int written(int fd, int got, u32 n) {
   return fd <= 2 || got == (int)n ? 0 : -1;
 }
 
+/* Each descriptor's file position as far as known (-1: not known), so a
+   seek to where the file already is costs no call: the VM pager's swap
+   transfers to consecutive slots, a read after a read. Reads and writes
+   advance it; an error forgets it. Under the fio lock. */
+#define NPOS 32
+static s32 fpos[NPOS] = {[0 ... NPOS - 1] = -1};
+static void pos_set(int fd, s32 at) {
+  if ((u32)fd < NPOS)
+    fpos[fd] = at;
+}
+static void pos_add(int fd, int r, u32 n) {
+  if ((u32)fd < NPOS)
+    fpos[fd] = r < 0 || fpos[fd] < 0 ? -1 : fpos[fd] + (s32)n;
+}
+
 /* Small writes (the tty) are copied, so the data may be anywhere and change
    at once; large ones go from where they are (core memory or VM; the
    scratchpad and uncached data are copied). VM is pinned for the call
@@ -679,6 +791,7 @@ int mx_fio_write(int fd, const void *data, u32 n) {
       n -= len;
     }
   }
+  pos_add(fd, r, n0);
   fio_unlock();
   if (vm)
     mx_vm_unpin(data, n0);
@@ -711,6 +824,7 @@ static int fio_open_unlocked(const char *path, int flags) {
 int mx_fio_open(const char *path, int flags) {
   fio_lock();
   int r = fio_open_unlocked(path, flags);
+  pos_set(r, flags & 0x0100 /* APPEND: writes go to the end */ ? -1 : 0);
   fio_unlock();
   return r;
 }
@@ -777,12 +891,13 @@ int mx_fio_read(int fd, void *data, u32 n) {
   while (total < n) {
     /* at most the file server's transfer buffer a READ (16 KiB): reads it
        had to send in two pieces stalled after the first under ps2link */
-    u32 len = n - total > FIO_READ_CHUNK ? FIO_READ_CHUNK : n - total;
+    u32 len = n - total > mx__fio_read_chunk ? mx__fio_read_chunk : n - total;
     struct mx_vm_piece pc = mx_vm_first_piece(d + total, len);
     len = pc.bytes;
     int got = fio_read1(fd, d + total, pc.addr, len);
     if (got < 0) {
       r = total ? (int)total : got;
+      pos_add(fd, -1, 0);
       goto out;
     }
     total += (u32)got;
@@ -790,6 +905,7 @@ int mx_fio_read(int fd, void *data, u32 n) {
       break; /* the end of the file */
   }
   r = (int)total;
+  pos_add(fd, 0, total);
 out:
   fio_unlock();
   if (vm) {
@@ -832,7 +948,13 @@ static int fio_lseek_unlocked(int fd, s32 offset, int whence) {
 
 int mx_fio_lseek(int fd, s32 offset, int whence) {
   fio_lock();
-  int r = fio_lseek_unlocked(fd, offset, whence);
+  int r;
+  if (whence == MX_FIO_SEEK_SET && offset >= 0 && (u32)fd < NPOS && fpos[fd] == offset)
+    r = offset; /* there already */
+  else {
+    r = fio_lseek_unlocked(fd, offset, whence);
+    pos_set(fd, r < 0 ? -1 : r);
+  }
   fio_unlock();
   return r;
 }
@@ -851,6 +973,7 @@ static int fio_close_unlocked(int fd) {
 
 int mx_fio_close(int fd) {
   fio_lock();
+  pos_set(fd, -1);
   int r = fio_close_unlocked(fd);
   fio_unlock();
   return r;

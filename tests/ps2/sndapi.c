@@ -140,6 +140,9 @@ int main(int argc, char **argv) {
   mx_printf("snd: stream took %u bytes in %u ms (%u calls), %u queued: %u bytes/s (192000)\n",
             total, ms, calls, queued, rate);
   CHECK(rate > 182000 && rate < 202000);
+  /* the room is estimated (src/base/snd.c): never more than audsrv took */
+  extern volatile u32 mx__snd_short;
+  CHECK_EQ(mx__snd_short, 0);
   mx_snd_stream_stop();
   wait_ms(300);
 
