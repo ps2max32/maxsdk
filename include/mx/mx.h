@@ -30,12 +30,14 @@ void mx_exit(int status) __attribute__((noreturn));
 void *mx_heap_start(void);
 void *mx_heap_end(void);
 
-/* End marker for the test runners (ps2-pcsx2-test, ps2-hw-test). In the
+/* End marker for the test runners (ps2-pcsx2-test, ps2-hw-test), after
+   (with VM on) a line of what the pager and the IOP's waits cost. In the
    combined batch ELF (MX_BATCH) only the batch prints it. */
+void mx__test_end(int status);
 #ifdef MX_BATCH
 #define MX_TEST_END(status) ((void)(status))
 #else
-#define MX_TEST_END(status) mx_printf("@@PS2TEST_END@@ status=%d\n", (status))
+#define MX_TEST_END(status) mx__test_end(status)
 #endif
 
 #endif

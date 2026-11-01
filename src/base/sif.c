@@ -10,6 +10,7 @@
 #include <mx/hw/regs.h>
 #include <mx/iop.h>
 #include <mx/sif.h>
+#include <mx/timer.h>
 #include <mx/string.h>
 #include <mx/vm.h>
 
@@ -318,6 +319,7 @@ int mx_sif_serve(u32 sid, mx_sif_server_fn fn, void *arg) {
 
 int mx_sif_ready(void) { return sif_state == 1; }
 
+
 void mx_sif_exit(void) {
   if (sif0_handler_id > 0)
     mx_bios_remove_dmac_handler(MX_DMAC_SIF0, sif0_handler_id);
@@ -434,7 +436,29 @@ static int sleep_wait(struct mx_sif_client *c, u32 limit, u32 t0, int *r) {
   return 1;
 }
 
+/* time (µs) and number of waits for the IOP, all, and of them for the file
+   server (mx__sif_report) */
+static u32 wait_us, waits, fio_us, fio_waits;
+/* the counts so far: waits, their µs, the file server's waits, their µs */
+void mx__sif_waits(u32 out[4]) {
+  out[0] = waits, out[1] = wait_us, out[2] = fio_waits, out[3] = fio_us;
+}
+
+void mx__sif_report(void) {
+  mx_printf("maxsdk: IOP waits %u in %u ms, of them the file server's %u in %u ms\n", waits,
+            wait_us / 1000, fio_waits, fio_us / 1000);
+}
+
+static int wait_answer1(struct mx_sif_client *c, int may_give_up);
 static int wait_answer(struct mx_sif_client *c, int may_give_up) {
+  u32 t0 = mx_count();
+  int r = wait_answer1(c, may_give_up);
+  wait_us += (mx_count() - t0) / (MX_EE_HZ / 1000000u);
+  waits++;
+  return r;
+}
+
+static int wait_answer1(struct mx_sif_client *c, int may_give_up) {
   u32 limit = may_give_up > 1 ? (u32)may_give_up : 600000000u;
   u32 t0 = mx_count();
   /* the answer comes by interrupt: waiting with them off hangs (it once
@@ -657,8 +681,11 @@ volatile u32 mx__fio_calls;
 
 static int fio_call(int fno, const void *send, u32 ssize, void *recv, u32 rsize) {
   mx__fio_calls++;
+  u32 us0 = wait_us;
   /* 12 s: the cycle counter wraps at 14.5 */
   int r = sif_call(fio_c, fno, send, ssize, recv, rsize, 12u * 294912000u);
+  fio_us += wait_us - us0;
+  fio_waits++;
   if (r == -2) {
     /* the debug screen (<mx/debug.h>), slot 27: timeouts so far << 24 |
        the function << 16 | RDATA answers waiting << 8 | packets in use */

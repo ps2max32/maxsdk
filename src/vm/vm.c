@@ -538,13 +538,13 @@ static void write_out(u32 pg, u32 f) {
 static void lock(void);
 static void unlock(void);
 
-/* Frames free, or holding a page that can go without a write. The lock is
-   held. */
+/* Frames free, or holding a page the clock may take next without a write
+   (clean, not used since its last pass). The lock is held. */
 static u32 clean_count(void) {
   u32 n = vm.nfree;
   for (u32 f = 0; f < vm.nframes; f++) {
     int q = page_in(f);
-    if (q >= 0 && !(vm.flags[q] & (PG_DIRTY | PG_BUSY)) && !vm.pins[q])
+    if (q >= 0 && !(vm.flags[q] & (PG_DIRTY | PG_BUSY | PG_REF)) && !vm.pins[q])
       n++;
   }
   return n;
@@ -625,7 +625,10 @@ static void writer_start(u32 clean) {
 
 /* Take a frame by the clock: a page used since the last pass loses V (and
    is kept), the first one not used goes (written out if dirty). Returns
-   the frame, marked taken. The lock is held. */
+   the frame, marked taken. The lock is held. Clean pages are not preferred:
+   a program's code in VM is clean (read from its ELF) and among the
+   hottest; with clean ones taken first, Quake III's loading went to frames
+   of 10 s on the PS2 (2026-11-01). */
 static u32 evict(void) {
   mx_vm_unpin_done();
   if (vm.wsema >= 0)
@@ -1160,6 +1163,17 @@ void mx__core_fault(const void *p, const char *what) {
 }
 
 /* ---- set up ---------------------------------------------------------------------- */
+
+void mx__vm_report(void) {
+  struct mx_vm_stats s;
+  mx_vm_stats(&s);
+  mx_printf("maxsdk: VM %u frames, %u faults: %u swap ins (%u ms), %u outs (%u ms), %u by the "
+            "writer, %u drops, %u from files (%u ms), %u zero fills; lock waits %u ms; %u "
+            "file server calls\n",
+            s.frames, s.faults, s.swap_ins, s.us_swap_in / 1000, s.swap_outs + s.writer_outs,
+            s.us_swap_out / 1000, s.writer_outs, s.drops, s.file_ins, s.us_file_in / 1000,
+            s.zero_fills, s.us_lock / 1000, s.io_calls);
+}
 
 void mx_vm_stats(struct mx_vm_stats *s) {
   *s = vm.st;

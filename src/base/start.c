@@ -49,7 +49,26 @@ static void *heap_end;
 void *mx_heap_end(void) { return heap_end; }
 void *mx_heap_start(void) { return _end; }
 
+void mx__vm_report(void);
+void mx__sif_report(void);
+
+/* with VM on: what the pager and the IOP's waits cost, once */
+static void report(void) {
+  static int done;
+  if (mx_vm_active() && !done) {
+    done = 1;
+    mx__vm_report();
+    mx__sif_report();
+  }
+}
+
+void mx__test_end(int status) {
+  report();
+  mx_printf("@@PS2TEST_END@@ status=%d\n", status);
+}
+
 void mx_exit(int status) {
+  report();
   mx_debug_flush();
   mx_bios_exit(status);
 }
