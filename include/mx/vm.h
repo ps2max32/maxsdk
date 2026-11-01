@@ -130,6 +130,7 @@ struct mx_vm_piece mx_vm_first_piece(const void *p, u32 bytes);
 struct mx_vm_stats {
   u32 pages, frames, free_frames, pinned;
   u32 refills;    /* TLB refills (no entry): MX_VM_REFILL_CYCLES each */
+  u32 refills_i;  /* of them, instruction fetches (code in VM) */
   u32 zero_fills; /* first touches */
   u32 faults;     /* page faults handled in the thread: new pages, the swap file */
   u32 swap_ins, swap_outs, drops; /* drops: clean pages evicted without I/O */
@@ -146,8 +147,9 @@ struct mx_vm_stats {
                                      mapped page counts as written (PCSX2) */
 };
 void mx_vm_stats(struct mx_vm_stats *s);
-/* What a TLB refill of a resident page costs (the PS2, docs/vm.md "Costs") */
-#define MX_VM_REFILL_CYCLES 290
+/* What a TLB refill of a resident page costs (the PS2, tlb.S's fast
+   refill, probe/p22_refill.c; docs/vm.md "Costs") */
+#define MX_VM_REFILL_CYCLES 176
 
 /* ---- the trace (mx_vm_config.trace) ------------------------------------------------ */
 

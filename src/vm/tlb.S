@@ -19,6 +19,93 @@
 	.type mx__vm_vector, @function
 	.ent mx__vm_vector
 mx__vm_vector:
+	# The fast refill: a TLB refill (code 2 or 3) of a VM page that is
+	# mapped (V in lo[]) and has no entry gets the next entry here, as
+	# vm.c's tlb_take and tlb_sync would (vm_int.h, struct mx__vm_fast),
+	# with $1-$3 saved; anything else goes to the full path below.
+	lui $27, %hi(mx__vm_fast)
+	addiu $27, $27, %lo(mx__vm_fast)
+	mfc0 $26, $13
+	andi $26, $26, 0x78	# ExcCode << 2: 0x08 (2) and 0x0C (3) give 0x08
+	xori $26, $26, 0x08
+	bnez $26, full
+	nop
+	sq $1, VMF_SAVE($27)
+	sq $2, VMF_SAVE + 16($27)
+	sq $3, VMF_SAVE + 32($27)
+	mfc0 $26, $8		# BadVAddr
+	srl $26, $26, 15
+	addiu $26, $26, -VMF_BASE_PAGE	# k0 = the page (if VM)
+	lw $1, VMF_NPAGES($27)
+	sltu $1, $26, $1
+	beqz $1, slow
+	lw $2, VMF_PAGE_SLOT($27)
+	addu $2, $2, $26	# $2 = &page_slot[page]
+	lbu $1, 0($2)
+	bnez $1, slow		# it has an entry: C
+	lw $1, VMF_LO($27)
+	sll $3, $26, 2
+	addu $1, $1, $3
+	lw $1, 0($1)		# $1 = lo[page]
+	andi $3, $1, 2		# LO_V
+	beqz $3, slow
+	lw $3, VMF_NEXT($27)	# $3 = the entry to take
+	mtc0 $3, $0		# Index
+	mtc0 $1, $2		# EntryLo0
+	addiu $1, $1, 0x100	# EntryLo1: the next 16 KiB
+	mtc0 $1, $3
+	ori $1, $0, 0x6000	# PageMask 16 KiB
+	mtc0 $1, $5
+	mfc0 $1, $8
+	srl $1, $1, 15
+	sll $1, $1, 15
+	mtc0 $1, $10		# EntryHi: the page's address, ASID 0
+	sync.p
+	tlbwi
+	sync.p
+	sb $3, 0($2)		# page_slot[page] = entry
+	sll $1, $3, 1
+	addu $1, $1, $27
+	lhu $2, VMF_SLOT_PAGE($1)	# what the entry held: page + 1, 0, 0xFFFF
+	addiu $26, $26, 1
+	sh $26, VMF_SLOT_PAGE($1)	# slot_page[entry] = page + 1
+	beqz $2, 4f
+	addiu $2, $2, -1
+	ori $1, $0, 0xFFFE
+	beq $2, $1, 4f		# one of the BIOS's (put back on a miss)
+	lw $1, VMF_PAGE_SLOT($27)
+	addu $1, $1, $2
+	sb $0, 0($1)		# that page: no entry
+4:	addiu $3, $3, 1		# the next entry: 31..47 in turn
+	sltiu $1, $3, 48
+	bnez $1, 5f
+	nop
+	ori $3, $0, 31
+5:	sw $3, VMF_NEXT($27)
+	lw $1, VMF_REFILLS($27)
+	addiu $1, $1, 1
+	sw $1, VMF_REFILLS($27)
+	mfc0 $1, $14		# an instruction fetch: BadVAddr = EPC (+ 4 in a delay slot)
+	mfc0 $2, $13
+	bgez $2, 6f
+	nop
+	addiu $1, $1, 4
+6:	mfc0 $2, $8
+	bne $1, $2, 7f
+	lw $1, VMF_REFILLS_I($27)
+	addiu $1, $1, 1
+	sw $1, VMF_REFILLS_I($27)
+7:	lq $1, VMF_SAVE($27)
+	lq $2, VMF_SAVE + 16($27)
+	lq $3, VMF_SAVE + 32($27)
+	sync.p
+	eret
+	nop
+slow:
+	lq $1, VMF_SAVE($27)
+	lq $2, VMF_SAVE + 16($27)
+	lq $3, VMF_SAVE + 32($27)
+full:
 	lui $26, %hi(mx__vm_xs)
 	addiu $26, $26, %lo(mx__vm_xs)
 	sq $1, 16($26)

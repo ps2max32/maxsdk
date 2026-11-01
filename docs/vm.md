@@ -13,7 +13,7 @@ virtual memory at 0x0800_0000, in 32 KiB pages held in the physical memory left 
 | `malloc` | libmxc's own (`libc/malloc.c`, TLSF: free blocks in lists by size class, found by bitmaps), not picolibc's: that one clears every block it hands out and walks one address-sorted free list on every `free`. Over VM both touch pages all over the heap, each touch maybe a swap transfer: Quake's 16 MiB hunk was written out to swap as it was allocated, and its loading thrashed (1700 page faults a second, no progress). Now `malloc` touches the block's header, its neighbours' and a list head; it does not clear (`calloc` does; new VM pages are zero) |
 | Page | 32 KiB = one TLB entry, both 16 KiB halves valid (PageMask 16 KiB). An entry with an invalid half hangs the PS2 (below), so a page is in the TLB whole or not at all, and every miss is a refill. |
 | TLB | `tlbwi` only, at entries 31–47 in turn, with a table of what each holds (no `tlbwr`, no `tlbp`: PCSX2 gets both wrong). The BIOS's entries 0–30 stay; its UCAB entries (31–38) may be replaced and are put back on a miss. 17 entries: 544 KiB in the TLB at once. |
-| Exception | Codes 1–3 (`SetVTLBRefillHandler`) go to `src/vm/tlb.S`: the registers are saved, C (`mx__vm_exception`, at EXL = 1, on its own stack, core memory only) does as little as it can: it refills the TLB, maps a resident page again, or marks the page dirty (TLB modified). Everything else goes to the thread. |
+| Exception | Codes 1–3 (`SetVTLBRefillHandler`) go to `src/vm/tlb.S`. A refill of a VM page that is mapped and has no entry is done there at once (the fast refill: three registers saved, the next entry written, the tables of `struct mx__vm_fast` in `vm_int.h` updated; not with a trace). Otherwise the registers are saved, C (`mx__vm_exception`, at EXL = 1, on its own stack, core memory only) does as little as it can: it refills the TLB, maps a resident page again, or marks the page dirty (TLB modified). Everything else goes to the thread. |
 | Page fault | A new page (zero fill) or one in the swap file continues in the faulting thread: the registers are copied onto its stack, the exception returns into `mx__vm_slow` with the thread's interrupts, which takes the VM lock (a BIOS semaphore: other threads run meanwhile), zero-fills, or evicts and reads, then resumes by a negative syscall whose handler (at EXL = 1) restores everything and returns to the instruction. A fault with interrupts off, in the BIOS, or on a VM stack ends the program with a report: touch VM that may not be resident only from thread code with interrupts on (pin what an interrupt handler reads). |
 | Eviction | The clock (second chance) over the frames: a used page is taken out of the TLB and kept; an unused one goes, written to its swap slot if dirty, dropped if clean. Pinned and busy pages are skipped. |
 | Dirty tracking | Clean pages are mapped without D: the first store raises TLB modified (code 1) and marks the page. `mx_vm_init` tests it: on PCSX2, which ignores D, every mapped page counts as dirty. |
@@ -31,6 +31,12 @@ virtual memory at 0x0800_0000, in 32 KiB pages held in the physical memory left 
   program marks `MX_CORE_FN` / `MX_CORE_DATA` stay core. `jal` reaches between the two.
   A library linked as objects stays core when the program lists them in `MX_CORE_OBJS`
   (the link puts them in an archive of their own): Quake's `MX_CORE_OBJS = $(MXGL_OBJS)`.
+* `MX_VM_TEXT=core` (with `MX_MEMORY=vm`, `ld/maxsdk-vm-coretext.ld`): the program's code
+  stays core too, only its rodata, data and bss are VM. The code then takes no VM TLB
+  entries and is never paged, at the cost of as many frames. Quake III (2.2 MiB of code):
+  12.0 fps with its code in VM, 12.6 in core; 14.0 against 3.8 million refills in 80 s of
+  `timedemo four` (with the code in VM 27% of them were code, and its entries pushed the
+  data's out of the TLB), and 591 against 671 swap ins (2.2 MiB fewer frames).
 * Started by `mxload.elf host:app.elf args...` (`loader/mxload.c`, linked at 0x01F0_0000):
   it loads the core segments itself, leaves the VM ones, and jumps to the program in its own
   thread, argv[0] the program's path. The start-up turns VM on (`mx_vm_config`, or no swap
@@ -124,6 +130,7 @@ which replays it with other page sizes, memory sizes and eviction policies:
 
 | Fact | Value | Conditions | Source | Date |
 |---|---|---|---|---|
+| `ei` needs a `sync.p` after it: without it a Status read a few instructions later (the next `mx_di`) could still see EIE clear, so that `mx_di` returned 0 and its `mx_irq_restore` left interrupts off; the next page fault for the thread then ended the program ("interrupts off"). `mx_ei` has it | | | `tests/ps2/vm6_refill.c`, `probe/p22_refill.c` | 2026-11-01 |
 | `main` runs in user mode with COP0 usable: Status 0x70030c11 (KSU 2, CU0 1, EDI 1, IE and EIE 1); `tlbr`, `tlbwi`, `tlbp` work from it | | ps2link | `probe/p19_tlb.c` | 2026-10-31 |
 | The BIOS's TLB: entry 0 the scratchpad, 1–12 the kernel, I/O (0x1000_0000 in 4 KiB pairs), VU and GS memory, ROM; 13–21 main memory cached, 22–30 uncached, 31–38 UCAB (not wired), 39–47 unused (kseg3, V = 0: entry *i* at 0xE000_0000 + *i* × 8 KiB, 0xE004_E000 for 39; PCSX2: (*i* − 1) × 8 KiB); Wired = 31. As ps2sdk's `InitTLB32MB` table. The VM parks the entries it clears above both (0xE000_0000 + (48 + *i*) × 8 KiB), so no two match one address | | | `probe/p19_tlb.c`, `tests/ps2/vm5_tlb.c` | 2026-11-01 |
 | The page of timers 2 and 3 (0x1000_1000) is mapped without D: a user-mode store there raises TLB modified (code 1). `<mx/timer.h>`: use timers 0 and 1 | | | the first VM test's watchdog (since split into `tests/ps2/vm*_*.c`) | 2026-10-31 |
@@ -189,7 +196,7 @@ the debug screen now counts those timeouts in slot 27 (`src/base/sif.c`, `fio_ca
 
 | What | Value |
 |---|---|
-| TLB refill of a resident page | 290 cycles (1024 refills) |
+| TLB refill of a resident page | 176 cycles with the fast refill, 470 through the full save and C (`probe/p22_refill.c`; `probe/p20_vm.c` measured 290 for the latter) |
 | First touch (zero fill, in the thread: the slow path and 32 KiB of stores) | 41522 cycles a page (64) |
 | First store to a clean page (TLB modified) | 502 cycles |
 | Page fault: swap in + write back of a dirty page | 11.5 ms (768 faults, 256 written back) |

@@ -38,7 +38,9 @@ MX_CRT0  = $(MAXSDK_OUT)/obj/crt0.o
 # started by mxload.elf (MX_LOADER); phys (the default): all in core
 MX_MEMORY ?= phys
 MX_LD_phys = $(MAXSDK)/ld/maxsdk.ld
-MX_LD_vm   = $(MAXSDK)/ld/maxsdk-vm.ld
+# MX_VM_TEXT=core (with MX_MEMORY=vm): the program's code stays core
+MX_VM_TEXT ?= vm
+MX_LD_vm   = $(MAXSDK)/ld/maxsdk-vm$(if $(filter core,$(MX_VM_TEXT)),-coretext).ld
 MX_LD    = $(MX_LD_$(MX_MEMORY))
 # the loader for programs with VM segments (loader/mxload.c)
 MX_LOADER = $(MAXSDK_OUT)/mxload.elf

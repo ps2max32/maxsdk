@@ -77,9 +77,7 @@ static struct {
   u16 *frame_of, *slot_of, *page_of;
   u8 *flags, *pins;
   u8 *page_slot; /* TLB entry of each page (with a trace: of each block), 0: none */
-  u16 slot_page[TLB_N]; /* its page (block) + 1 */
   u32 bpp;              /* TLB entries a page can have: 1, BPP with a trace */
-  u32 next_slot;
   u32 nfree, free_hint, hand;
   int dbit;
   int fd;
@@ -108,6 +106,11 @@ static struct {
     u32 epoch, ms, every_ms, cyc, t_last;
   } tr; /* the trace (mx_vm_config.trace) */
 } vm;
+
+/* tlb.S's fast refill reads it (vm_int.h) */
+struct mx__vm_fast mx__vm_fast MX_ALIGNED(16);
+#define F mx__vm_fast
+_Static_assert(VMF_BASE_PAGE == MX_VM_BASE >> PAGE_SHIFT, "tlb.S");
 
 static u32 page_va(u32 pg) {
   return pg < vm.npages ? MX_VM_BASE + pg * PAGE : MX_VM_MAP_BASE + (pg - vm.npages) * PAGE;
@@ -173,12 +176,12 @@ static void tlb_read(u32 i, u32 *pm, u32 *hi, u32 *lo0, u32 *lo1) {
 /* A TLB entry for something new: the next one in turn, freed of what it
    held. Interrupts off (or at EXL). */
 static u32 tlb_take(void) {
-  u32 s = vm.next_slot;
-  vm.next_slot = s + 1 < TLB_N ? s + 1 : TLB_FIRST;
-  u32 old = vm.slot_page[s];
+  u32 s = F.next_slot;
+  F.next_slot = s + 1 < TLB_N ? s + 1 : TLB_FIRST;
+  u32 old = F.slot_page[s];
   if (old && old != SLOT_ALIAS)
     vm.page_slot[old - 1] = 0;
-  vm.slot_page[s] = 0;
+  F.slot_page[s] = 0;
   return s;
 }
 
@@ -213,7 +216,7 @@ static void tlb_sync(u32 pg) {
     if (!(lo & LO_V)) {
       if (s) {
         tlb_clear(s);
-        vm.slot_page[s] = 0;
+        F.slot_page[s] = 0;
         vm.page_slot[bi] = 0;
       }
     } else if (vm.bpp > 1) {
@@ -223,7 +226,7 @@ static void tlb_sync(u32 pg) {
       if (!s) {
         s = tlb_take();
         vm.page_slot[bi] = (u8)s;
-        vm.slot_page[s] = (u16)(bi + 1);
+        F.slot_page[s] = (u16)(bi + 1);
       }
       tlb_write(s, PM16K, page_va(pg), lo, lo + (HALF >> 12 << 6));
     }
@@ -258,7 +261,7 @@ static void blk_fill(u32 pg, u32 va, int write) {
   if (!s) {
     s = tlb_take();
     vm.page_slot[bi] = (u8)s;
-    vm.slot_page[s] = (u16)(bi + 1);
+    F.slot_page[s] = (u16)(bi + 1);
   }
   blk_write(s, pg, b);
 }
@@ -281,11 +284,11 @@ static void tr_tick(void) {
     return;
   last = ms;
   for (u32 i = TLB_FIRST; i < TLB_N; i++) {
-    u32 q = vm.slot_page[i];
+    u32 q = F.slot_page[i];
     if (q && q != SLOT_ALIAS) {
       tlb_clear(i);
       vm.page_slot[q - 1] = 0;
-      vm.slot_page[i] = 0;
+      F.slot_page[i] = 0;
     }
   }
   if (!(++vm.tr.epoch & 63))
@@ -336,7 +339,7 @@ static int alias_refill(u32 va) {
     u32 pair = (vm.alias[i].pm | 0x1FFFu) + 1;
     if (va - vm.alias[i].hi < pair) {
       u32 s = tlb_take();
-      vm.slot_page[s] = SLOT_ALIAS;
+      F.slot_page[s] = SLOT_ALIAS;
       tlb_write(s, vm.alias[i].pm, vm.alias[i].hi, vm.alias[i].lo0, vm.alias[i].lo1);
       return 1;
     }
@@ -459,7 +462,9 @@ int mx__vm_exception(struct mx__vm_x *x) {
     tlb_sync(pg);
     return VMX_RETURN;
   }
-  vm.st.refills++;
+  F.refills++;
+  if (x->badvaddr == x->epc + (x->cause >> 31 ? 4u : 0u)) /* an instruction fetch */
+    F.refills_i++;
   if (vm.lo[pg] & LO_V) { /* mapped, only not in the TLB */
     if (vm.bpp > 1)
       blk_fill(pg, va, code == 3);
@@ -1311,12 +1316,16 @@ void mx__core_fault(const void *p, const char *what) {
 void mx__vm_report(void) {
   struct mx_vm_stats s;
   mx_vm_stats(&s);
+  /* two lines: long ones were lost on the PS2 (ps2link) */
   mx_printf("maxsdk: VM %u frames, %u faults: %u swap ins (%u ms), %u outs (%u ms), %u by the "
-            "writer, %u drops, %u from files (%u ms), %u zero fills; lock waits %u ms; %u "
-            "file server calls; %u TLB refills (about %u ms)\n",
+            "writer, %u drops, %u from files (%u ms), %u zero fills\n",
             s.frames, s.faults, s.swap_ins, s.us_swap_in / 1000, s.swap_outs + s.writer_outs,
             s.us_swap_out / 1000, s.writer_outs, s.drops, s.file_ins, s.us_file_in / 1000,
-            s.zero_fills, s.us_lock / 1000, s.io_calls, s.refills, s.refills / (MX_EE_HZ / 1000 / MX_VM_REFILL_CYCLES));
+            s.zero_fills);
+  mx_printf("maxsdk: VM lock waits %u ms; %u file server calls; %u TLB refills (%u of code; "
+            "about %u ms)\n",
+            s.us_lock / 1000, s.io_calls, s.refills, s.refills_i,
+            s.refills / (MX_EE_HZ / 1000 / MX_VM_REFILL_CYCLES));
   if (vm.tr.cap)
     mx_printf("maxsdk: VM trace %u events (%u lost), every %u ms\n", vm.tr.n, vm.tr.lost,
               vm.tr.every_ms);
@@ -1324,6 +1333,8 @@ void mx__vm_report(void) {
 
 void mx_vm_stats(struct mx_vm_stats *s) {
   *s = vm.st;
+  s->refills = F.refills;
+  s->refills_i = F.refills_i;
   s->pages = vm.npages;
   s->frames = vm.nframes;
   s->free_frames = vm.nfree;
@@ -1359,7 +1370,7 @@ u32 mx__vm_check(void) {
       r = 3u << 28 | pg;
   }
   for (u32 s = TLB_FIRST; s < TLB_N && !r; s++) {
-    u32 q = vm.slot_page[s];
+    u32 q = F.slot_page[s];
     if (q && q != SLOT_ALIAS) {
       u32 pg = (q - 1) / vm.bpp, b = (q - 1) % vm.bpp;
       if (vm.page_slot[q - 1] != s)
@@ -1471,9 +1482,9 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
     tlb_read(TLB_FIRST + i, &vm.alias[i].pm, &vm.alias[i].hi, &vm.alias[i].lo0,
              &vm.alias[i].lo1);
     vm.alias[i].lo0 |= LO_G, vm.alias[i].lo1 |= LO_G;
-    vm.slot_page[TLB_FIRST + i] = SLOT_ALIAS;
+    F.slot_page[TLB_FIRST + i] = SLOT_ALIAS;
   }
-  vm.next_slot = TLB_FIRST + 8;
+  F.next_slot = TLB_FIRST + 8;
   mx_irq_restore(was);
   mx_bios_set_syscall(VM_RESUME_SYSCALL, (void *)mx__vm_resume_k);
   for (int c = 1; c <= 3; c++)
@@ -1497,7 +1508,8 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   }
   vm.flags[0] = 0;
   unmap(0);
-  vm.st.zero_fills = vm.st.refills = vm.st.faults = 0;
+  vm.st.zero_fills = vm.st.faults = 0;
+  F.refills = F.refills_i = 0;
   mx_irq_restore(was);
   if (!faults) {
     vm.active = 0;
@@ -1505,6 +1517,12 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
     mx_printf("mx_vm_init: TLB misses are not raised (PCSX2: run with the EE interpreter)\n");
     return -1;
   }
+  /* the fast refill (tlb.S): without a trace (a page, one entry) */
+  was = mx_di();
+  F.lo = vm.lo;
+  F.page_slot = vm.page_slot;
+  F.npages = vm.bpp == 1 ? vm.npages : 0;
+  mx_irq_restore(was);
   if (cfg->trace) {
     was = mx_di();
     vm.tr.every_ms = cfg->trace_ms ? cfg->trace_ms : 100;

@@ -129,7 +129,10 @@ MX_INLINE u32 mx_status(void) {
   return s;
 }
 
-MX_INLINE void mx_ei(void) { __asm__ volatile("ei" ::: "memory"); }
+/* sync.p: Status reads EIE set after it (without, an mx_di just after
+   could read it still clear, return 0, and its mx_irq_restore leave
+   interrupts off: the PS2, 2026-11-01) */
+MX_INLINE void mx_ei(void) { __asm__ volatile("ei\n\tsync.p" ::: "memory"); }
 
 /* Disable interrupts. The R5900 can miss a DI that coincides with an
    interrupt, so it is repeated until Status.EIE reads 0 (EE Core User's
