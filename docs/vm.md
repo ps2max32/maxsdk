@@ -27,6 +27,8 @@ virtual memory at 0x0800_0000, in 32 KiB pages held in the physical memory left 
   member (libmx, libmxc, picolibc, compiler-rt), libmxc's glue, the VU and HLSL objects, VU
   microcode, constructors, packets, `MX_DMA_LINES` buffers, `mx_vm_config`, and what the
   program marks `MX_CORE_FN` / `MX_CORE_DATA` stay core. `jal` reaches between the two.
+  A library linked as objects stays core when the program lists them in `MX_CORE_OBJS`
+  (the link puts them in an archive of their own): Quake's `MX_CORE_OBJS = $(MXGL_OBJS)`.
 * Started by `mxload.elf host:app.elf args...` (`loader/mxload.c`, linked at 0x01F0_0000):
   it loads the core segments itself, leaves the VM ones, and jumps to the program in its own
   thread, argv[0] the program's path. The start-up turns VM on (`mx_vm_config`, or no swap
@@ -133,7 +135,7 @@ interrupt in slots 30–31 (it stops when interrupts stay off), and at the end b
 | `vm14_mapfile` | a 300 KiB file mapped with 8 frames and no swap file: in the file window, read twice (read again, dropped, never written out), random reads, a DMA pin and a VIF1 transfer of mapped data, a write pin refused, `mx_fio_write` from the mapping, two files mapped, unmapped and mapped again at the same places. `vm14_mapfile.elf store`: a store into the mapping, which ends the program (status 255) |
 | `vm15_overwrite` | `mx_fio_read` into VM pinned with `MX_VM_PIN_OVERWRITE`, 8 frames: a read at byte 100 over 5 pages in the swap file (4 not read in, the bytes around as they were), a short read over 4 pages (the rest of 2 restored from the swap file), reads into new pages (no zero fill; past a short read, zero) |
 
-Steps 1–15 pass on the PS2 (2026-11-01) (`vm11_vmlink`'s first version, with 2650 swap
+Steps 1–15 pass on the PS2 (2026-11-01), and Quake1 linked into VM (`MX_MEMORY=vm`, 600 demo frames at 53–72 fps) (`vm11_vmlink`'s first version, with 2650 swap
 transfers in step 4, ran past the 60 s timeout: about 15 a second through `host:`); step 8 in 44 runs of 45, the last 44 in a row (with the
 UCAB fix and the checks below). In the other one, the build before those, the file
 server on the IOP stopped answering after the gather's swap writes: the debug screen showed

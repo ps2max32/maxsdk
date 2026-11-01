@@ -44,8 +44,16 @@ MX_LD    = $(MX_LD_$(MX_MEMORY))
 MX_LOADER = $(MAXSDK_OUT)/mxload.elf
 MX_HDRS := $(wildcard $(MAXSDK)/include/mx/*.h $(MAXSDK)/include/mx/hw/*.h)
 # $(call link,out,objs)
-link     = $(LLVM)/ld.lld -m elf32ltsmipn32 -T$(MX_LD) -z max-page-size=128 \
-           --gc-sections -Map $(1:.elf=.map) -o $(1) $(2)
+# With MX_MEMORY=vm, the objects of objs also in MX_CORE_OBJS (a library
+# linked as objects, e.g. maxsdk_gl's) stay core: they are linked from an
+# archive of their own ($(out:.elf=.core.a)), and ld/maxsdk-vm.ld keeps
+# archive members core.
+link_objs = $(filter-out $(MX_CORE_OBJS),$(2)) --whole-archive $(1:.elf=.core.a) --no-whole-archive
+link     = $(if $(filter vm,$(MX_MEMORY)),$(if $(MX_CORE_OBJS),rm -f $(1:.elf=.core.a) && \
+             $(LLVM)/llvm-ar rcs $(1:.elf=.core.a) $(filter $(MX_CORE_OBJS),$(2)) && )) \
+           $(LLVM)/ld.lld -m elf32ltsmipn32 -T$(MX_LD) -z max-page-size=128 \
+           --gc-sections -Map $(1:.elf=.map) -o $(1) \
+           $(if $(and $(filter vm,$(MX_MEMORY)),$(MX_CORE_OBJS)),$(call link_objs,$(1),$(2)),$(2))
 
 ifneq ($(MAXSDK_OUT),$(OUT))
 $(MX_LIB) $(MX_CRT0): $(wildcard $(MAXSDK)/src/*/*) $(MX_HDRS)
