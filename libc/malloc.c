@@ -152,7 +152,16 @@ static int grow(u32 size) {
      size: a block of just size may be in the class below */
   if (size >= SMALL)
     size += 1u << (msb(size) - SL_BITS);
-  u32 incr = size + 2 * HDR > MIN_GROW ? size + 2 * HDR : MIN_GROW;
+  /* a free last block is extended: only what it lacks (memory runs out at
+     the top first) */
+  u32 have = 0;
+  if (epilogue && epilogue->prev_size) {
+    struct blk *last = prev_blk(epilogue);
+    if (!(last->size & USED))
+      have = bsize(last);
+  }
+  u32 want = size > have ? size - have : 0;
+  u32 incr = want + 2 * HDR > MIN_GROW ? want + 2 * HDR : MIN_GROW;
   incr = (incr + 15) & ~15u;
   char *p = mxc_morecore((intptr_t)incr);
   if (p == (char *)-1)
@@ -244,8 +253,26 @@ void *mxc_morecore(intptr_t incr) { return mx_sbrk((int32_t)incr); }
 
 /* ---- the interface ------------------------------------------------------------------- */
 
+/* the first block of size's own class that holds it (find() skips that
+   class): a walk of one list, only before the heap grows */
+static struct blk *first_fit(u32 size) {
+  u32 fl, sl;
+  mapping(size, &fl, &sl);
+  if (fl >= FL_N)
+    return NULL;
+  for (u32 o = heads[fl][sl]; o; o = at(o)->next)
+    if (bsize(at(o)) >= size) {
+      struct blk *b = at(o);
+      unlink_free(b);
+      return b;
+    }
+  return NULL;
+}
+
 static void *alloc(u32 size) {
   struct blk *b = find(size);
+  if (!b)
+    b = first_fit(size);
   if (!b) {
     if (!grow(size))
       return NULL;
