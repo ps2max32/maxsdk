@@ -191,7 +191,15 @@ A swap file on `host:` costs milliseconds a fault: use VM for data that is touch
 samples being mixed, the level in play) can be kept resident with `mx_vm_pin` or
 `mx_vm_lock`: each pinned page is a frame taken from the pager for as long. Pager time
 shows in `mx_vm_stats` (`us_swap_in`, `us_swap_out`, `us_file_in`, `us_lock`, `io_calls`,
-`writer_outs`); `probe/p21_iolat.c` measures what each call of the IOP costs.
+`writer_outs`); `probe/p21_iolat.c` measures what each call of the IOP costs. With VM on, the
+end marker (`MX_TEST_END`) and `mx_exit` print a line of the pager's totals and one of the
+IOP's waits (all, and the file server's), and `mx_prof_report` what changed between
+`mx_prof_start` and `mx_prof_stop`: the profile of a game's frames then says how much of
+its waiting is the pager.
+
+The clock does not prefer clean pages: a program's code in VM is clean (read from its ELF)
+and among the hottest; with clean pages taken first, Quake III's loading went to frames of
+10 s on the PS2. The writer thread instead cleans the dirty pages the clock may take next.
 
 The IOP's file manager has 16 descriptors, 3 of them for stdio; a program linked into VM
 holds 2 (its ELF and the swap file), and each mapped file one.
