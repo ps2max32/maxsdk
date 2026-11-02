@@ -45,7 +45,7 @@ Each example has its own directory in `examples/`:
 
 Apps on maxsdk live in their own repos: `ps2max/apps/model` (a glTF model, skinned and animated,
 drawn by HLSL shaders, supersampled), `ps2max/apps/procgen` (generated terrain), with the MXM
-model converter in `ps2max/libs/mxm`.
+model converter in `ps2max/libs/libmxm`.
 
 DMA addresses have a type of their own (`mx_paddr`, `<mx/cpu.h>`): only `mx_paddr_of` (core memory,
 the scratchpad) and `mx_paddr_range` (also pinned virtual memory in one piece) make one, and

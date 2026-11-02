@@ -170,10 +170,14 @@ MX_INLINE u64 *mx_gs_e_regs_close(u64 *tag, u64 *c, int eop) {
   return c;
 }
 
-/* Local -> host readback of w x h pixels of a 32-bit buffer at (x, y) into
-   dst. bp is in 64-word blocks (BITBLTBUF units; a framebuffer page is 32
-   blocks: use MX_GS_PAGE(fbp)), bw in 64-pixel units. dst (uncached or cached; it is invalidated). w * h * 4 must be
-   a multiple of 128 bytes. Blocking. */
+/* Local -> host readback of w x h pixels of a buffer of psm at (x, y) into
+   dst, packed as the GS sends them (GS manual 4.3): 4 bytes a pixel for
+   CT32/Z32, 3 for CT24/Z24 (no padding byte), 2 for the 16-bit formats, 1
+   for T8/T8H, half a byte for T4/T4HL/T4HH. bp is in 64-word blocks
+   (BITBLTBUF units; a framebuffer page is 32 blocks: use MX_GS_PAGE(fbp)),
+   bw in 64-pixel units. dst (uncached or cached; it is invalidated). The
+   bytes must be a multiple of 128 (-1 if not, or for another psm).
+   Blocking. */
 int mx_gs_download(void *dst, u32 bp, u32 bw, u32 psm, u32 x, u32 y, u32 w, u32 h);
 
 /* Save framebuffer buf (0/1) as a TGA file through the IOP file server

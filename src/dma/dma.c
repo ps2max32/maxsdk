@@ -170,7 +170,7 @@ void mx_dma_stall(int src, int drain, const void *startp) {
 /* ---- MFIFO ------------------------------------------------------------- */
 
 static struct {
-  int drain;
+  int drain, tte;
   u32 ring, size; /* physical start, bytes */
 } mf;
 
@@ -178,8 +178,15 @@ static struct {
 
 void mx_mfifo_init(int drain_ch, void *ring, u32 size, int tte) {
   mf.drain = drain_ch;
+  mf.tte = tte;
   mf.ring = mx_paddr_of(ring).v;
   mf.size = size;
+  mx_mfifo_restart();
+}
+
+void mx_mfifo_restart(void) {
+  int drain_ch = mf.drain;
+  u32 size = mf.size;
   MX_R32(MX_D_RBOR) = mf.ring;
   MX_R32(MX_D_RBSR) = size - 16;
   MX_DMA_REG(MX_CH_FROMSPR, MADR) = mf.ring;
@@ -187,7 +194,7 @@ void mx_mfifo_init(int drain_ch, void *ring, u32 size, int tte) {
   MX_R32(MX_D_CTRL) = c | (u32)MX_SET(D_CTRL_MFD, drain_ch == MX_CH_VIF1 ? 2 : 3);
   MX_DMA_REG(drain_ch, QWC) = 0;
   MX_DMA_REG(drain_ch, TADR) = mf.ring;
-  start(drain_ch, MX_CHCR_CHAIN | MX_CHCR_FROM_MEM | (tte ? MX_CHCR_TTE : 0));
+  start(drain_ch, MX_CHCR_CHAIN | MX_CHCR_FROM_MEM | (mf.tte ? MX_CHCR_TTE : 0));
 }
 
 u32 mx_mfifo_used(void) {
@@ -224,6 +231,9 @@ void mx_mfifo_push(const void *spr, u32 qwc) {
 void mx_mfifo_stop(void) {
   mx_dma_wait(MX_CH_FROMSPR);
   while (mx_mfifo_used())
+    ;
+  /* the last packet's data out of the ring too */
+  while (MX_DMA_REG(mf.drain, QWC))
     ;
   /* the drain holds on the empty ring: stop it, then leave MFIFO mode */
   MX_DMA_REG(mf.drain, CHCR) &= ~(u32)MX_CHCR_STR;

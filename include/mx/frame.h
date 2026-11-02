@@ -49,6 +49,15 @@ void mx_frame_init(void *ring, u32 size, void *spr, u32 spr_bytes);
 #define MX_FRAME_SLOTS 16
 int mx_frame_init_chain(void *mem, u32 bytes, void *spr, u32 spr_bytes);
 void mx_frame_stop(void);
+/* What the stream has so far reaches the GS: it is sent, ends with a
+   FLUSH (VU1 and the GIF done) and this waits until VIF1 is idle and its DMA
+   no longer runs, and the PATH3 stream (mx_frame3_*) has been sent too.
+   VIF1 and the GIF channel can then be used by the caller (mx_gs_download,
+   which waits for the GS with its own FINISH); the stream goes on after it
+   as before (an MFIFO stream: its drain is stopped, and the next push
+   starts it again). Not in hires (record) mode. Returns 0, or -1 in record
+   mode. */
+int mx_frame_sync(void);
 /* Work for the EE while it would wait for ring space or for the back
    buffer: fn is called until the wait is over or it returns 0 (nothing more
    to do now). Each call should be short, as the push waits for it. fn must

@@ -112,6 +112,9 @@ MX_INLINE void mx_mfifo_push_wait(void) { mx_dma_wait(MX_CH_FROMSPR); }
 u32 mx_mfifo_used(void);
 /* Stop the MFIFO (waits until the drain has emptied the ring). */
 void mx_mfifo_stop(void);
+/* After mx_mfifo_stop: MFIFO mode again, with the ring and drain of
+   mx_mfifo_init, from the start of the (empty) ring. */
+void mx_mfifo_restart(void);
 
 /* ---- The DMA engine: interrupt-refilled queues --------------------------- */
 

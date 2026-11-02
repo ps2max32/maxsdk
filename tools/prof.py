@@ -7,7 +7,7 @@ import bisect, os, re, subprocess, sys
 
 elf, log = sys.argv[1], sys.argv[2]
 llvm = os.environ.get("LLVM", os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                      "../../../build/toolchain/generic/llvm/feature/bin"))
+                      "../../../build/toolchain/llvm/feature/bin"))
 syms = []
 for line in subprocess.run([os.path.join(llvm, "llvm-nm"), "-n", elf], capture_output=True,
                            text=True).stdout.splitlines():

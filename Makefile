@@ -26,11 +26,12 @@ LIB_VSMS := $(wildcard $(HERE)/src/*/*.vsm)
 LIB_OBJS += $(patsubst %.vsm,$(OUT)/vu/%.o,$(notdir $(LIB_VSMS)))
 vpath %.vsm $(sort $(dir $(LIB_VSMS)))
 # IOP modules of ps2sdk that libmx loads (the sound driver, src/base/snd.c),
-# as data between the symbols <name>_irx and <name>_irx_end
-PS2SDK   ?= $(PS2MAX)/../ps2dev/install/ps2sdk
+# as data between the symbols <name>_irx and <name>_irx_end. They are the
+# prebuilt modules of ps2dev: ps2max has no IOP toolchain of its own.
+PS2MAX_IRX ?= $(PS2MAX)/../ps2dev/install/ps2sdk/iop/irx
 LIB_IRX  := libsd audsrv
 LIB_OBJS += $(patsubst %,$(OUT)/irx/%.o,$(LIB_IRX))
-$(OUT)/irx/%.o: $(PS2SDK)/iop/irx/%.irx
+$(OUT)/irx/%.o: $(PS2MAX_IRX)/%.irx
 	@mkdir -p $(dir $@)
 	printf '%s\n' '.section .rodata.$*_irx, "a"' '.balign 16' '.globl $*_irx' '$*_irx:' \
 	  '.incbin "$<"' '.globl $*_irx_end' '$*_irx_end:' > $(@:.o=.S)
@@ -125,7 +126,7 @@ PICOLIBC     ?= $(PS2MAX)/build/libs/picolibc/install
 PICOLIBC_SRC ?= $(PS2MAX)/libs/picolibc
 # compiler-rt's generic builtins, built like libmx (non-PIC; the toolchain's
 # own libclang_rt.builtins.a is PIC and its GOT relocations do not link here)
-RT_DIR       ?= $(PS2MAX)/toolchain/generic/llvm/llvm-project/compiler-rt/lib/builtins
+RT_DIR       ?= $(PS2MAX_LLVM_SRC)/compiler-rt/lib/builtins
 RT_SKIP       = divxc3 emutls enable_execute_stack eprintf extendhfxf2 fixunsxfdi fixunsxfsi \
                 fixunsxfti fixxfdi fixxfti floatdixf floattixf floatundixf floatuntixf mulxc3 \
                 powixf2 truncdfbf2 truncsfbf2 truncxfhf2 clear_cache trampoline_setup \

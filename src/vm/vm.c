@@ -1433,9 +1433,36 @@ static void *table(u32 bytes) {
   return p;
 }
 
+/* mx_vm_init failed: what it took goes back (the tables, the swap file,
+   the semaphores, the frames), so that the program has the memory as
+   without VM and mx_vm_init may be tried again. The VM_RESUME syscall
+   stays set: it is only reached from VM's own faults. */
+static void undo_init(void) {
+  mx_core_free(vm.lo), vm.lo = 0;
+  mx_core_free(vm.frame_of), vm.frame_of = 0;
+  mx_core_free(vm.slot_of), vm.slot_of = 0;
+  mx_core_free(vm.flags), vm.flags = 0;
+  mx_core_free(vm.pins), vm.pins = 0;
+  mx_core_free(vm.page_slot), vm.page_slot = 0;
+  mx_core_free(F.stamp), F.stamp = 0;
+  mx_core_free(vm.page_of), vm.page_of = 0;
+  mx_core_free(vm.tr.seen), vm.tr.seen = 0;
+  mx_core_free(vm.tr.buf), vm.tr.buf = 0;
+  if (vm.lock >= 0)
+    mx_bios_delete_sema(vm.lock);
+  if (vm.swapsema >= 0)
+    mx_bios_delete_sema(vm.swapsema);
+  vm.lock = vm.swapsema = -1;
+  if (vm.fd >= 0)
+    mx_fio_close(vm.fd);
+  vm.fd = -1;
+  mx__heap_untake();
+}
+
 int mx_vm_init(const struct mx_vm_config *cfg) {
   if (vm.active || mx_bios_get_memory_size() != 32 * 1024 * 1024)
     return -1;
+  vm.lock = vm.swapsema = -1;
   u32 size = cfg->size ? cfg->size : 128u << 20;
   if (size > MX_VM_LIMIT - MX_VM_BASE)
     size = MX_VM_LIMIT - MX_VM_BASE;
@@ -1469,6 +1496,7 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
     vm.tr.buf = mx_core_alloc(cfg->trace, 16);
     if (!vm.tr.seen || !vm.tr.buf) {
       mx_printf("mx_vm_init: no core memory for the trace (%u bytes)\n", cfg->trace);
+      undo_init();
       return -1;
     }
   }
@@ -1483,6 +1511,7 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   vm.page_of = table(nf * 2);
   if (!vm.lo || !vm.frame_of || !vm.slot_of || !vm.flags || !vm.pins || !vm.page_slot || !F.stamp ||
       !vm.page_of || nf < 4) {
+    undo_init();
     mx_printf("mx_vm_init: not enough memory (%u frames)\n", nf);
     return -1;
   }
@@ -1492,7 +1521,6 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   vm.nmap = nmap;
   vm.frames = mem;
   vm.nframes = vm.nfree = nf;
-  vm.lock = -1;
   struct {
     s32 count, max_count, init_count, wait_threads;
     u32 attr, option;
@@ -1532,6 +1560,7 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   if (!faults) {
     vm.active = 0;
     mx_exception_init();
+    undo_init();
     mx_printf("mx_vm_init: TLB misses are not raised (PCSX2: run with the EE interpreter)\n");
     return -1;
   }

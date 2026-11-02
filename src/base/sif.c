@@ -735,11 +735,13 @@ static void fio_unlock(void) {
 
 /* The most one READ asks for: the file server's transfer buffer. */
 #define FIO_READ_CHUNK 0x4000u
-/* the same, changed by probes (probe/p21_iolat.c) */
+/* the same, changed by probes (probe/p21_iolat.c; 0: FIO_READ_CHUNK) */
 u32 mx__fio_read_chunk = FIO_READ_CHUNK;
 
 /* The most one WRITE sends from memory. */
 #define FIO_CHUNK 0x10000u
+/* the same, changed by probes (probe/p23_blocksize.c; 0: FIO_CHUNK) */
+u32 mx__fio_write_chunk = FIO_CHUNK;
 
 /* One WRITE of n bytes that the IOP reads from pa (the CPU's view of them
    at p): the bytes before the first quadword boundary go in the call (mis,
@@ -802,8 +804,9 @@ int mx_fio_write(int fd, const void *data, u32 n) {
     return -1;
   fio_lock();
   if (n >= 256 && !mx_is_spr(s) && ((uintptr_t)s & 0xF0000000u) != 0x20000000u) {
+    u32 chunk = mx__fio_write_chunk ? mx__fio_write_chunk : FIO_CHUNK;
     for (u32 done = 0; done < n && r == 0;) {
-      struct mx_vm_piece pc = mx_vm_first_piece(s + done, n - done > FIO_CHUNK ? FIO_CHUNK : n - done);
+      struct mx_vm_piece pc = mx_vm_first_piece(s + done, n - done > chunk ? chunk : n - done);
       r = written(fd, fio_write1(fd, s + done, pc.addr, pc.bytes), pc.bytes);
       done += pc.bytes;
     }
@@ -915,10 +918,11 @@ int mx_fio_read(int fd, void *data, u32 n) {
   fio_lock();
   u32 total = 0;
   int r = 0;
+  u32 chunk = mx__fio_read_chunk ? mx__fio_read_chunk : FIO_READ_CHUNK;
   while (total < n) {
     /* at most the file server's transfer buffer a READ (16 KiB): reads it
        had to send in two pieces stalled after the first under ps2link */
-    u32 len = n - total > mx__fio_read_chunk ? mx__fio_read_chunk : n - total;
+    u32 len = n - total > chunk ? chunk : n - total;
     struct mx_vm_piece pc = mx_vm_first_piece(d + total, len);
     len = pc.bytes;
     int got = fio_read1(fd, d + total, pc.addr, len);

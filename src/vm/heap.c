@@ -141,8 +141,10 @@ void *mx_sbrk(s32 incr) {
 /* For vm.c: hand the free middle of the heap (above the break, below the
    core heap less keep bytes) over as frames; the core heap may not grow
    into them. Returns the start (aligned to align), *bytes its size. */
+static u8 *taken_brk; /* the break before mx__heap_take */
 void *mx__heap_take(u32 keep, u32 align, u32 *bytes) {
   heap_setup();
+  taken_brk = brk_lo;
   u8 *lo = (u8 *)(((uintptr_t)brk_lo + align - 1) & ~(uintptr_t)(align - 1));
   u8 *hi = core_lo - keep;
   if ((uintptr_t)core_lo < keep || hi <= lo) {
@@ -154,4 +156,13 @@ void *mx__heap_take(u32 keep, u32 align, u32 *bytes) {
   core_floor = hi;
   brk_lo = lo + *bytes;
   return lo;
+}
+
+/* For vm.c, when VM does not come on after all: the frames go back to the
+   break and the core heap. */
+void mx__heap_untake(void) {
+  if (taken_brk)
+    brk_lo = taken_brk;
+  core_floor = 0;
+  taken_brk = 0;
 }

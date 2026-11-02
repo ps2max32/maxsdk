@@ -82,7 +82,7 @@ VU1 cycles an index for 3 outputs). A vertex that the triangles share is transfo
 | Switching programs | `mx_frame_shader_setup` waits (FLUSH) until the packets of the last program are read: the layouts overlap |
 
 Batches of N = 32: `lvl2` 176 indices, `mtex` 192, `mskin` (103 uniform quadwords) 96. The model
-demo (`apps/model/model.c`, `libs/mxm/tools/gltf2mxm.py`) makes its clusters for the smallest of its
+demo (`apps/model/model.c`, `libs/libmxm/tools/gltf2mxm.py`) makes its clusters for the smallest of its
 programs (`mtex`, `mscei`: 192).
 
 ## Compute programs (VU0 or VU1)

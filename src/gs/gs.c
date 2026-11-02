@@ -319,13 +319,35 @@ void mx_gs_label_ad(struct mx_pkt *p, u32 id) {
   mx_pkt_ad(p, MX_GS_REG_LABEL, mx_gs_label(id, 0xFFFFFFFFu));
 }
 
+/* The bits a pixel of psm takes in an IMAGE transfer (packed: CT24 and Z24
+   are 3 bytes, GS manual 4.3), 0 for a psm that is not a buffer format. */
+static u32 psm_bits(u32 psm) {
+  switch (psm) {
+  case MX_GS_PSM_CT32:
+  case MX_GS_PSM_Z32:
+    return 32;
+  case MX_GS_PSM_CT24:
+  case MX_GS_PSM_Z24:
+    return 24;
+  case MX_GS_PSM_CT16:
+  case MX_GS_PSM_CT16S:
+  case MX_GS_PSM_Z16:
+  case MX_GS_PSM_Z16S:
+    return 16;
+  case MX_GS_PSM_T8:
+  case MX_GS_PSM_T8H:
+    return 8;
+  case MX_GS_PSM_T4:
+  case MX_GS_PSM_T4HL:
+  case MX_GS_PSM_T4HH:
+    return 4;
+  }
+  return 0;
+}
+
 void mx_gs_upload(struct mx_pkt *p, u32 dbp, u32 dbw, u32 psm, u32 x, u32 y, u32 w, u32 h,
                   const void *data) {
-  u32 bpp = psm == MX_GS_PSM_CT32 || psm == MX_GS_PSM_Z32 ? 32
-            : psm == MX_GS_PSM_CT24 || psm == MX_GS_PSM_Z24 ? 24
-            : psm == MX_GS_PSM_T8 ? 8
-            : psm == MX_GS_PSM_T4 ? 4
-                                  : 16;
+  u32 bpp = psm_bits(psm) ? psm_bits(psm) : 16;
   u32 qwc = (w * h * bpp / 8 + 15) / 16;
   mx_pkt_ad_begin(p, 4, 0);
   mx_pkt_ad(p, MX_GS_REG_BITBLTBUF, mx_gs_bitbltbuf(0, 0, 0, dbp, dbw, psm));
@@ -401,9 +423,11 @@ void mx_gs_frame_submit(const void *chain) {
 
 int mx_gs_download(void *dst, u32 bp, u32 bw, u32 psm, u32 x, u32 y, u32 w, u32 h) {
   static u32 setup[16 * 4] MX_ALIGNED(64);
-  u32 bytes = w * h * 4;
-  if (bytes % 128)
+  /* the GS sends the pixels packed (24-bit ones in 3 bytes) */
+  u32 bits = w * h * psm_bits(psm);
+  if (!bits || bits % (128 * 8))
     return -1;
+  u32 bytes = bits / 8;
   struct mx_pkt p;
   mx_pkt_begin(&p, MX_UNCACHED(setup), sizeof setup, 0);
   mx_pkt_end(&p, 0, 0);

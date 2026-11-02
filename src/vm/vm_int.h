@@ -78,6 +78,7 @@ _Static_assert(sizeof(struct mx__vm_fast) == VMF_SIZE, "tlb.S offsets");
 extern struct mx__vm_fast mx__vm_fast;
 
 void *mx__heap_take(u32 keep, u32 align, u32 *bytes);
+void mx__heap_untake(void);
 /* Shown by the crash report after a fatal VM fault. */
 extern const char *mx__exception_note;
 #endif

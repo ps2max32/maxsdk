@@ -47,8 +47,15 @@ int4 rgba8(float4 v) { return asint(v + 12582912.0); }
 // vertex, and the first vertices of a batch see those of the batch before.
 void __clip(float3 v, float w);
 uint __fcand(uint mask);
+uint __fcand_tri();
 void clip(float3 v, float w) { __clip(v, w); }
 uint clipped(uint mask) { return __fcand(mask); }
+// 1 when the triangle of the strip that ends at this vertex has a clipped
+// vertex, for the ADC of XYZ2 (adc): clipped(0x3FFFF) in a strips program;
+// in an indexed one (built with -vu-indexed) the vertices are judged in the
+// order of the inputs, so it is this vertex's judgement (0x3F) and the
+// gather sets ADC where it or one of the two indices before has it.
+uint clipped_triangle() { return __fcand_tri(); }
 // The w field of GIF_XYZ2 or GIF_XYZF2 that sets ADC (bit 15: no triangle
 // ends at this vertex) when adc is 1 (a clipped result). Only bit 15 of w is
 // read.

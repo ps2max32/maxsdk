@@ -30,6 +30,7 @@ static struct {
      the slot is queued on VIF1 when the next copy starts (or the stream
      must go out now: kick) */
   int chain;
+  int paused; /* ring mode: mx_frame_sync stopped the MFIFO */
   u64 *slot[MX_FRAME_SLOTS];
   mx_event ev[MX_FRAME_SLOTS];
   u8 used[MX_FRAME_SLOTS];
@@ -132,6 +133,7 @@ static u32 init_halves(void *spr, u32 spr_bytes, int chain) {
 
 void mx_frame_init(void *ring, u32 size, void *spr, u32 spr_bytes) {
   init_halves(spr, spr_bytes, 0);
+  f.paused = 0;
   f.ring_qw = size / 16;
   mx_mfifo_init(MX_CH_VIF1, ring, size, 1);
 }
@@ -239,6 +241,10 @@ static void flush(void) {
   } else if (f.chain) {
     chain_flush(n);
   } else {
+    if (f.paused) { /* VIF1 back from the caller of mx_frame_sync */
+      mx_mfifo_restart();
+      f.paused = 0;
+    }
     u32 t0 = mx_count(), busy = idle_while(ring_full, n);
     mx_mfifo_push(f.half[f.cur], n);
     mx_frame_stats.wait_ring += mx_count() - t0 - busy;
@@ -272,11 +278,50 @@ void mx_frame_stop(void) {
     mx_dmaq_release(&f.q);
     if (mx__frame3_stop)
       mx__frame3_stop();
-  } else {
+  } else if (!f.paused) {
     mx_mfifo_push_wait();
     mx_mfifo_stop();
   }
+  f.paused = 0;
   mx_gs.counting = 0;
+}
+
+static int q_busy(u32 q) {
+  struct mx_dmaq *dq = (struct mx_dmaq *)(uintptr_t)q;
+  return !mx_event_done((mx_event){dq, dq->issued});
+}
+static int ring_busy(u32 arg) {
+  (void)arg;
+  return mx_dma_busy(MX_CH_FROMSPR) || mx_mfifo_used() || MX_DMA_REG(MX_CH_VIF1, QWC);
+}
+static int vif1_busy(u32 arg) {
+  (void)arg;
+  return mx_dma_busy(MX_CH_VIF1) ||
+         (MX_R32(MX_VIF_VIF1_STAT) & (u32)((MX_VIF_STAT_VPS_MASK << MX_VIF_STAT_VPS_SHIFT) |
+                                           (MX_VIF_STAT_FQC_MASK << MX_VIF_STAT_FQC_SHIFT)));
+}
+
+int mx_frame_sync(void) {
+  if (f.record)
+    return -1;
+  mx_frame_commit(mx_e_cnt(mx_frame_reserve(1), 0, mx_vif_flush(), mx_vif_nop()));
+  kick();
+  if (f.chain) {
+    spin(q_busy, (u32)(uintptr_t)&f.q, "mx_frame_sync: the VIF1 stream not sent");
+  } else {
+    /* the push into the ring done, the ring drained, then the drain (which
+       holds on the empty ring, its DMA never ends) stopped: the next push
+       starts it again (flush) */
+    spin(ring_busy, 0, "mx_frame_sync: the ring not drained");
+    mx_mfifo_stop();
+    f.paused = 1;
+  }
+  /* the FIFO empty and VIF1 idle (past the FLUSH) */
+  spin(vif1_busy, 0, "mx_frame_sync: VIF1 not idle");
+  /* the PATH3 queue (GIF) too: the caller may use the GIF channel */
+  if (mx__frame3_q)
+    spin(q_busy, (u32)(uintptr_t)mx__frame3_q, "mx_frame_sync: the PATH3 stream not sent");
+  return 0;
 }
 
 u32 mx_frame_room(void) { return f.half_qw - (u32)f.chain; }

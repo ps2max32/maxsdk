@@ -20,7 +20,10 @@ MAXSDK     := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 # the includer's first target stays the default goal
 MX_GOAL    := $(.DEFAULT_GOAL)
 PS2MAX     ?= $(abspath $(MAXSDK)/../..)
-LLVM       ?= $(PS2MAX)/build/toolchain/generic/llvm/feature/bin
+# the feature LLVM (ps2max/build-llvm.sh); envsetup.sh exports the same paths
+PS2MAX_LLVM_SRC ?= $(PS2MAX)/toolchain/llvm/llvm-project
+PS2MAX_LLVM_BIN ?= $(PS2MAX)/build/toolchain/llvm/feature/bin
+LLVM       ?= $(PS2MAX_LLVM_BIN)
 MAXSDK_OUT ?= $(PS2MAX)/build/libs/maxsdk
 
 # -ffinite-math-only: the R5900 FPU has no INF/NaN, so clang only uses it for
@@ -58,8 +61,16 @@ link     = $(if $(filter vm,$(MX_MEMORY)),$(if $(MX_CORE_OBJS),rm -f $(1:.elf=.c
            $(if $(and $(filter vm,$(MX_MEMORY)),$(MX_CORE_OBJS)),$(call link_objs,$(1),$(2)),$(2))
 
 ifneq ($(MAXSDK_OUT),$(OUT))
-$(MX_LIB) $(MX_CRT0): $(wildcard $(MAXSDK)/src/*/*) $(MX_HDRS)
+# one make of maxsdk for both, not two at once under -j: a grouped target
+# (&:, GNU make 4.3), or before 4.3 the crt0 made with the library
+ifneq ($(filter grouped-target,$(.FEATURES)),)
+$(MX_LIB) $(MX_CRT0) &: $(wildcard $(MAXSDK)/src/*/*) $(MX_HDRS)
 	$(MAKE) -C $(MAXSDK) OUT=$(MAXSDK_OUT) lib
+else
+$(MX_LIB): $(wildcard $(MAXSDK)/src/*/*) $(MX_HDRS)
+	$(MAKE) -C $(MAXSDK) OUT=$(MAXSDK_OUT) lib
+$(MX_CRT0): $(MX_LIB)
+endif
 endif
 
 # ---- VU microcode -------------------------------------------------------------
