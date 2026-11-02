@@ -10,6 +10,7 @@ int main(void) {
   test_chain();
   test_video();
   test_tex();
+  test_vcache();
   test_failures += test_malloc();
   if (test_failures) {
     printf("host tests: %d FAILED\n", test_failures);

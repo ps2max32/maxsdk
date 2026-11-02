@@ -176,3 +176,9 @@ Flat triangles fall short of 2 cycles (2.25). Textured sprites cost 6 GS cycles,
 large textured areas as columns, not as many small sprites. For fill, draw in 32-pixel-wide
 columns (graphtip: scan along the long side of a page): 95 % of the manual's pixel rate, one
 big sprite reaches 42 %. Z and alpha cost nothing at these rates.
+| Small textures of different formats (CT32, CT16, T8, T4, CLUTs) share a page at block offsets that are a multiple of the power of two holding their blocks, without overlap; drawn from those TBPs they read right | 289 cache entries read back intact, 4 formats drawn | `<mx/vcache.h>`, 12 pages under eviction | `tests/ps2/vcache.c` (PS2) | 2026-11-02 |
+| T4 64×32 at block offset o of a page writes blocks o .. o+3 only | | upload, page read back as CT32 | `tests/ps2/vcache.c` (PCSX2 probe) | 2026-11-02 |
+| GS memory does not read back as 4-bit texels (local → host): T4 comes back wrong (1021 of 1024 bytes), T4HL/T4HH never send FINISH; T8/T8H read back right. `mx_gs_download` refuses the 4-bit formats; check T4 by drawing it with an identity CLUT | | 64×32 at TBP + 0; GS manual 4.3 | `probe/p24_t4down.c` (PS2) | 2026-11-02 |
+| In one GIF stream, an IMAGE upload that overwrites a texture a sprite before it drew from does not change that sprite | | CT32 64×32, TEXFLUSH after the upload | `tests/ps2/vcache.c` (PS2) | 2026-11-02 |
+| `mx_vcache_tex`, 12 pages, 48 keys, 640 lookups (≈ 70 % misses) | hit ≈ 1 750 cycles; miss: COST 45 393 avg / 148 457 max (187 hits), AUTO 28 162 / 108 443 (179 hits, 40 frames went to ring order), RING 12 906 / 40 057 (154 hits) | STREAM | `tests/ps2/vcache.c` (PS2) | 2026-11-02 |
+| 20 one-page textures each frame through 16 pages, hits in a frame | COST 15, AUTO 12, RING 0 | STREAM, host model | `tests/host/test_vcache.c` | 2026-11-02 |

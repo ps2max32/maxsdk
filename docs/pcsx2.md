@@ -77,3 +77,4 @@ renderer (`Renderer = 13` in `[EmuCore/GS]` of the flatpak's `inis/PCSX2.ini`, s
 | `tlbp` | finds the entry | finds nothing (`TLBP` compares the low 19 bits of EntryHi as the VPN2) | `probe/p19_tlb.c` |
 | `tlbwr` | Random entry between Wired and 47 | Random is never updated (0): `tlbwr` overwrites entry 0, the scratchpad's | `probe/p19_tlb.c` |
 | Data cache | write back: DMA from dirty lines reads stale memory | not emulated, unless `EnableEECache` (`PCSX2_EE=interp-cache`, very slow) | |
+| GS memory read back (local → host) as T4 / T4HL / T4HH | T4 wrong (1021 of 1024 bytes), T4HL/T4HH never end (no FINISH) | T4HL/T4HH right, T4 one byte wrong | maxsdk `probe/p24_t4down.c` |

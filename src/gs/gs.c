@@ -91,15 +91,32 @@ u32 mx_video_field(void) {
   return (u32)MX_GET(GS_CSR_FIELD, CSR);
 }
 
-void mx_vram_reset(void) { mx_gs.vram = mx_gs.tbp = 0; }
+void mx_vram_reset(void) {
+  mx_vram_clear();
+  mx_gs.vram = mx_gs.tbp = 0;
+}
+
+/* mx_gs.vram, mx_gs.tbp: after the highest page of a render target */
+static void vram_mark(void) {
+  mx_gs.vram = mx_vram_end(MX_VRAM_FIXED);
+  mx_gs.tbp = MX_GS_PAGE(mx_gs.vram);
+}
 
 u32 mx_vram_alloc(u32 pages) {
-  u32 p = mx_gs.vram;
-  if (p + pages > 512)
+  if (pages == 0)
+    return mx_gs.vram;
+  u32 p = mx_vram_find(pages);
+  if (p == ~0u || mx_vram_take(p, pages, MX_VRAM_FIXED) != 0)
     return ~0u;
-  mx_gs.vram = p + pages;
-  mx_gs.tbp = MX_GS_PAGE(mx_gs.vram);
+  vram_mark();
   return p;
+}
+
+void mx_vram_free(u32 page, u32 pages) {
+  for (u32 p = page; p < page + pages && p < MX_VRAM_PAGES; p++)
+    if (mx_vram_owner(p) == MX_VRAM_FIXED)
+      mx_vram_give(p, 1);
+  vram_mark();
 }
 
 /* A present (mx_frame_present) starts this long after the vblank at the
@@ -423,6 +440,9 @@ void mx_gs_frame_submit(const void *chain) {
 
 int mx_gs_download(void *dst, u32 bp, u32 bw, u32 psm, u32 x, u32 y, u32 w, u32 h) {
   static u32 setup[16 * 4] MX_ALIGNED(64);
+  /* the GS can't send 4-bit pixels: T4 comes back wrong, T4HL/T4HH never end */
+  if (psm == MX_GS_PSM_T4 || psm == MX_GS_PSM_T4HL || psm == MX_GS_PSM_T4HH)
+    return -1;
   /* the GS sends the pixels packed (24-bit ones in 3 bytes) */
   u32 bits = w * h * psm_bits(psm);
   if (!bits || bits % (128 * 8))

@@ -223,7 +223,8 @@ batch: $(OUT)/batch/ps2batch.elf
 # Pure parts of the library are tested on the host too.
 HOST_SRCS := $(wildcard $(HERE)/tests/host/*.c) $(HERE)/src/pkt/pkt.c $(HERE)/src/pkt/chain.c \
              $(HERE)/src/gs/shader.c $(HERE)/src/gs/rt.c $(HERE)/src/gs/display.c \
-             $(HERE)/src/gs/video.c $(HERE)/src/gs/tex.c $(HERE)/libc/malloc.c
+             $(HERE)/src/gs/video.c $(HERE)/src/gs/tex.c $(HERE)/src/gs/vram.c \
+             $(HERE)/src/gs/vcache.c $(HERE)/libc/malloc.c
 HOST_BIN   = $(OUT)/host/test_host
 
 $(HOST_BIN): $(HOST_SRCS) $(wildcard $(HERE)/tests/host/*.h) $(HDRS)

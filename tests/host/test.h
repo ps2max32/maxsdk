@@ -20,5 +20,6 @@ void test_emit(void);
 void test_chain(void);
 void test_video(void);
 void test_tex(void);
+void test_vcache(void);
 
 #endif

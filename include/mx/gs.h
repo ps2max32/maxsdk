@@ -17,6 +17,7 @@
 #include <mx/rt.h>
 #include <mx/types.h>
 #include <mx/video.h>
+#include <mx/vram.h>
 
 struct mx_gs {
   u32 w, h;      /* framebuffer size in pixels */
@@ -50,7 +51,7 @@ struct mx_gs {
   u32 ndisp;
   const struct mx_display *volatile pending; /* mx_display_show: at the next vblank */
   u64 dregs[MX_DISP_NREGS]; /* the display registers last written (write-only registers) */
-  u32 vram;                 /* the first page that mx_vram_alloc has not handed out */
+  u32 vram;                 /* one past the highest page of a render target (mx_vram_alloc) */
 };
 
 extern struct mx_gs mx_gs;
@@ -77,11 +78,16 @@ void mx_gs_init_mode(u32 w, u32 h, u32 flags);
    result: -1 if the console does not have the mode. */
 int mx_gs_init_video(const struct mx_video_mode *m);
 
-/* GS memory for render targets, in 8 KiB pages from page 0 up: returns the
-   first page, or ~0u if fewer than pages are left (512 in all). mx_gs.tbp is
-   the 64-word block after the last page handed out, where textures can
-   start. mx_gs_init* reset it. */
+/* GS memory for render targets, in 8 KiB pages (<mx/vram.h>, owner
+   MX_VRAM_FIXED): the first free run from page 0 up. Returns its first
+   page, or ~0u if there is no free run that long (512 pages in all).
+   mx_gs.vram is one past the highest page of a render target, mx_gs.tbp
+   its 64-word block, where an application's own textures can start (not
+   with <mx/vcache.h>, which takes the free pages as it needs them).
+   mx_vram_free gives a target's pages back. mx_vram_reset frees every page
+   (the cache's too); mx_gs_init* do it. */
 u32 mx_vram_alloc(u32 pages);
+void mx_vram_free(u32 page, u32 pages);
 void mx_vram_reset(void);
 
 /* The frame pipeline (mx_gs_frame_*, <mx/frame.h>) shows frame k with
@@ -173,11 +179,13 @@ MX_INLINE u64 *mx_gs_e_regs_close(u64 *tag, u64 *c, int eop) {
 /* Local -> host readback of w x h pixels of a buffer of psm at (x, y) into
    dst, packed as the GS sends them (GS manual 4.3): 4 bytes a pixel for
    CT32/Z32, 3 for CT24/Z24 (no padding byte), 2 for the 16-bit formats, 1
-   for T8/T8H, half a byte for T4/T4HL/T4HH. bp is in 64-word blocks
-   (BITBLTBUF units; a framebuffer page is 32 blocks: use MX_GS_PAGE(fbp)),
-   bw in 64-pixel units. dst (uncached or cached; it is invalidated). The
-   bytes must be a multiple of 128 (-1 if not, or for another psm).
-   Blocking. */
+   for T8/T8H. Not T4/T4HL/T4HH (-1, nothing sent): the GS can't send
+   4-bit pixels (manual 4.3; on the PS2 T4 comes back wrong and T4HL/T4HH
+   never end, probe/p24_t4down.c); read the buffer as T8 or 32 bits, or
+   draw it. bp is in 64-word blocks (BITBLTBUF units; a framebuffer page is
+   32 blocks: use MX_GS_PAGE(fbp)), bw in 64-pixel units. dst (uncached or
+   cached; it is invalidated). The bytes must be a multiple of 128 (-1 if
+   not, or for another psm). Blocking. */
 int mx_gs_download(void *dst, u32 bp, u32 bw, u32 psm, u32 x, u32 y, u32 w, u32 h);
 
 /* Save framebuffer buf (0/1) as a TGA file through the IOP file server
