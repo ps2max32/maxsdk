@@ -8,6 +8,15 @@
 
 #include <mx/types.h>
 
+/* Reset the IOP (ps2sdk's SifIopReset + SifIopSync): it boots again with
+   the ROM's modules, or with those of an IOPRP image when arg names one
+   ("rom0:UDNL <path>"; 0 or "" for none), and the SIF is set up again.
+   Every module loaded before is gone, and every binding (mx_sif_bound);
+   maxsdk's own clients bind again, the pad and audsrv do not (mx_pad_init,
+   mx_snd_init again). Thread code, before any file is open. Returns 0, < 0
+   when the IOP does not come back within 10 s. */
+int mx_iop_reset(const char *arg);
+
 /* Copy size bytes of IOP RAM at iop (any alignment) to dst. */
 int mx_iop_read(u32 iop, void *dst, u32 size);
 /* Copy size bytes from src to IOP RAM at iop: both 16-byte aligned, size a

@@ -101,7 +101,8 @@ void mx__main(void) {
        from its ELF */
     static const struct mx_vm_config none;
     if (!by_mxload) {
-      mx_printf("maxsdk: this program is linked into VM: start it with mxload.elf\n");
+      mx_printf("maxsdk: this program is linked into VM: start it with mxlink (the PS2's loader, "
+                "tools/mxlink) or mxload.elf\n");
       mx_exit(255);
     }
     if (mx_vm_init(&mx_vm_config ? &mx_vm_config : &none) < 0 ||

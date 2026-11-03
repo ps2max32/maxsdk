@@ -36,6 +36,28 @@ mx_bios_exit:
 	.end mx_bios_exit
 	.size mx_bios_exit, .-mx_bios_exit
 
+	.globl mx_bios_load_exec_ps2
+	.type mx_bios_load_exec_ps2, @function
+	.ent mx_bios_load_exec_ps2
+mx_bios_load_exec_ps2:
+	li $3, 6
+	syscall
+	jr $31
+	nop
+	.end mx_bios_load_exec_ps2
+	.size mx_bios_load_exec_ps2, .-mx_bios_load_exec_ps2
+
+	.globl mx_bios_exec_ps2
+	.type mx_bios_exec_ps2, @function
+	.ent mx_bios_exec_ps2
+mx_bios_exec_ps2:
+	li $3, 7
+	syscall
+	jr $31
+	nop
+	.end mx_bios_exec_ps2
+	.size mx_bios_exec_ps2, .-mx_bios_exec_ps2
+
 	.globl mx_bios_set_tlb_handler
 	.type mx_bios_set_tlb_handler, @function
 	.ent mx_bios_set_tlb_handler
@@ -234,6 +256,17 @@ mx_bios_exit_thread:
 	.end mx_bios_exit_thread
 	.size mx_bios_exit_thread, .-mx_bios_exit_thread
 
+	.globl mx_bios_exit_delete_thread
+	.type mx_bios_exit_delete_thread, @function
+	.ent mx_bios_exit_delete_thread
+mx_bios_exit_delete_thread:
+	li $3, 36
+	syscall
+	jr $31
+	nop
+	.end mx_bios_exit_delete_thread
+	.size mx_bios_exit_delete_thread, .-mx_bios_exit_delete_thread
+
 	.globl mx_bios_terminate_thread
 	.type mx_bios_terminate_thread, @function
 	.ent mx_bios_terminate_thread
@@ -421,6 +454,17 @@ mx_bios_ipoll_sema:
 	.end mx_bios_ipoll_sema
 	.size mx_bios_ipoll_sema, .-mx_bios_ipoll_sema
 
+	.globl mx_bios_refer_sema_status
+	.type mx_bios_refer_sema_status, @function
+	.ent mx_bios_refer_sema_status
+mx_bios_refer_sema_status:
+	li $3, 71
+	syscall
+	jr $31
+	nop
+	.end mx_bios_refer_sema_status
+	.size mx_bios_refer_sema_status, .-mx_bios_refer_sema_status
+
 	.globl mx_bios_enable_intc_handler
 	.type mx_bios_enable_intc_handler, @function
 	.ent mx_bios_enable_intc_handler
@@ -486,6 +530,17 @@ mx_bios_iflush_cache:
 	nop
 	.end mx_bios_iflush_cache
 	.size mx_bios_iflush_cache, .-mx_bios_iflush_cache
+
+	.globl mx_bios_sif_stop_dma
+	.type mx_bios_sif_stop_dma, @function
+	.ent mx_bios_sif_stop_dma
+mx_bios_sif_stop_dma:
+	li $3, 107
+	syscall
+	jr $31
+	nop
+	.end mx_bios_sif_stop_dma
+	.size mx_bios_sif_stop_dma, .-mx_bios_sif_stop_dma
 
 	.globl mx_bios_gs_get_imr
 	.type mx_bios_gs_get_imr, @function

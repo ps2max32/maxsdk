@@ -7,10 +7,15 @@ ENTRY(__start)
    at 0x94000 - 0x100000); the kernel puts the stack at the top of memory
    (__stack -1), the heap is from _end up to it. A program linked with
    --defsym=__mx_base=<address> starts there instead (mxload, which loads
-   programs below itself). */
+   programs below itself). One linked with --defsym=__mx_top=<address> also
+   ends there, its stack just below it: a resident program that leaves the
+   memory above to others (mxlink, at 0x94000 - 0xFF800). The stack's size
+   is 128 KiB, or --defsym=__mx_stack_size=<bytes> (a --defsym of
+   __stack_size itself comes after the PROVIDEs below have used it). */
 MEMORY {
   ram : ORIGIN = DEFINED(__mx_base) ? __mx_base : 0x00100000,
-        LENGTH = 0x02000000 - (DEFINED(__mx_base) ? __mx_base : 0x00100000)
+        LENGTH = (DEFINED(__mx_top) ? __mx_top : 0x02000000) -
+                 (DEFINED(__mx_base) ? __mx_base : 0x00100000)
   spr : ORIGIN = 0x70000000, LENGTH = 16K
 }
 
@@ -66,8 +71,8 @@ SECTIONS {
   /DISCARD/ : { *(.MIPS.abiflags) *(.reginfo) *(.gnu.attributes) *(.comment) *(.pdr) }
 
   /* The kernel picks the stack at the top of memory when __stack is -1. */
-  PROVIDE(__stack = -1);
-  PROVIDE(__stack_size = 128 * 1024);
+  PROVIDE(__stack_size = DEFINED(__mx_stack_size) ? __mx_stack_size : 128 * 1024);
+  PROVIDE(__stack = DEFINED(__mx_top) ? __mx_top - __stack_size : -1);
 }
 
 ASSERT(_end <= ORIGIN(ram) + LENGTH(ram) - __stack_size,

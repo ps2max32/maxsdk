@@ -18,6 +18,7 @@
 #define CMD_CHANGE_SADDR 0x80000000u
 #define CMD_SET_SREG 0x80000001u
 #define CMD_INIT_CMD 0x80000002u
+#define CMD_RESET 0x80000003u
 #define CMD_RPC_END 0x80000008u
 #define CMD_RPC_BIND 0x80000009u
 #define CMD_RPC_CALL 0x8000000Au
@@ -28,7 +29,9 @@
 #define REG_SMFLAG 4
 #define SYSREG_SUBADDR 0x80000000u
 #define SYSREG_RPCINIT 0x80000002u
+#define SMFLAG_SIFINIT 0x10000
 #define SMFLAG_CMDINIT 0x20000
+#define SMFLAG_BOOTEND 0x40000
 
 /* sceSifSetDma attributes */
 #define DMA_INT_O 0x4
@@ -76,6 +79,8 @@ static volatile u32 iop_buf;
 static volatile s32 sregs[32];
 static int sif_state; /* 0 = not tried, 1 = ready, -1 = no IOP */
 static int sif0_handler_id;
+/* the IOP's boots by mx_iop_reset: bindings of an earlier one are gone */
+static u32 sif_epoch;
 
 static volatile u32 *uw(void *p) { return (volatile u32 *)MX_UNCACHED(p); }
 
@@ -497,11 +502,15 @@ int mx_sif_bind_tries(struct mx_sif_client *c, u32 sid, int n) {
     send_cmd(0, CMD_RPC_BIND, p, RPC_PKT_SIZE, 0, 0, 0);
     if (wait_answer(c, 1) < 0)
       return -1;
-    if (c->server)
+    if (c->server) {
+      c->epoch = sif_epoch;
       return 0;
+    }
   }
   return -1;
 }
+
+int mx_sif_bound(const struct mx_sif_client *c) { return c->server && c->epoch == sif_epoch; }
 
 /* An RPC call; wait (cycles): 0 forever, otherwise give up after about
    that long and return -2. A call given up leaves its client to its late
@@ -638,7 +647,7 @@ static struct lf_load_arg lf_arg MX_DMA_LINES;
 static s32 lf_result[4] MX_DMA_LINES;
 
 int mx_iop_load_module(const char *path) {
-  if ((!mx_sif_ready() && mx_sif_init() < 0) || (!lf.server && mx_sif_bind(&lf, LOADFILE_SID) < 0))
+  if ((!mx_sif_ready() && mx_sif_init() < 0) || (!mx_sif_bound(&lf) && mx_sif_bind(&lf, LOADFILE_SID) < 0))
     return -1;
   u32 i = 0;
   for (; path[i] && i < sizeof lf_arg.path - 1; i++)
@@ -694,6 +703,7 @@ static int fio_call(int fno, const void *send, u32 ssize, void *recv, u32 rsize)
                         (u32)__builtin_popcount(pkt_busy));
     struct mx_sif_client *n = &fio_pool[(u32)(fio_c - fio_pool + 1) % 4];
     n->server = fio_c->server, n->buf = fio_c->buf, n->cbuf = fio_c->cbuf;
+    n->epoch = fio_c->epoch;
     n->done = 0, n->pkt = 0;
     fio_c = n;
   }
@@ -704,7 +714,7 @@ static u32 wr_result[4] MX_DMA_LINES;
 static char wr_data[1024] MX_DMA_LINES;
 
 static int fio_bind(void) {
-  if (!fio.server && (mx_sif_init() < 0 || mx_sif_bind(&fio, FILEIO_SID) < 0))
+  if (!mx_sif_bound(&fio) && (mx_sif_init() < 0 || mx_sif_bind(&fio, FILEIO_SID) < 0))
     return -1;
   return 0;
 }
@@ -1017,9 +1027,9 @@ int mx_fio_close(int fd) {
 static int fio_dopen_unlocked(const char *path) {
   if (fio_bind() < 0)
     return -1;
-  static int patched;
-  if (!patched) {
-    patched = 1;
+  static u32 patched; /* sif_epoch + 1: patched in this boot of the IOP */
+  if (patched != sif_epoch + 1) {
+    patched = sif_epoch + 1;
     mx_iop_patch_fileio();
   }
   static char dp_arg[256] MX_DMA_LINES;
@@ -1104,9 +1114,9 @@ int mx_fio_dclose(int fd) {
 static int fio_path_call_unlocked(int fn, const char *path) {
   if (fio_bind() < 0)
     return -1;
-  static int patched;
-  if (!patched) {
-    patched = 1;
+  static u32 patched; /* sif_epoch + 1: patched in this boot of the IOP */
+  if (patched != sif_epoch + 1) {
+    patched = sif_epoch + 1;
     mx_iop_patch_fileio();
   }
   static char pa_arg[256] MX_DMA_LINES;
@@ -1134,3 +1144,75 @@ int mx_fio_mkdir(const char *path, int mode) {
   return fio_path_call(FILEIO_MKDIR, path);
 }
 int mx_fio_rmdir(const char *path) { return fio_path_call(FILEIO_RMDIR, path); }
+
+/* ---- IOP reset ---------------------------------------------------------- */
+
+/* As ps2sdk's SifIopReset, SifIopSync and SifInitRpc: a RESET command to
+   the IOP's SIF command handler, then the SIF registers as a new IOP boot
+   expects them; the IOP sets BOOTEND in SMFLAG when it is up again. */
+int mx_iop_reset(const char *arg) {
+  static struct {
+    u32 size, dest, cid, opt;
+    s32 arglen, mode;
+    char arg[80];
+  } pkt MX_DMA_LINES;
+  if (!mx_sif_ready() && mx_sif_init() < 0)
+    return -1;
+  u32 n = 0;
+  if (arg)
+    for (; arg[n] && n < sizeof pkt.arg - 1; n++)
+      pkt.arg[n] = arg[n];
+  pkt.arg[n] = 0;
+  pkt.size = sizeof pkt; /* psize; dsize 0 */
+  pkt.dest = 0;
+  pkt.cid = CMD_RESET;
+  pkt.opt = 0;
+  pkt.arglen = (s32)n;
+  pkt.mode = 0;
+  mx_dcache_writeback(&pkt, sizeof pkt);
+
+  mx_bios_sif_stop_dma();
+  struct sif_dma t = {(u32)(uintptr_t)&pkt, (u32)mx_bios_sif_get_reg(SYSREG_SUBADDR),
+                      (s32)sizeof pkt, DMA_ERT | DMA_INT_O};
+  mx_bios_sif_set_reg(REG_SMFLAG, SMFLAG_BOOTEND);
+  if (!mx_bios_sif_set_dma(&t, 1))
+    return -1;
+  mx_bios_sif_set_reg(REG_SMFLAG, SMFLAG_SIFINIT);
+  mx_bios_sif_set_reg(REG_SMFLAG, SMFLAG_CMDINIT);
+  mx_bios_sif_set_reg(SYSREG_RPCINIT, 0);
+  mx_bios_sif_set_reg(SYSREG_SUBADDR, 0);
+
+  /* everything of the IOP before is gone: our bindings, its packets, the
+     file positions; mx_sif_init starts again once the IOP is up */
+  mx_sif_exit();
+  sif_epoch++;
+  pkt_busy = 0;
+  ndeferred = 0;
+  for (int i = 0; i < 32; i++)
+    sregs[i] = 0;
+  for (int i = 0; i < NPOS; i++)
+    fpos[i] = -1;
+  u32 t0 = mx_count();
+  while (!(mx_bios_sif_get_reg(REG_SMFLAG) & SMFLAG_BOOTEND))
+    if (mx_count() - t0 > 10u * 294912000u) /* 10 s (the counter wraps at 14.5) */
+      return -1;
+  if (mx_sif_init() < 0)
+    return -1;
+  /* BOOTEND comes before the ROM's servers are up (LOADFILE, FILEIO and
+     the heap start after it): wait until each answers a bind. Not bind
+     after bind: answering them kept the IOP from starting the servers
+     (PCSX2), so 10 ms between tries */
+  static const u32 sids[3] = {LOADFILE_SID, FILEIO_SID, 0x80000003u /* the IOP heap */};
+  static struct mx_sif_client c[3]; /* static: each keeps its semaphore */
+  for (int i = 0; i < 3; i++) {
+    t0 = mx_count();
+    while (mx_sif_bind_tries(&c[i], sids[i], 1) < 0) {
+      if (mx_count() - t0 > 10u * 294912000u)
+        return -1;
+      u32 t1 = mx_count();
+      while (mx_count() - t1 < 2949120u) /* 10 ms */
+        ;
+    }
+  }
+  return 0;
+}

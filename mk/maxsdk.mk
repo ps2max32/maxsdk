@@ -38,7 +38,8 @@ CFLAGS  += $(EXTRA_CFLAGS)
 MX_LIB   = $(MAXSDK_OUT)/libmx.a
 MX_CRT0  = $(MAXSDK_OUT)/obj/crt0.o
 # MX_MEMORY=vm: the program's own objects linked into VM (docs/vm.md),
-# started by mxload.elf (MX_LOADER); phys (the default): all in core
+# started by mxlink (tools/mxlink, the PS2's loader) or mxload.elf (MX_LOADER); phys (the default):
+# all in core
 MX_MEMORY ?= phys
 MX_LD_phys = $(MAXSDK)/ld/maxsdk.ld
 # MX_VM_TEXT=core (with MX_MEMORY=vm): the program's code stays core

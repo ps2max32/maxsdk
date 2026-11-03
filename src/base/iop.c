@@ -21,7 +21,7 @@ static struct mx_sif_client heap;
 static u32 heap_arg[4] MX_DMA_LINES;
 
 static int heap_call(int fno, u32 *v) {
-  if (!heap.server && (mx_sif_init() < 0 || mx_sif_bind(&heap, HEAP_SID) < 0))
+  if (!mx_sif_bound(&heap) && (mx_sif_init() < 0 || mx_sif_bind(&heap, HEAP_SID) < 0))
     return -1;
   volatile u32 *a = MX_UNCACHED(heap_arg);
   a[0] = *v;
@@ -329,7 +329,7 @@ int mx_iop_load_module_buffer(const void *buf, u32 size, const char *args, u32 a
                               int *modres) {
   if (mx_iop_patch_lmb() < 0)
     return -1;
-  if (!lf.server && (mx_sif_init() < 0 || mx_sif_bind(&lf, LOADFILE_SID) < 0))
+  if (!mx_sif_bound(&lf) && (mx_sif_init() < 0 || mx_sif_bind(&lf, LOADFILE_SID) < 0))
     return -1;
   u32 p = mx_iop_alloc((size + 15) & ~15u);
   if (!p)

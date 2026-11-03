@@ -16,6 +16,7 @@ struct mx_sif_client {
   void *pkt; /* our packet of the request in flight */
   int sema;  /* + 1: a semaphore to sleep on while waiting (0: none yet) */
   volatile int sleeping;
+  u32 epoch; /* the IOP's boot it was bound in (mx_sif_bound) */
 };
 
 /* Returns 0 on success, < 0 if the IOP side does not answer. */
@@ -25,6 +26,9 @@ int mx_sif_ready(void);
    (mxload). SIF0 stays on (ps2link's handler needs it); the IOP still has our
    receive buffer until the next program's mx_sif_init sends its own. */
 void mx_sif_exit(void);
+/* 1 if c is bound to a server of the IOP as it runs now: a binding made
+   before mx_iop_reset (<mx/iop.h>) is gone. */
+int mx_sif_bound(const struct mx_sif_client *c);
 /* Bind to RPC server sid. Blocks (polls) until the IOP answers. */
 int mx_sif_bind(struct mx_sif_client *c, u32 sid);
 /* The same, giving up after n tries (0 if the server is not registered). */
