@@ -200,10 +200,10 @@ static void cache_load(int policy) {
   }
   struct mx_vcache_stats st;
   mx_vcache_stats(&st);
-  mx_printf("vcache %s: %u hits %u misses %u evicted (%u of the frame), %u ring frames, "
+  mx_printf("vcache %s: %u hits %u misses %u evicted (%u of the frame, %u done), "
             "%u ring places, %u pages (%u small), %u entries read back\n",
             (const char *[]){"AUTO", "COST", "RING"}[policy], st.hits, st.misses, st.evicted,
-            st.evicted_now, st.ring_frames, st.ring_places, st.pages, st.small_pages, checked);
+            st.evicted_now, st.evicted_done, st.ring_places, st.pages, st.small_pages, checked);
   mx_printf("vcache: lookup cycles: hits %u, misses %u on average, %u at most\n",
             tsum[0] / (nlook[0] ? nlook[0] : 1), tsum[1] / (nlook[1] ? nlook[1] : 1), tmax);
   CHECK_EQ(bad, 0);
@@ -261,11 +261,12 @@ static u32 check_row(u32 k, u32 x0, u32 y0, u32 y) {
 
 static void drawn(void) {
   /* a CT32 (MIPMAP, level 0 two pages), a small CT32, a T8 and a T4 with
-     their CLUTs, looked up in a frame of their own (uploaded if missing) */
+     their CLUTs, looked up in a frame of their own (uploaded if missing),
+     two frames after the last (not done for this frame by last frame's uses) */
   static const u32 want[4] = {0, 1, 3, 4};
   u32 keys[4], n = 0;
   struct mx_tex ts[4];
-  mx_vcache_frame(41, 40);
+  mx_vcache_frame(42, 41);
   for (u32 i = 0; i < 4; i++) {
     u32 k = want[i];
     const struct shape *sh = shape_of(k);

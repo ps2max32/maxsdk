@@ -67,9 +67,13 @@ void mx__test_end(int status) {
   mx_printf("@@PS2TEST_END@@ status=%d\n", status);
 }
 
+void mx__vm_shutdown(void);
+
 void mx_exit(int status) {
   report();
   mx_debug_flush();
+  /* the BIOS's TLB back for ps2link (with VM on) */
+  mx__vm_shutdown();
   mx_bios_exit(status);
 }
 

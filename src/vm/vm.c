@@ -54,6 +54,7 @@
 #define PM16M 0x01FFE000u
 #define TLB_N 48
 #define FRAME_TAKEN 0xFFFFu  /* page_of: taken, its page not there yet */
+#define FRAME_PINNED 0xFFFEu /* page_of: pinned memory (<mx/mem.h>), out of the pool */
 
 /* EntryLo bits */
 #define LO_G 1u
@@ -98,6 +99,8 @@ static struct {
     int fd;
   } seg[NSEG];
   u32 nmap, map_next; /* pages of the file window, the next one not given out */
+  u32 nheap, heap_next; /* pages of the heap window, the next one not given out */
+  u32 pinned_frames;    /* frames out of the pool as pinned memory */
   struct {
     u32 *buf, cap, n, lost;
     u8 *seen; /* per block, this interval: epoch << 2 | written << 1 | read */
@@ -110,21 +113,30 @@ struct mx__vm_fast mx__vm_fast MX_ALIGNED(16);
 #define F mx__vm_fast
 _Static_assert(VMF_BASE_PAGE == MX_VM_BASE >> PAGE_SHIFT, "tlb.S");
 
+/* The tables' pages: VM's (0 .. npages), the file window's (.. + nmap),
+   the heap window's (.. + nheap). */
 static u32 page_va(u32 pg) {
-  return pg < vm.npages ? MX_VM_BASE + pg * PAGE : MX_VM_MAP_BASE + (pg - vm.npages) * PAGE;
+  if (pg < vm.npages)
+    return MX_VM_BASE + pg * PAGE;
+  if (pg < vm.npages + vm.nmap)
+    return MX_VM_MAP_BASE + (pg - vm.npages) * PAGE;
+  return MX_VM_HEAP_BASE + (pg - vm.npages - vm.nmap) * PAGE;
 }
 
-/* The page of va, or ~0 (outside both windows in use). */
+/* The page of va, or ~0 (outside the windows in use). */
 static u32 va_page(u32 va) {
   if (va - MX_VM_BASE < vm.npages * PAGE)
     return (va - MX_VM_BASE) >> PAGE_SHIFT;
   if (va - MX_VM_MAP_BASE < vm.nmap * PAGE)
     return vm.npages + ((va - MX_VM_MAP_BASE) >> PAGE_SHIFT);
+  if (va - MX_VM_HEAP_BASE < vm.nheap * PAGE)
+    return vm.npages + vm.nmap + ((va - MX_VM_HEAP_BASE) >> PAGE_SHIFT);
   return ~0u;
 }
 
 /* a page of the file window: read-only */
-static int is_mapped(u32 pg) { return pg >= vm.npages; }
+static int is_mapped(u32 pg) { return pg - vm.npages < vm.nmap; }
+static u32 npages_all(void) { return vm.npages + vm.nmap + vm.nheap; }
 
 void mx__vm_code(void) { vm.code = 1; }
 
@@ -175,7 +187,7 @@ static void tlb_read(u32 i, u32 *pm, u32 *hi, u32 *lo0, u32 *lo1) {
    held. Interrupts off (or at EXL). */
 static u32 tlb_take(void) {
   u32 s = F.next_slot;
-  F.next_slot = s + 1 < TLB_N ? s + 1 : TLB_FIRST;
+  F.next_slot = F.next_of[s];
   u32 old = F.slot_page[s];
   if (old)
     vm.page_slot[old - 1] = 0;
@@ -281,7 +293,7 @@ static void tr_tick(void) {
   if (ms - last < vm.tr.every_ms)
     return;
   last = ms;
-  for (u32 i = TLB_FIRST; i < TLB_N; i++) {
+  for (u32 i = 0; i < TLB_N; i++) {
     u32 q = F.slot_page[i];
     if (q) {
       tlb_clear(i);
@@ -290,7 +302,7 @@ static void tr_tick(void) {
     }
   }
   if (!(++vm.tr.epoch & 63))
-    __builtin_memset(vm.tr.seen, 0, (vm.npages + vm.nmap) * BPP);
+    __builtin_memset(vm.tr.seen, 0, npages_all() * BPP);
   tr_push((u32)MX_VM_TR_TICK << 30 | (ms & 0x3FFFFFFFu));
 }
 
@@ -305,7 +317,7 @@ static void vblank(void) {
     tr_tick();
     return;
   }
-  for (u32 i = TLB_FIRST; i < TLB_N; i++) {
+  for (u32 i = 0; i < TLB_N; i++) {
     u32 q = F.slot_page[i];
     if (q) {
       tlb_clear(i);
@@ -349,21 +361,127 @@ int mx_vm_trace_save(const char *path) {
   return r ? -1 : (int)n;
 }
 
-/* The BIOS's entries of uncached main memory (22..30: 0x2008_0000 on)
-   and UCAB (31..38: 0x3010_0000 on) as one each, 32 MiB from 0x2000_0000
-   and 0x3000_0000 (16 MiB halves, as the BIOS's ROM entry 12): the same
-   mappings and a little more (the kernel's first 512 KiB and 1 MiB), in 2
-   entries instead of 17. The others first out of the way: two entries
-   matching one address are undefined. Interrupts off; nothing in between
-   touches those addresses. */
-static void tlb_init(void) {
-  for (u32 s = 23; s < TLB_N; s++)
-    tlb_clear(s);
-  tlb_write(22, PM16M, 0x20000000u, 0x00000017u, 0x00040017u); /* uncached, D V G */
-  tlb_write(23, PM16M, 0x30000000u, 0x0000003Fu, 0x0004003Fu); /* UCAB */
-  for (u32 s = 0; s < TLB_N; s++)
-    F.slot_page[s] = 0;
-  F.next_slot = TLB_FIRST;
+/* The BIOS's TLB (ps2sdk's InitTLB32MB table; docs/vm.md) as mx_vm_init
+   found it, written back by mx__vm_shutdown before the program returns to
+   ps2link; and its TLB handlers. */
+static struct {
+  u32 pm, hi, lo0, lo1;
+} bios_tlb[TLB_N];
+static void *bios_handler[4];
+static u8 tlb_fixed[TLB_N]; /* 1: a BIOS entry kept as it was; 2: one of the VM's fixed ones */
+static int tlb_saved;
+
+/* the range of VA an entry maps (both halves) */
+static u32 ent_lo(u32 i) {
+  u32 pair = (bios_tlb[i].pm | 0x1FFFu) + 1;
+  return bios_tlb[i].hi & ~(pair - 1);
+}
+static u32 ent_hi(u32 i) { return ent_lo(i) + (bios_tlb[i].pm | 0x1FFFu); }
+
+/* The VM's TLB: the BIOS's entries are read and saved; what the program,
+   ps2link and the kernel use stays where it is (the scratchpad, kseg3,
+   VU and GS memory, ROM, and the cached main memory that holds the BIOS's
+   area, the program, the physical allocator and the stack: their code
+   keeps running while this changes them); its 8 pairs of 4 KiB I/O pages
+   become one entry (64 KiB halves: the write protection of two pages, the
+   timers 2/3 and the SIF registers, goes), its 9 uncached and 8 UCAB
+   entries one each (16 MiB halves), its cached main memory that holds only
+   frames (phys [flo, fhi)) goes, and one entry maps all of main memory
+   cached at MX_PHYS_WIN. Each kind is cleared before its new entry is
+   written (two entries matching one address are undefined). Every other
+   entry is the VM's, taken in turn (next_of). Interrupts off; nothing in
+   between touches the addresses changed. */
+static void tlb_init(u32 flo, u32 fhi) {
+  for (u32 i = 0; i < TLB_N; i++)
+    tlb_read(i, &bios_tlb[i].pm, &bios_tlb[i].hi, &bios_tlb[i].lo0, &bios_tlb[i].lo1);
+  tlb_saved = 1;
+  int io = -1, unc = -1, ucab = -1;
+  for (u32 i = 0; i < TLB_N; i++) {
+    u32 lo = ent_lo(i), hi = ent_hi(i), valid = (bios_tlb[i].lo0 | bios_tlb[i].lo1) & LO_V;
+    tlb_fixed[i] = 0;
+    if (!valid)
+      continue; /* unused (kseg3, V = 0) */
+    if (lo >= 0x10000000u && hi <= 0x1000FFFFu) {
+      tlb_clear(i);
+      io = io < 0 ? (int)i : io;
+    } else if (lo >= 0x20000000u && hi <= 0x21FFFFFFu) {
+      tlb_clear(i);
+      unc = unc < 0 ? (int)i : unc;
+    } else if (lo >= 0x30000000u && hi <= 0x31FFFFFFu) {
+      tlb_clear(i);
+      ucab = ucab < 0 ? (int)i : ucab;
+    } else if (hi < 0x02000000u && lo >= flo && hi < fhi) {
+      tlb_clear(i); /* only frames: reached through MX_PHYS_WIN */
+    } else
+      tlb_fixed[i] = 1;
+  }
+  /* the slots the BIOS's I/O, uncached and UCAB entries had (or free ones) */
+  for (u32 i = 0; i < TLB_N && (io < 0 || unc < 0 || ucab < 0); i++)
+    if (!tlb_fixed[i] && (int)i != io && (int)i != unc && (int)i != ucab) {
+      if (io < 0)
+        io = (int)i;
+      else if (unc < 0)
+        unc = (int)i;
+      else
+        ucab = (int)i;
+    }
+  tlb_write((u32)io, 0x1E000u, 0x10000000u, 0x00400017u, 0x00400417u); /* I/O: uncached, D V G */
+  tlb_write((u32)unc, PM16M, 0x20000000u, 0x00000017u, 0x00040017u);   /* uncached */
+  tlb_write((u32)ucab, PM16M, 0x30000000u, 0x0000003Fu, 0x0004003Fu);  /* UCAB */
+  tlb_fixed[io] = tlb_fixed[unc] = tlb_fixed[ucab] = 2;
+  int win = -1;
+  for (u32 i = 0; i < TLB_N && win < 0; i++)
+    if (!tlb_fixed[i])
+      win = (int)i;
+  tlb_write((u32)win, PM16M, MX_PHYS_WIN, 0x0000001Fu, 0x0004001Fu); /* cached, D V G */
+  tlb_fixed[win] = 2;
+  /* the others: the VM's, in a ring */
+  int first = -1, prev = -1;
+  for (u32 i = 0; i < TLB_N; i++) {
+    F.slot_page[i] = 0;
+    if (tlb_fixed[i])
+      continue;
+    tlb_clear(i);
+    if (first < 0)
+      first = (int)i;
+    if (prev >= 0)
+      F.next_of[prev] = (u8)i;
+    prev = (int)i;
+  }
+  F.next_of[prev] = (u8)first;
+  F.next_slot = (u32)first;
+}
+
+u32 mx__vm_tlb_entries(void) {
+  u32 n = 0;
+  for (u32 i = 0; i < TLB_N; i++)
+    n += !tlb_fixed[i];
+  return n;
+}
+
+/* The BIOS's TLB and handlers back (mx_exit, the crash report): the VM's
+   entries and the fixed ones it wrote are cleared first, then the BIOS's
+   written; the entries kept never changed, so the code running here stays
+   mapped. VM is off after it: nothing of it may be touched. */
+void mx__vm_shutdown(void) {
+  if (!tlb_saved)
+    return;
+  int was = mx_di();
+  vm.active = 0;
+  F.npages = 0;
+  for (u32 i = 0; i < TLB_N; i++) {
+    F.slot_page[i] = 0;
+    if (tlb_fixed[i] != 1)
+      tlb_clear(i);
+  }
+  for (u32 i = 0; i < TLB_N; i++)
+    if (tlb_fixed[i] != 1)
+      tlb_write(i, bios_tlb[i].pm, bios_tlb[i].hi, bios_tlb[i].lo0, bios_tlb[i].lo1);
+  tlb_saved = 0;
+  mx_irq_restore(was);
+  for (int c = 1; c <= 3; c++)
+    if (bios_handler[c])
+      mx_bios_set_tlb_handler(c, (void (*)(void))bios_handler[c]);
 }
 
 /* ---- pages and frames ------------------------------------------------------- */
@@ -407,7 +525,7 @@ static int frame_take(void) {
 /* The page in frame f, or -1 (free or taken). */
 static int page_in(u32 f) {
   u32 q = vm.page_of[f];
-  return q && q != FRAME_TAKEN ? (int)(q - 1) : -1;
+  return q && q < FRAME_PINNED ? (int)(q - 1) : -1;
 }
 
 static void frame_give(u32 pg, u32 f) {
@@ -454,10 +572,12 @@ int mx__vm_exception(struct mx__vm_x *x) {
     return to_thread(x);
   u32 pg = va_page(va);
   if (code < 1 || code > 3 || pg == ~0u) {
-    mx__exception_note = va - MX_VM_BASE < MX_VM_LIMIT - MX_VM_BASE
+      mx__exception_note = va - MX_VM_BASE < MX_VM_LIMIT - MX_VM_BASE
                              ? "VM: outside the VM in use (mx_vm_size)"
                          : va - MX_VM_MAP_BASE < MX_VM_MAP_LIMIT - MX_VM_MAP_BASE
                              ? "VM: in the file window, but not in a mapped file"
+                         : va - MX_VM_HEAP_BASE < MX_VM_HEAP_LIMIT - MX_VM_HEAP_BASE
+                             ? "VM: in the heap window, but not in a heap (mx_heap_create)"
                              : 0;
     return VMX_FATAL;
   }
@@ -1010,7 +1130,7 @@ static int find_run(u32 a, u32 n) {
     u32 i = 0;
     for (; i < n; i++) {
       int q = page_in(f0 + i);
-      if (vm.page_of[f0 + i] == FRAME_TAKEN ||
+      if (vm.page_of[f0 + i] >= FRAME_PINNED ||
           (q >= 0 && vm.pins[q] && ((u32)q < a || (u32)q >= a + n)))
         break;
     }
@@ -1240,11 +1360,205 @@ mx_paddr mx__vm_paddr(const void *p, u32 bytes) {
 
 void mx__paddr_fault(const void *p, u32 bytes) {
   mx_printf("\nDMA: %p (%u bytes) is not core memory: DMA tags, chains, rings and their "
-            "addresses must be core (mx_core_alloc, mx_dma_alloc, static data); VM data "
+            "addresses must be core or pinned (static data, mx_heap_alloc of MX_MEM_PINNED); VM data "
             "only through mx_vm_pin (<mx/dma.h>)\n",
             p, bytes);
   MX_TEST_END(255);
   mx_exit(255);
+}
+
+/* ---- pinned memory, heaps of pages (mem.c) ------------------------------------------ */
+
+/* A run of n frames, from the top down, of free frames and pages that may
+   move (not pinned, not busy): pinned memory gathers at the top. */
+static int pin_run(u32 n) {
+  for (int f0 = (int)vm.nframes - (int)n; f0 >= 0; f0--) {
+    u32 i = 0;
+    for (; i < n; i++) {
+      u32 f = (u32)f0 + i;
+      if (vm.page_of[f] >= FRAME_PINNED)
+        break;
+      int q = page_in(f);
+      if (q >= 0 && (vm.pins[q] || (vm.flags[q] & PG_BUSY)))
+        break;
+    }
+    if (i == n)
+      return f0;
+    f0 = f0 + (int)i - (int)n + 1; /* below the one in the way, after the f0-- */
+  }
+  return -1;
+}
+
+/* bytes (whole frames) of pinned memory: a run of frames out of the pool,
+   the pages in it moved out (to free frames, or the swap file). Its address
+   in MX_PHYS_WIN, or 0. Thread code with interrupts on. */
+void *mx__vm_frames_take(u32 bytes) {
+  u32 n = (bytes + PAGE - 1) / PAGE;
+  if (!vm.active || !n || n > vm.nframes)
+    return 0;
+  irq_check(0x50);
+  lock();
+  int f0 = pin_run(n);
+  if (f0 < 0) {
+    unlock();
+    return 0;
+  }
+  for (u32 i = 0; i < n; i++) {
+    u32 fr = (u32)f0 + i;
+    if (page_in(fr) >= 0)
+      vacate(fr, (u32)f0, (u32)f0 + n);
+    int was = mx_di();
+    vm.page_of[fr] = FRAME_PINNED;
+    vm.nfree--;
+    mx_irq_restore(was);
+  }
+  vm.pinned_frames += n;
+  unlock();
+  return frame_ptr((u32)f0);
+}
+
+void mx__vm_frames_give(void *p, u32 bytes) {
+  u32 n = (bytes + PAGE - 1) / PAGE, f0 = (u32)((u8 *)p - vm.frames) / PAGE;
+  int was = mx_di();
+  for (u32 i = 0; i < n; i++)
+    if (vm.page_of[f0 + i] == FRAME_PINNED) {
+      vm.page_of[f0 + i] = 0;
+      vm.nfree++;
+      vm.pinned_frames--;
+    }
+  mx_irq_restore(was);
+}
+
+/* bytes (whole pages) of the heap window for a heap of pages: its
+   address, or 0 */
+u32 mx__vm_va_take(u32 bytes) {
+  u32 n = (bytes + PAGE - 1) / PAGE;
+  int was = mx_di();
+  u32 r = 0;
+  if (vm.active && vm.heap_next + n <= vm.nheap) {
+    r = MX_VM_HEAP_BASE + vm.heap_next * PAGE;
+    vm.heap_next += n;
+  }
+  mx_irq_restore(was);
+  return r;
+}
+
+/* [p, p + bytes) all resident (no fault to touch or lock it) */
+int mx__vm_resident(const void *p, u32 bytes) {
+  if (!mx_is_vm(p))
+    return 1;
+  if (!in_vm(p, bytes))
+    return 0;
+  int was = mx_di();
+  int r = 1;
+  for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b && r; pg++)
+    r = vm.frame_of[pg] && !(vm.flags[pg] & PG_BUSY);
+  mx_irq_restore(was);
+  return r;
+}
+
+/* the bytes of [p, p + bytes) in resident pages */
+u32 mx__vm_resident_bytes(const void *p, u32 bytes) {
+  if (!mx_is_vm(p))
+    return bytes;
+  if (!in_vm(p, bytes))
+    return 0;
+  int was = mx_di();
+  u32 n = 0;
+  for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b; pg++)
+    n += vm.frame_of[pg] ? PAGE : 0;
+  mx_irq_restore(was);
+  return n;
+}
+
+/* The pager thread: brings the ranges asked for in (mx__vm_prefetch), at
+   the writer's priority (it sleeps in its I/O). */
+#define NPREF 64
+static struct {
+  const void *p;
+  u32 bytes;
+} pref[NPREF];
+static volatile u32 pref_in, pref_out;
+static int psema = -1;
+static u8 pstack[8192] MX_ALIGNED(16);
+
+static void pager(void *arg) {
+  (void)arg;
+  for (;;) {
+    mx_bios_wait_sema(psema);
+    while (pref_out != pref_in) {
+      const void *p = pref[pref_out % NPREF].p;
+      u32 bytes = pref[pref_out % NPREF].bytes;
+      pref_out++;
+      if (!in_vm(p, bytes))
+        continue;
+      lock();
+      for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b; pg++)
+        if (!vm.frame_of[pg])
+          fault_in(pg, 0);
+      unlock();
+
+    }
+  }
+}
+
+void mx__vm_prefetch(const void *p, u32 bytes) {
+  if (!vm.active || !mx_is_vm(p) || !in_vm(p, bytes) || mx__vm_resident(p, bytes))
+    return;
+  if (psema < 0) {
+    struct {
+      s32 count, max_count, init_count, wait_threads;
+      u32 attr, option;
+    } sp = {0, NPREF, 0, 0, 0, 0};
+    int me = mx_thread_self(), prio = mx_thread_prio(me);
+    psema = mx_bios_create_sema(&sp);
+    if (psema < 0 || mx_thread_start(pager, 0, pstack, sizeof pstack, prio - 1) < 0) {
+      mx_printf("maxsdk: the VM's pager thread did not start\n");
+      psema = -2;
+    }
+  }
+  if (psema < 0 || pref_in - pref_out >= NPREF)
+    return; /* asked again later */
+  pref[pref_in % NPREF].p = p;
+  pref[pref_in % NPREF].bytes = bytes;
+  pref_in++;
+  mx_bios_signal_sema(psema);
+}
+
+/* The whole pages in [p, p + bytes) of a heap of pages are free (mem.c):
+   their contents go (no swap write; zero when touched again). The lock is
+   taken; pinned pages stay. */
+void mx__vm_discard(const void *p, u32 bytes) {
+  u32 a = ((u32)(uintptr_t)p + PAGE - 1) & ~(PAGE - 1), e = ((u32)(uintptr_t)p + bytes) & ~(PAGE - 1);
+  if (!vm.active || e <= a || !in_vm((const void *)(uintptr_t)a, e - a))
+    return;
+  lock();
+  for (u32 pg = va_page(a), b = va_page(e - 1); pg <= b; pg++) {
+    if (vm.pins[pg] || (vm.flags[pg] & PG_BUSY))
+      continue;
+    int was = mx_di();
+    unmap(pg);
+    if (vm.frame_of[pg]) {
+      vm.page_of[vm.frame_of[pg] - 1u] = 0;
+      vm.nfree++;
+      vm.frame_of[pg] = 0;
+    }
+    vm.flags[pg] = 0;
+    mx_irq_restore(was);
+  }
+  unlock();
+}
+
+/* [p, p + bytes)'s resident pages the oldest: eviction takes them first
+   (a refill stamps a page again when it is used) */
+void mx__vm_cold(const void *p, u32 bytes) {
+  if (!vm.active || !in_vm(p, bytes))
+    return;
+  int was = mx_di();
+  for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b; pg++)
+    if (vm.frame_of[pg])
+      F.stamp[pg] = F.refills - 0x40000000u;
+  mx_irq_restore(was);
 }
 
 /* ---- mapped files ------------------------------------------------------------------ */
@@ -1329,7 +1643,7 @@ void mx__core_fault(const void *p, const char *what) {
     return;
   }
   mx_printf("\nVM: %s at %p is VM: what an interrupt handler runs or reads must be core "
-            "(MX_CORE_FN, MX_CORE_DATA, mx_core_alloc; <mx/cpu.h>)\n",
+            "(MX_CORE_FN, MX_CORE_DATA, pinned memory; <mx/cpu.h>, <mx/mem.h>)\n",
             what, p);
   MX_TEST_END(255);
   mx_exit(255);
@@ -1347,9 +1661,9 @@ void mx__vm_report(void) {
             s.us_swap_out / 1000, s.writer_outs, s.drops, s.file_ins, s.us_file_in / 1000,
             s.zero_fills);
   mx_printf("maxsdk: VM lock waits %u ms; %u file server calls; %u TLB refills (%u of code; "
-            "about %u ms)\n",
+            "about %u ms; %u entries); %u frames pinned\n",
             s.us_lock / 1000, s.io_calls, s.refills, s.refills_i,
-            s.refills / (MX_EE_HZ / 1000 / MX_VM_REFILL_CYCLES));
+            s.refills / (MX_EE_HZ / 1000 / MX_VM_REFILL_CYCLES), s.tlb_entries, s.pinned_frames);
   if (vm.tr.cap)
     mx_printf("maxsdk: VM trace %u events (%u lost), every %u ms\n", vm.tr.n, vm.tr.lost,
               vm.tr.every_ms);
@@ -1362,6 +1676,8 @@ void mx_vm_stats(struct mx_vm_stats *s) {
   s->pages = vm.npages;
   s->frames = vm.nframes;
   s->free_frames = vm.nfree;
+  s->pinned_frames = vm.pinned_frames;
+  s->tlb_entries = mx__vm_tlb_entries();
   s->dirty_tracking = (u32)vm.dbit;
 }
 
@@ -1380,12 +1696,12 @@ u32 mx__vm_check(void) {
     u32 q = vm.page_of[f];
     if (!q)
       nfree++;
-    else if (q != FRAME_TAKEN && vm.frame_of[q - 1] != f + 1)
+    else if (q < FRAME_PINNED && vm.frame_of[q - 1] != f + 1)
       r = 1u << 28 | f;
   }
   if (!r && nfree != vm.nfree)
     r = 2u << 28;
-  for (u32 pg = 0; pg < vm.npages && !r; pg++) {
+  for (u32 pg = 0; pg < npages_all() && !r; pg++) {
     u32 f = vm.frame_of[pg];
     if (f && vm.page_of[f - 1] != pg + 1)
       r = 1u << 28 | (f - 1);
@@ -1393,7 +1709,7 @@ u32 mx__vm_check(void) {
              (!f || vm.lo[pg] >> 6 != mx_paddr_of(frame_ptr(f - 1)).v >> 12))
       r = 3u << 28 | pg;
   }
-  for (u32 s = TLB_FIRST; s < TLB_N && !r; s++) {
+  for (u32 s = 0; s < TLB_N && !r; s++) {
     u32 q = F.slot_page[s];
     if (q) {
       u32 pg = (q - 1) / vm.bpp, b = (q - 1) % vm.bpp;
@@ -1427,7 +1743,7 @@ u32 mx__vm_check(void) {
 }
 
 static void *table(u32 bytes) {
-  void *p = mx_core_alloc(bytes, 16);
+  void *p = mx__phys_alloc(bytes, 16);
   if (p)
     __builtin_memset(p, 0, bytes);
   return p;
@@ -1438,16 +1754,16 @@ static void *table(u32 bytes) {
    without VM and mx_vm_init may be tried again. The VM_RESUME syscall
    stays set: it is only reached from VM's own faults. */
 static void undo_init(void) {
-  mx_core_free(vm.lo), vm.lo = 0;
-  mx_core_free(vm.frame_of), vm.frame_of = 0;
-  mx_core_free(vm.slot_of), vm.slot_of = 0;
-  mx_core_free(vm.flags), vm.flags = 0;
-  mx_core_free(vm.pins), vm.pins = 0;
-  mx_core_free(vm.page_slot), vm.page_slot = 0;
-  mx_core_free(F.stamp), F.stamp = 0;
-  mx_core_free(vm.page_of), vm.page_of = 0;
-  mx_core_free(vm.tr.seen), vm.tr.seen = 0;
-  mx_core_free(vm.tr.buf), vm.tr.buf = 0;
+  mx__phys_free(vm.lo), vm.lo = 0;
+  mx__phys_free(vm.frame_of), vm.frame_of = 0;
+  mx__phys_free(vm.slot_of), vm.slot_of = 0;
+  mx__phys_free(vm.flags), vm.flags = 0;
+  mx__phys_free(vm.pins), vm.pins = 0;
+  mx__phys_free(vm.page_slot), vm.page_slot = 0;
+  mx__phys_free(F.stamp), F.stamp = 0;
+  mx__phys_free(vm.page_of), vm.page_of = 0;
+  mx__phys_free(vm.tr.seen), vm.tr.seen = 0;
+  mx__phys_free(vm.tr.buf), vm.tr.buf = 0;
   if (vm.lock >= 0)
     mx_bios_delete_sema(vm.lock);
   if (vm.swapsema >= 0)
@@ -1480,10 +1796,16 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   u32 nmap = (cfg->map_size ? cfg->map_size : 64u << 20) / PAGE;
   if (nmap > (MX_VM_MAP_LIMIT - MX_VM_MAP_BASE) / PAGE)
     nmap = (MX_VM_MAP_LIMIT - MX_VM_MAP_BASE) / PAGE;
+  u32 nheap = (cfg->heap_size ? cfg->heap_size : 64u << 20) / PAGE;
+  if (nheap > (MX_VM_HEAP_LIMIT - MX_VM_HEAP_BASE) / PAGE)
+    nheap = (MX_VM_HEAP_LIMIT - MX_VM_HEAP_BASE) / PAGE;
   vm.bpp = cfg->trace ? BPP : 1; /* slot_page holds a block + 1 */
-  if ((np + nmap) * vm.bpp > 0xFFFE)
-    nmap = 0xFFFE / vm.bpp > np ? 0xFFFE / vm.bpp - np : 0;
-  u32 nt = np + nmap; /* the tables: VM's pages, then the file window's */
+  if ((np + nmap + nheap) * vm.bpp > 0xFFFE) {
+    nheap = 0;
+    if ((np + nmap) * vm.bpp > 0xFFFE)
+      nmap = 0xFFFE / vm.bpp > np ? 0xFFFE / vm.bpp - np : 0;
+  }
+  u32 nt = np + nmap + nheap; /* the tables: VM's pages, the file window's, the heap window's */
   vm.lo = table(nt * 4);
   vm.frame_of = table(nt * 2);
   vm.slot_of = table(nt * 2);
@@ -1493,14 +1815,16 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   F.stamp = table(nt * 4);
   if (cfg->trace) {
     vm.tr.seen = table(nt * BPP);
-    vm.tr.buf = mx_core_alloc(cfg->trace, 16);
+    vm.tr.buf = mx__phys_alloc(cfg->trace, 16);
     if (!vm.tr.seen || !vm.tr.buf) {
       mx_printf("mx_vm_init: no core memory for the trace (%u bytes)\n", cfg->trace);
       undo_init();
       return -1;
     }
   }
-  u32 keep = cfg->core_heap ? cfg->core_heap : 1u << 20;
+  /* everything above the break is frames but what the VM's last tables
+     and the physical allocator's little use after it need */
+  u32 keep = 64u << 10;
   u32 bytes;
   u8 *mem = mx__heap_take(keep, PAGE, &bytes);
   if (cfg->frames && cfg->frames < bytes)
@@ -1519,7 +1843,12 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
     np = nf;
   vm.npages = np;
   vm.nmap = nmap;
-  vm.frames = mem;
+  vm.nheap = nheap;
+  vm.heap_next = 0;
+  vm.pinned_frames = 0;
+  /* the frames through MX_PHYS_WIN: the BIOS's mapping of them goes */
+  u32 flo = mx_paddr_of(mem).v, fhi = flo + nf * PAGE;
+  vm.frames = (u8 *)(uintptr_t)(MX_PHYS_WIN + flo);
   vm.nframes = vm.nfree = nf;
   struct {
     s32 count, max_count, init_count, wait_threads;
@@ -1529,12 +1858,13 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   vm.swapsema = mx_bios_create_sema(&sp);
   vm.wsema = -1;
 
+  mx_bios_flush_cache(0); /* no dirty line of the frames under the BIOS's mapping */
   int was = mx_di();
-  tlb_init();
+  tlb_init(flo, fhi);
   mx_irq_restore(was);
   mx_bios_set_syscall(VM_RESUME_SYSCALL, (void *)mx__vm_resume_k);
   for (int c = 1; c <= 3; c++)
-    mx_bios_set_tlb_handler(c, mx__vm_vector);
+    bios_handler[c] = mx_bios_set_tlb_handler(c, mx__vm_vector);
   mx_bios_flush_cache(0);
   vm.dbit = 1;
   vm.active = 1;
@@ -1558,7 +1888,7 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   F.refills = F.refills_i = 0;
   mx_irq_restore(was);
   if (!faults) {
-    vm.active = 0;
+    mx__vm_shutdown();
     mx_exception_init();
     undo_init();
     mx_printf("mx_vm_init: TLB misses are not raised (PCSX2: run with the EE interpreter)\n");
@@ -1579,6 +1909,10 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
     mx_irq_restore(was);
   }
   mx__irq_vbon_hook(vblank);
+  /* the VM's threads (the writer, the pager) run above the program's: it
+     goes to priority 2 if it was above that (0 when started by PCSX2) */
+  if (mx_thread_prio(mx_thread_self()) < 2)
+    mx_thread_set_prio(mx_thread_self(), 2);
   if (cfg->clean_frames && vm.fd >= 0)
     writer_start(cfg->clean_frames);
   return 0;

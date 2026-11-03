@@ -27,6 +27,7 @@ static struct {
   struct mx_rt rt;
   struct mx_display disp[2];
   u32 strip_h, strip_pages, page_h;
+  u32 npass; /* strips */
   u32 zpsm;
   u32 line[MX_HIRES_PASSES]; /* the H-blank count at which the beam starts strip j */
   struct {
@@ -86,9 +87,9 @@ static u64 *pass_chain(int s, u32 k, int shifted, int finish, int once) {
   u32 rows = h.rt.h - y0 < h.strip_h ? h.rt.h - y0 : h.strip_h;
   u32 oy = h.rt.oy + (y0 << 4) + (shifted ? 8 : 0);
   u32 fbp = h.rt.fbp + k * h.strip_pages;
-  u32 zbp = h.rt.fbp + ((k + 1) % MX_HIRES_PASSES) * h.strip_pages;
+  u32 zbp = h.rt.fbp + ((k + 1) % h.npass) * h.strip_pages;
   u32 rgb = h.slot[s].rgb;
-  u64 *c0 = (u64 *)((uintptr_t)pass_mem[h.nchain] | 0x20000000u);
+  u64 *c0 = MX_UNCACHED(pass_mem[h.nchain]);
   h.nchain = (h.nchain + 1) % NPASS_CHAINS;
   u64 *c = c0;
   /* the record's texture uploads, before anything of it is drawn */
@@ -195,12 +196,12 @@ static void timer_irq(void *arg) {
   (void)arg;
   TMR_MODE = TMR_MODE | (u32)MX_BIT(TIMER_MODE_EQUF);
   u32 j = h.next_line;
-  if (j >= MX_HIRES_PASSES)
+  if (j >= h.npass)
     return;
   h.next_line = j + 1;
-  if (j + 1 < MX_HIRES_PASSES)
+  if (j + 1 < h.npass)
     TMR_COMP = h.line[j + 1];
-  kick((j + 1) % MX_HIRES_PASSES);
+  kick((j + 1) % h.npass);
 }
 
 /* The vblank starts: H-blanks counted from here. */
@@ -220,12 +221,23 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   if (mx_gs_init_video(&mm) < 0)
     return -1;
   int b16 = psm == MX_GS_PSM_CT16 || psm == MX_GS_PSM_CT16S;
-  h.zpsm = psm == MX_GS_PSM_CT16S ? MX_GS_PSM_Z16S : b16 ? MX_GS_PSM_Z16 : MX_GS_PSM_Z32;
+  /* CT24 with Z24: no write reaches the strips' top bytes (textures there) */
+  h.zpsm = psm == MX_GS_PSM_CT16S ? MX_GS_PSM_Z16S
+           : b16                  ? MX_GS_PSM_Z16
+           : psm == MX_GS_PSM_CT24 ? MX_GS_PSM_Z24
+                                   : MX_GS_PSM_Z32;
   h.page_h = b16 ? 64 : 32;
-  h.strip_h = align_up((hgt + MX_HIRES_PASSES - 1) / MX_HIRES_PASSES, h.page_h);
+  /* a third of the picture in whole pages; less when that leaves fewer
+     than three strips (the beam would never reach the third's line) */
+  h.strip_h = align_up((hgt + 2) / 3, h.page_h);
+  while (h.strip_h > h.page_h && (hgt + h.strip_h - 1) / h.strip_h < 3)
+    h.strip_h -= h.page_h;
+  h.npass = (hgt + h.strip_h - 1) / h.strip_h;
+  if (h.npass < 3 || h.npass > MX_HIRES_PASSES)
+    return -1;
   u32 fbw = (w + 63) / 64;
   h.strip_pages = fbw * h.strip_h / h.page_h;
-  u32 fbp = mx_vram_alloc(MX_HIRES_PASSES * h.strip_pages);
+  u32 fbp = mx_vram_alloc(h.npass * h.strip_pages);
   if (fbp == ~0u)
     return -1;
   mx_rt_init(&h.rt, fbp, w, hgt, psm, MX_RT_NOZ, MX_RT_NOZ);
@@ -242,7 +254,7 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   u32 dy = (u32)(d >> 12) & 0x7FF, magv = ((u32)(d >> 27) & 3) + 1;
   u32 top = (dy + 4) >> (mm.interlace ? 1 : 0);
   u32 per = mm.interlace && !mm.ffmd ? 1 : 2; /* field lines per 2 buffer lines */
-  for (u32 j = 0; j < MX_HIRES_PASSES; j++)
+  for (u32 j = 0; j < h.npass; j++)
     h.line[j] = top + j * h.strip_h * magv * per / 2;
 
   /* a slot: its main record, then its once record (a quarter) */
@@ -275,7 +287,7 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
 
   /* timer 0 counts H-blanks; its compare is the next strip's line */
   TMR_MODE = 0;
-  h.next_line = MX_HIRES_PASSES;
+  h.next_line = h.npass;
   TMR_COUNT = 0;
   TMR_COMP = 0xFFFF;
   mx_irq_intc(MX_INTC_TIM0, timer_irq, 0);
@@ -377,6 +389,12 @@ u32 mx_hires_slot(void) {
   return (u32)h.building;
 }
 
+u32 mx_hires_passes(void) { return h.npass; }
+u32 mx_hires_hbyte(u32 *page) {
+  *page = h.rt.fbp;
+  return h.rt.psm == MX_GS_PSM_CT24 ? h.npass * h.strip_pages : 0;
+}
+
 void mx_hires_clear(u32 r, u32 g, u32 b) { h.rgb = (r & 0xFF) | (g & 0xFF) << 8 | (b & 0xFF) << 16; }
 
 void mx_hires_shift_field(int f) { h.shift_field = f; }
@@ -410,7 +428,7 @@ int mx_hires_save_tga(const char *path) {
   u32 oh = twice ? 2 * hh : hh;
   u8 hdr[18] = {0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, (u8)w, (u8)(w >> 8), (u8)oh, (u8)(oh >> 8), 24, 0x20};
   mx_fio_write(fd, hdr, sizeof hdr);
-  for (u32 k = 0; k < MX_HIRES_PASSES; k++) {
+  for (u32 k = 0; k < h.npass; k++) {
     u32 n = hh - k * rows < rows ? hh - k * rows : rows;
     for (int f = 0; f < 1 + both; f++) {
       u32 fin = mx_gs.finish;
@@ -420,7 +438,7 @@ int mx_hires_save_tga(const char *path) {
       mx_gs_wait_finish(fin, 1);
       for (u32 y = 0; y < n; y++) {
         if (mx_gs_download(shot_line, MX_GS_PAGE(h.rt.fbp + k * h.strip_pages), h.rt.fbw,
-                           h.rt.psm, 0, y, w, 1) < 0)
+                           b16 ? h.rt.psm : MX_GS_PSM_CT32, 0, y, w, 1) < 0)
           break;
         for (u32 x = 0; x < w; x++) {
           u32 p = b16 ? ((const u16 *)shot_line)[x] : shot_line[x];

@@ -73,12 +73,9 @@ mx__vm_vector:
 	lw $1, VMF_PAGE_SLOT($27)
 	addu $1, $1, $2
 	sb $0, -1($1)		# that page: no entry
-4:	addiu $3, $3, 1		# the next entry: 24..47 in turn
-	sltiu $1, $3, 48
-	bnez $1, 5f
-	nop
-	ori $3, $0, VMF_TLB_FIRST
-5:	sw $3, VMF_NEXT($27)
+4:	addu $1, $27, $3	# the next entry: the VM's in turn (next_of)
+	lbu $3, VMF_NEXT_OF($1)
+	sw $3, VMF_NEXT($27)
 	lw $1, VMF_REFILLS($27)
 	addiu $1, $1, 1
 	sw $1, VMF_REFILLS($27)

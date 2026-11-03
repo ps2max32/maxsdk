@@ -5,11 +5,18 @@
    held in the physical memory left after the core (frames) and, when they
    run out, in a swap file. Off unless the program asks for it.
 
-   The core is never paged: the program (text, data, bss), the main stack,
-   the core heap (mx_core_alloc), and maxsdk's own tables. It stays on the
-   BIOS's fixed mappings, so it never faults. Interrupt handlers, BIOS calls,
-   thread stacks and the data the DMAC follows (tags, chains, rings) must be
-   core.
+   The core is never paged: the program (text, data, bss), the main stack
+   and maxsdk's own tables. It stays on the BIOS's fixed mappings, so it
+   never faults. Everything else is frames: pages of VM, and pinned memory
+   (<mx/mem.h>: runs of frames taken out of the pool while in use, at
+   MX_PHYS_WIN). Interrupt handlers, BIOS calls, thread stacks and the data
+   the DMAC follows (tags, chains, rings) must be core or pinned.
+
+   The TLB: the BIOS's entries for the program, its stack, ps2link and the
+   kernel stay; its I/O, uncached and UCAB entries are merged, those of
+   main memory that hold only frames go, so the VM has about 34 entries of
+   the 48 (mx_vm_stats: tlb_entries). mx_exit and the crash report write
+   the BIOS's TLB and TLB handlers back before returning to ps2link.
 
    With VM on, malloc (libmxc's sbrk) hands out VM. A VM access from code
    with interrupts off (an interrupt handler, under mx_di) or from the BIOS
@@ -34,7 +41,7 @@ struct mx_vm_config {
                     (then VM is as large as the frames). In the struct, not a
                     pointer: a program linked into VM reads it before VM is on */
   u32 size;      /* bytes of VM; 0: 128 MiB */
-  u32 core_heap; /* bytes kept for mx_core_alloc; 0: 1 MiB */
+  u32 heap_size; /* bytes of the heap window (heaps of pages, <mx/mem.h>); 0: 64 MiB */
   u32 frames;    /* bytes of physical memory for pages; 0: the rest */
   u32 map_size;  /* bytes of the file window (mx_vm_map_file); 0: 64 MiB */
   u32 clean_frames; /* 0, or a writer thread keeps that many frames free or
@@ -43,8 +50,8 @@ struct mx_vm_config {
                        runs above the priority of the thread that calls
                        mx_vm_init and sleeps in its I/O */
   u32 trace;    /* 0, or bytes of a trace of what the program touches, for
-                   tools/vmsim.py (mx_vm_trace_save): core memory besides
-                   core_heap, so the frames are fewer by as much. Slower:
+                   tools/vmsim.py (mx_vm_trace_save): core memory, so the
+                   frames are fewer by as much. Slower:
                    the TLB then maps 8 KiB pieces */
   u32 trace_ms; /* the trace's interval; 0: 100 ms */
 };
@@ -57,6 +64,8 @@ extern const struct mx_vm_config mx_vm_config
 /* Turn VM on. Returns 0, or -1 (VM stays off: no swap file, too little
    memory, already on). */
 int mx_vm_init(const struct mx_vm_config *cfg);
+/* (The calling thread goes to priority 2 if it was above it, so the VM's
+   writer and pager threads, at its priority - 1, can run above it.) */
 int mx_vm_active(void);
 MX_INLINE void *mx_vm_base(void) { return (void *)(uintptr_t)MX_VM_BASE; }
 u32 mx_vm_size(void);
@@ -129,6 +138,8 @@ struct mx_vm_piece mx_vm_first_piece(const void *p, u32 bytes);
 
 struct mx_vm_stats {
   u32 pages, frames, free_frames, pinned;
+  u32 pinned_frames; /* frames out of the pool as pinned memory (<mx/mem.h>) */
+  u32 tlb_entries;   /* TLB entries the VM has (the BIOS's kept: the rest) */
   u32 refills;    /* TLB refills (no entry): MX_VM_REFILL_CYCLES each */
   u32 refills_i;  /* of them, instruction fetches (code in VM) */
   u32 zero_fills; /* first touches */
@@ -181,23 +192,6 @@ void mx_vm_trace_restart(void);
 /* Write the trace to path (the head, then the events), and go on
    recording. Thread code. Returns the events written, or -1. */
 int mx_vm_trace_save(const char *path);
-
-/* ---- the core heap ----------------------------------------------------------------- */
-
-/* Core memory, with VM on or off: for what the DMAC follows, interrupt
-   handlers, thread stacks. align: a power of two (16 at least). */
-void *mx_core_alloc(u32 bytes, u32 align);
-void mx_core_free(void *p);
-/* How full the core heap is (to size mx_vm_config.core_heap): bytes it can
-   reach in all (with VM on: what it was given), in use (headers included),
-   and the largest allocation (16-byte aligned) that fits now. */
-struct mx_core_stats {
-  u32 total, used, largest_free;
-};
-void mx_core_stats(struct mx_core_stats *s);
-/* DMA buffers: core, aligned to a cache line (a write back never touches a
-   neighbour). */
-MX_INLINE void *mx_dma_alloc(u32 bytes) { return mx_core_alloc((bytes + 63) & ~63u, 64); }
 
 /* The program break (libmxc's sbrk): VM when VM is on, otherwise the core
    heap's other end. Returns the old break, or (void *)-1. */

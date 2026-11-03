@@ -33,11 +33,13 @@
 #define VMF_REFILLS 16   /* all refills */
 #define VMF_REFILLS_I 20 /* of them, instruction fetches */
 #define VMF_STAMP 24     /* u32 *: each page's last refill (refills then), for eviction */
+
 #define VMF_SLOT_PAGE 32 /* u16[48]: each TLB entry's page + 1, 0: none */
 #define VMF_SAVE 128     /* three GPRs, 128 bits each */
-#define VMF_SIZE 176
+#define VMF_NEXT_OF 176  /* u8[48]: the VM's entries in a ring (the BIOS's kept ones left out) */
+#define VMF_SIZE 224
 #define VMF_BASE_PAGE 0x1000 /* MX_VM_BASE >> 15 */
-#define VMF_TLB_FIRST 24     /* the VM's TLB entries: 24..47 */
+#define VMF_TLB_FIRST 24     /* the first entry the VM may take (others below it: next_of) */
 
 /* The syscall that resumes a slow fault (a negative one: its handler runs
    at EXL = 1 on the caller's stack). */
@@ -68,17 +70,38 @@ struct mx__vm_fast {
   u32 pad;
   u16 slot_page[48];
   u64 save[6];
+  u8 next_of[48]; /* the TLB entry the VM takes after each of its own */
 };
 _Static_assert(__builtin_offsetof(struct mx__vm_fast, next_slot) == VMF_NEXT, "tlb.S offsets");
 _Static_assert(__builtin_offsetof(struct mx__vm_fast, refills_i) == VMF_REFILLS_I, "tlb.S offsets");
 _Static_assert(__builtin_offsetof(struct mx__vm_fast, stamp) == VMF_STAMP, "tlb.S offsets");
 _Static_assert(__builtin_offsetof(struct mx__vm_fast, slot_page) == VMF_SLOT_PAGE, "tlb.S offsets");
 _Static_assert(__builtin_offsetof(struct mx__vm_fast, save) == VMF_SAVE, "tlb.S offsets");
+_Static_assert(__builtin_offsetof(struct mx__vm_fast, next_of) == VMF_NEXT_OF, "tlb.S offsets");
 _Static_assert(sizeof(struct mx__vm_fast) == VMF_SIZE, "tlb.S offsets");
 extern struct mx__vm_fast mx__vm_fast;
 
 void *mx__heap_take(u32 keep, u32 align, u32 *bytes);
 void mx__heap_untake(void);
+/* the physical allocator (heap.c): the memory between the break and the
+   top of the heap, from the top down. Without VM it holds every heap's
+   blocks (<mx/mem.h>); with VM, the VM's own tables. */
+void *mx__phys_alloc(u32 bytes, u32 align);
+void mx__phys_free(void *p);
+u32 mx__phys_used(void);
+/* vm.c for mem.c: runs of frames out of the VM's pool (pinned memory),
+   pointers in the physical window; VA for heaps of pages */
+void *mx__vm_frames_take(u32 bytes);
+void mx__vm_frames_give(void *p, u32 bytes);
+u32 mx__vm_va_take(u32 bytes);
+void mx__vm_prefetch(const void *p, u32 bytes);
+int mx__vm_resident(const void *p, u32 bytes);
+u32 mx__vm_resident_bytes(const void *p, u32 bytes);
+void mx__vm_discard(const void *p, u32 bytes);
+void mx__vm_cold(const void *p, u32 bytes);
+u32 mx__vm_tlb_entries(void);
+/* the BIOS's TLB and handlers back (mx_exit); VM off after it */
+void mx__vm_shutdown(void);
 /* Shown by the crash report after a fatal VM fault. */
 extern const char *mx__exception_note;
 #endif

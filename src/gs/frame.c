@@ -269,6 +269,7 @@ void mx__frame_kick(void) {
 }
 int mx__frame_chain(void) { return f.chain; }
 
+static void unlock_all(void);
 void mx_frame_stop(void) {
   kick();
   if (f.record) {
@@ -284,6 +285,9 @@ void mx_frame_stop(void) {
   }
   f.paused = 0;
   mx_gs.counting = 0;
+  /* no frame reads anything any more (the frame counters start again):
+     what waited for one is unlocked now */
+  unlock_all();
 }
 
 static int q_busy(u32 q) {
@@ -352,8 +356,9 @@ int mx_frame_ready(void) {
   return f.novsync ? mx_gs.frames_done >= n - d + 1 : mx_gs.shown >= n - d + 2;
 }
 
-/* mx_frame_unlock: ranges to unlock and the frame after which */
-#define NUNLOCK 64
+/* mx_frame_unlock: ranges to unlock and the frame after which (a level's
+   texture uploads lock hundreds in one frame) */
+#define NUNLOCK 1024
 static struct {
   const void *p;
   u32 bytes, frame;
@@ -371,6 +376,12 @@ static void unlock_done(void) {
   nunlock = k;
 }
 
+static void unlock_all(void) {
+  for (u32 i = 0; i < nunlock; i++)
+    mx_vm_unlock(unlocks[i].p, unlocks[i].bytes);
+  nunlock = 0;
+}
+
 static int unlocks_full(u32 arg) {
   (void)arg;
   unlock_done();
@@ -382,7 +393,7 @@ void mx_frame_unlock(const void *p, u32 bytes) {
     return;
   if (nunlock == NUNLOCK) {
     kick(); /* what is built so far, so frames get done */
-    spin(unlocks_full, 0, "mx_frame_unlock: 64 ranges waiting");
+    spin(unlocks_full, 0, "mx_frame_unlock: 1024 ranges waiting");
   }
   unlocks[nunlock].p = p, unlocks[nunlock].bytes = bytes, unlocks[nunlock].frame = mx_gs.frames;
   nunlock++;
@@ -446,7 +457,7 @@ static void finish(void) {
     rec_open();
     mx_dma_wait(MX_CH_FROMSPR);
     for (int d = 0; d < 2; d++) {
-      u64 *t = (u64 *)((uintptr_t)f.rec_at[d] | 0x20000000u);
+      u64 *t = (u64 *)MX_UNCACHED(f.rec_at[d]);
       t[0] = mx_dmatag(MX_TAG_RET, 0, MX_PADDR_NONE, 0);
       t[1] = 0;
     }

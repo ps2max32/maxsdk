@@ -52,29 +52,56 @@ static u32 piece(u32 w, u32 h, u32 psm) {
 static int indexed(u32 psm) { return psm == MX_GS_PSM_T8 || psm == MX_GS_PSM_T4; }
 
 /* the places of every entry, checked */
+/* the top bytes given to the cache (hbyte()): blocks h_lo .. h_hi - 1 */
+static u32 h_lo, h_hi;
+
 static void check_places(u32 max_pages) {
-  static u16 owner[MX_VRAM_BLOCKS];
+  static u16 owner[MX_VRAM_BLOCKS], howner[MX_VRAM_BLOCKS];
   for (u32 i = 0; i < MX_VRAM_BLOCKS; i++)
-    owner[i] = 0;
+    owner[i] = howner[i] = 0;
   int bad = 0;
-  u32 used = 0;
+  u32 used = 0, hused = 0;
   for (u32 k = 0; k < NKEYS; k++) {
     struct mx_tex t;
     if (!known[k] || !mx_vcache_peek(k, &t))
       continue;
     const struct shape *s = &shapes[k];
     u32 bp[MX_TEX_LEVELS + 1], nb[MX_TEX_LEVELS + 1], n = 0;
+    if (t.psm == MX_GS_PSM_T8H) {
+      /* the levels in the top bytes, laid out as mx_tex_init from the first */
+      struct mx_tex lay;
+      u32 len = mx_tex_init(&lay, t.tbp[0], MX_GS_PSM_T8H, s->tw, s->th, s->levels, MX_TEX_PACKED);
+      if (s->psm != MX_GS_PSM_T8 || t.tbp[0] < h_lo || t.tbp[0] + len > h_hi) {
+        printf("key %u: T8H at %u + %u outside the top bytes\n", k, t.tbp[0], len);
+        bad++;
+      }
+      for (u32 l = 0; l < s->levels; l++)
+        if (t.tbp[l] != lay.tbp[l] || t.tbw[l] != lay.tbw[l])
+          bad++;
+      for (u32 b = t.tbp[0]; b < t.tbp[0] + len && b < MX_VRAM_BLOCKS; b++) {
+        if (howner[b]) {
+          printf("key %u: top byte block %u also key %u\n", k, b, howner[b] - 1u);
+          bad++;
+          break;
+        }
+        howner[b] = (u16)(k + 1);
+      }
+      hused += len;
+      n = s->levels;
+      goto clut;
+    }
     for (u32 l = 0; l < s->levels; l++, n++) {
       bp[n] = t.tbp[l];
       nb[n] = piece(1u << (s->tw > l ? s->tw - l : 0), 1u << (s->th > l ? s->th - l : 0), s->psm);
       if (t.tbw[l] != mx_tex_tbw(1u << (s->tw > l ? s->tw - l : 0), s->psm))
         bad++;
     }
-    if (indexed(s->psm)) {
+  clut:
+    if (indexed(s->psm) && s->cpsm != MX_VCACHE_NO_CLUT) {
       bp[n] = t.cbp;
       nb[n++] = piece(s->psm == MX_GS_PSM_T4 ? 8 : 16, s->psm == MX_GS_PSM_T4 ? 2 : 16, s->cpsm);
     }
-    for (u32 i = 0; i < n; i++) {
+    for (u32 i = t.psm == MX_GS_PSM_T8H ? s->levels : 0; i < n; i++) {
       u32 a = 1;
       while (a < nb[i] && a < 32)
         a <<= 1;
@@ -103,6 +130,7 @@ static void check_places(u32 max_pages) {
   mx_vcache_stats(&st);
   CHECK_EQ(bad, 0);
   CHECK_EQ(st.used_blocks, used);
+  CHECK_EQ(st.hbyte_used, hused);
   CHECK_EQ(st.pages, mx_vram_count(MX_VRAM_CACHE));
   if (max_pages)
     CHECK(st.pages <= max_pages);
@@ -132,6 +160,7 @@ static void setup_p(u32 fixed, u32 max_pages, int mode, int policy) {
     mx_vram_take(0, fixed, MX_VRAM_FIXED);
   mx_vcache_init(max_pages, mode, policy);
   mx_vcache_frame(0, 0);
+  h_lo = h_hi = 0;
 }
 static void setup(u32 fixed, u32 max_pages, int mode) { setup_p(fixed, max_pages, mode, MX_VCACHE_AUTO); }
 
@@ -237,13 +266,13 @@ static void random_load(int mode, int policy) {
   CHECK(st.evicted > 0);
   if (mode != MX_VCACHE_STREAM)
     CHECK_EQ(st.evicted_now, 0);
-  printf("vcache random (mode %d, policy %d): %u hits %u misses %u full %u evicted, %u ring frames, "
+  printf("vcache random (mode %d, policy %d): %u hits %u misses %u full %u evicted (%u done), "
          "%u pages %u small\n",
-         mode, policy, st.hits, st.misses, st.full, st.evicted, st.ring_frames, st.pages,
+         mode, policy, st.hits, st.misses, st.full, st.evicted, st.evicted_done, st.pages,
          st.small_pages);
   if (policy == MX_VCACHE_RING)
     CHECK(st.ring_places > 0);
-  if (policy == MX_VCACHE_COST)
+  if (policy != MX_VCACHE_RING)
     CHECK_EQ(st.ring_places, 0);
 }
 
@@ -281,7 +310,8 @@ static void pins(void) {
 }
 
 /* 20 one-page textures each frame, in the same order, through 16 pages:
-   the 15 used first stay (a ring or LRU would miss all 20 every frame) */
+   16 stay: the 4 placed last evict those done for the frame (a ring or
+   LRU would miss all 20 every frame) */
 static u32 too_many(int policy) {
   struct mx_tex t;
   setup_p(0, 16, MX_VCACHE_STREAM, policy);
@@ -295,11 +325,71 @@ static u32 too_many(int policy) {
   }
   struct mx_vcache_stats st;
   mx_vcache_stats(&st);
-  printf("vcache too many (policy %d): %u hits in the last frame, %u ring frames\n", policy,
-         hits_last, st.ring_frames);
-  if (policy == MX_VCACHE_AUTO)
-    CHECK_EQ(st.ring_frames, 10); /* every frame: the 17th does not fit */
+  printf("vcache too many (policy %d): %u hits in the last frame\n", policy, hits_last);
+  if (policy != MX_VCACHE_RING)
+    CHECK_EQ(st.ring_places, 0);
   return hits_last;
+}
+
+/* A frame of a game (STREAM) whose textures are 125% of the cache: 16
+   pages; 12 one-page textures drawn once, 4 drawn twice (early and at the
+   end), 2 two-page ones; the same frame over and over. Blocks uploaded a
+   frame once it repeats, and the evictions of textures done for the
+   frame. */
+static u32 cyclic(int policy, u32 *done) {
+  static const u8 order[] = {12, 13, 0, 1, 2, 16, 3, 4, 5, 14, 6, 7, 8, 17, 9, 10, 11, 15,
+                             12, 13, 14, 15};
+  struct mx_tex t;
+  setup_p(0, 16, MX_VCACHE_STREAM, policy);
+  struct mx_vcache_stats st0, st;
+  for (u32 f = 1; f <= 20; f++) {
+    if (f == 11)
+      mx_vcache_stats(&st0);
+    mx_vcache_frame(f, f - 1);
+    for (u32 i = 0; i < sizeof order; i++) {
+      u32 k = order[i];
+      int r = k >= 16 ? tex(k, MX_GS_PSM_CT32, 7, 5, 1, &t) : tex(k, MX_GS_PSM_CT32, 6, 5, 1, &t);
+      CHECK(r != MX_VCACHE_FULL);
+    }
+    check_places(16);
+  }
+  mx_vcache_stats(&st);
+  u32 up = (st.upload_blocks - st0.upload_blocks) / 10;
+  *done = st.evicted_done - st0.evicted_done;
+  printf("vcache cyclic 125%% (policy %d): %u blocks uploaded a frame (%u pages of textures), "
+         "%u evictions of done textures\n",
+         policy, up, 20, *done);
+  return up;
+}
+
+/* mx_vcache_use counts as a use: a texture looked up once and used again
+   without a lookup is not done for the frame before its last use */
+static void use_counts(void) {
+  struct mx_tex t;
+  setup_p(0, 2, MX_VCACHE_STREAM, MX_VCACHE_COST);
+  CHECK_EQ(mx_vcache_use(1), -1);
+  for (u32 f = 1; f <= 3; f++) {
+    mx_vcache_frame(f, f - 1);
+    /* 1 used twice (the second without a lookup), 2 once */
+    CHECK(tex(1, MX_GS_PSM_CT32, 6, 5, 1, &t) != MX_VCACHE_FULL);
+    CHECK(tex(2, MX_GS_PSM_CT32, 6, 5, 1, &t) != MX_VCACHE_FULL);
+    if (f < 3)
+      CHECK_EQ(mx_vcache_use(1), 0);
+  }
+  /* frame 3: 1 used once of twice, 2 done (and used last): 2 goes, not 1 */
+  CHECK_EQ(tex(3, MX_GS_PSM_CT32, 6, 5, 1, &t), MX_VCACHE_MISS);
+  CHECK_EQ(mx_vcache_peek(1, &t), 1);
+  CHECK_EQ(mx_vcache_peek(2, &t), 0);
+  struct mx_vcache_stats st;
+  mx_vcache_stats(&st);
+  CHECK_EQ(st.evicted_done, 1);
+  /* placed again in the next frame, it keeps its counts: done after one use */
+  mx_vcache_frame(4, 3);
+  CHECK(tex(2, MX_GS_PSM_CT32, 6, 5, 1, &t) != MX_VCACHE_FULL); /* evicts 1 or 3 */
+  CHECK(tex(4, MX_GS_PSM_CT32, 6, 5, 1, &t) != MX_VCACHE_FULL);
+  mx_vcache_stats(&st);
+  CHECK_EQ(st.evicted_done, 2); /* 2 again: done */
+  check_places(2);
 }
 
 /* ring order: one-page textures take the pages in turn, round and round;
@@ -384,9 +474,83 @@ static void many_keys(void) {
   check_places(0);
 }
 
+/* an indexed texture without a CLUT of its own (MX_VCACHE_NO_CLUT): no
+   CLUT piece, and not the same shape as the same texture with one */
+static void no_clut(void) {
+  struct mx_tex t;
+  setup(400, 0, MX_VCACHE_STREAM);
+  /* for check_places */
+  known[1] = 1;
+  shapes[1] = (struct shape){.psm = MX_GS_PSM_T8, .tw = 4, .th = 4, .levels = 1, .cpsm = MX_VCACHE_NO_CLUT};
+  CHECK_EQ(mx_vcache_tex(1, MX_GS_PSM_T8, 4, 4, 1, MX_VCACHE_NO_CLUT, &t), MX_VCACHE_MISS);
+  CHECK_EQ(t.blocks, 1); /* 16 x 16 T8: the level alone */
+  CHECK_EQ(t.cbp, 0);
+  CHECK_EQ(mx_vcache_tex(1, MX_GS_PSM_T8, 4, 4, 1, MX_VCACHE_NO_CLUT, &t), MX_VCACHE_HIT);
+  CHECK_EQ(mx_vcache_tex(1, MX_GS_PSM_T8, 4, 4, 1, MX_GS_PSM_CT32, &t), MX_VCACHE_MISS);
+  shapes[1].cpsm = MX_GS_PSM_CT32;
+  CHECK_EQ(t.blocks, 1 + 4);
+  CHECK(t.cbp != 0);
+  check_places(0);
+}
+
+/* T8 textures in the top bytes of a 24-bit buffer (pages 0 .. 39, the
+   application's): placed there as T8H while that room is free, CLUTs in
+   pages of the cache; then in pages of the cache; over frames the top
+   bytes are reused (evicted by cost like the rest); other formats never
+   go there */
+static void hbyte(void) {
+  struct mx_tex t;
+  setup_p(40, 0, MX_VCACHE_STREAM, MX_VCACHE_AUTO);
+  mx_vcache_hpages(0, 40);
+  h_lo = 0, h_hi = 40 * 32;
+  u32 nh = 0, nn = 0;
+  /* 64 x 64 T8, 4 levels: 2 pages of top bytes + 16 + 4 + 1 blocks */
+  for (u32 k = 0; k < 24; k++) {
+    CHECK_EQ(tex(k, MX_GS_PSM_T8, 6, 6, 4, &t), MX_VCACHE_MISS);
+    nh += t.psm == MX_GS_PSM_T8H, nn += t.psm == MX_GS_PSM_T8;
+    check_places(0);
+  }
+  struct mx_vcache_stats st;
+  mx_vcache_stats(&st);
+  printf("vcache top bytes: %u of 24 textures there (%u of %u blocks), %u in pages\n", nh,
+         st.hbyte_used, st.hbyte_blocks, nn);
+  CHECK_EQ(nh, 13); /* 85 blocks each, from a page: 3 pages */
+  CHECK_EQ(nh + nn, 24);
+  CHECK_EQ(tex(30, MX_GS_PSM_CT16, 6, 6, 1, &t), MX_VCACHE_MISS);
+  CHECK_EQ(t.psm, MX_GS_PSM_CT16);
+  /* a hit keeps its place and psm */
+  CHECK_EQ(tex(0, MX_GS_PSM_T8, 6, 6, 4, &t), MX_VCACHE_HIT);
+  CHECK_EQ(t.psm, MX_GS_PSM_T8H);
+  /* the pages of the cache limited to 6 (a texture and its CLUT, 26
+     blocks: one a page): 20 textures a frame, room for 19: the cache
+     keeps all but one or two from frame to frame, the top bytes reused */
+  setup_p(40, 6, MX_VCACHE_STREAM, MX_VCACHE_AUTO);
+  mx_vcache_hpages(0, 40);
+  h_lo = 0, h_hi = 40 * 32;
+  u32 hits = 0;
+  for (u32 f = 1; f <= 8; f++) {
+    mx_vcache_frame(f, f - 1);
+    hits = 0;
+    for (u32 k = 0; k < 20; k++) {
+      int r = tex(100 + k, MX_GS_PSM_T8, 6, 6, 4, &t);
+      CHECK(r != MX_VCACHE_FULL);
+      hits += r == MX_VCACHE_HIT;
+    }
+    check_places(6);
+  }
+  mx_vcache_stats(&st);
+  printf("vcache top bytes over frames: %u places there, %u evicted, %u hits in the last frame\n",
+         st.hbyte_places, st.evicted, hits);
+  CHECK(st.hbyte_places >= 13);
+  CHECK(hits >= 17);
+  mx_vcache_hpages(0, 0);
+  check_places(6);
+}
+
 void test_vcache(void) {
   pages();
   basics();
+  no_clut();
   too_large();
   for (int pol = MX_VCACHE_AUTO; pol <= MX_VCACHE_RING; pol++) {
     random_load(MX_VCACHE_STREAM, pol);
@@ -395,9 +559,16 @@ void test_vcache(void) {
   }
   async_fence();
   pins();
-  CHECK_EQ(too_many(MX_VCACHE_COST), 15);
-  too_many(MX_VCACHE_AUTO);
+  CHECK_EQ(too_many(MX_VCACHE_COST), 16); /* the 4 done for the frame make room */
+  CHECK_EQ(too_many(MX_VCACHE_AUTO), 16);
   too_many(MX_VCACHE_RING);
+  u32 d_ring, d_cost;
+  u32 up_ring = cyclic(MX_VCACHE_RING, &d_ring), up_cost = cyclic(MX_VCACHE_AUTO, &d_cost);
+  CHECK(up_cost * 2 < up_ring);
+  CHECK(up_cost < 128 + 32); /* 4 pages at least */
+  CHECK(d_cost > 0);
+  use_counts();
+  hbyte();
   ring_order();
   fragmented();
   many_keys();

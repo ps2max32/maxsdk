@@ -1,7 +1,7 @@
 /* VM step 6: VM on without a swap file (<mx/vm.h>): TLB refills, new pages
    zero-filled in the thread (the exception at EXL = 1 only refills the
    TLB, marks pages dirty and maps resident ones again), dirty tracking.
-   4 MiB of frames, so 128 pages; the TLB has 17 entries for them. About
+   4 MiB of frames, so 128 pages; the TLB has about 30 entries for them. About
    10 s; at the end the screen is bright green with 900D0000 in slot 0, or
    bright red with BAD000nn.
 
@@ -15,7 +15,8 @@
      5 a second thread checking pages while the main thread writes others
      6 a timer interrupt reading a pinned (so resident) page
      7 reads through the ranges of the BIOS's 8 UCAB entries (31-38; one
-       entry of 32 MiB with VM on), the odd page of each too;
+       entry of 32 MiB with VM on), the odd page of each too, against the
+       physical window (MX_PHYS_WIN);
        then the tables and the TLB consistent (slot 3: mx__vm_check) */
 
 #include "t.h"
@@ -165,8 +166,10 @@ int main(void) {
       for (u32 h = 1; h <= 2; h++) {
         u32 a = at[i] + h * (pair[i] / 2) - 64;
         /* only read (any memory: the program, frames): the same word
-           through the cache, written back first, and through UCAB */
-        const volatile u32 *c = MX_CACHED((const volatile u32 *)(uintptr_t)a);
+           through the cache (the physical window: the BIOS's cached
+           mapping no longer holds the frames), written back first, and
+           through UCAB */
+        const volatile u32 *c = (const volatile u32 *)(uintptr_t)(MX_PHYS_WIN + (a & 0x01FFFFFFu));
         mx_dcache_writeback((const void *)c, 4);
         mx_dbg_word(1, a);
         CHECK_EQ(*(volatile u32 *)(uintptr_t)a, *c);

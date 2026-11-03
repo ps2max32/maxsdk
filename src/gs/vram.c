@@ -36,6 +36,7 @@ void mx_vram_give(u32 page, u32 pages) {
 }
 
 u32 mx_vram_owner(u32 page) { return owner[page]; }
+const u8 *mx__vram_owners(void) { return owner; }
 
 u32 mx_vram_count(u32 own) {
   u32 n = 0;

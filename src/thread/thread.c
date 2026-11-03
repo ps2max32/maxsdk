@@ -57,7 +57,7 @@ int mx_thread_start(void (*fn)(void *), void *arg, void *stack, u32 bytes, int p
      thread switch, the VM's own fault path): core only */
   if (mx_is_vm(stack)) {
     mx_printf("mx_thread_start: the stack %p is VM; thread stacks must be core memory "
-              "(mx_core_alloc)\n",
+              "(static, or pinned: <mx/mem.h>)\n",
               stack);
     return -1;
   }

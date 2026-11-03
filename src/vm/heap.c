@@ -1,9 +1,11 @@
 /* The heap: physical memory from the end of the program (_end) to the main
    stack (mx_heap_start .. mx_heap_end), shared by
    - the program break (mx_sbrk, libmxc's malloc), from the bottom up;
-   - the core heap (mx_core_alloc), from the top down.
+   - the physical allocator (mx__phys_alloc), from the top down: without VM
+     the blocks of every heap (<mx/mem.h>), with VM the VM's own tables.
    With VM on, the break moves into VM and the memory between the two
-   becomes the frames (vm.c); the core heap keeps what it was given. */
+   becomes the frames (vm.c); the physical allocator keeps what it was
+   given. */
 
 #include <mx/debug.h>
 #include <mx/mx.h>
@@ -41,7 +43,7 @@ static void *user_ptr(struct blk *b, u32 align) {
   return (void *)p;
 }
 
-void *mx_core_alloc(u32 bytes, u32 align) {
+void *mx__phys_alloc(u32 bytes, u32 align) {
   heap_setup();
   if (align < 16)
     align = 16;
@@ -75,25 +77,18 @@ void *mx_core_alloc(u32 bytes, u32 align) {
   return user_ptr(b, align);
 }
 
-void mx_core_stats(struct mx_core_stats *s) {
+u32 mx__phys_used(void) {
   heap_setup();
-  u8 *floor = core_floor ? core_floor : brk_lo;
   int was = mx_di();
-  u32 used = 0, largest = (u32)(core_lo - floor), total = (u32)(top - floor);
-  for (struct blk *b = (struct blk *)core_lo; (u8 *)b < top; b = next_blk(b)) {
+  u32 used = 0;
+  for (struct blk *b = (struct blk *)core_lo; (u8 *)b < top; b = next_blk(b))
     if (b->used)
       used += b->size;
-    else if (b->size > largest)
-      largest = b->size;
-  }
   mx_irq_restore(was);
-  /* a block's header and alignment come out of what it can hold */
-  s->total = total;
-  s->used = used;
-  s->largest_free = largest > sizeof(struct blk) + 4 ? largest - (u32)sizeof(struct blk) - 4 : 0;
+  return used;
 }
 
-void mx_core_free(void *p) {
+void mx__phys_free(void *p) {
   if (!p)
     return;
   struct blk *b = ((struct blk **)p)[-1];
@@ -139,8 +134,8 @@ void *mx_sbrk(s32 incr) {
 }
 
 /* For vm.c: hand the free middle of the heap (above the break, below the
-   core heap less keep bytes) over as frames; the core heap may not grow
-   into them. Returns the start (aligned to align), *bytes its size. */
+   physical allocator's blocks less keep bytes) over as frames; the physical
+   allocator may not grow into them. Returns the start (aligned to align), *bytes its size. */
 static u8 *taken_brk; /* the break before mx__heap_take */
 void *mx__heap_take(u32 keep, u32 align, u32 *bytes) {
   heap_setup();
@@ -159,7 +154,7 @@ void *mx__heap_take(u32 keep, u32 align, u32 *bytes) {
 }
 
 /* For vm.c, when VM does not come on after all: the frames go back to the
-   break and the core heap. */
+   break and the physical allocator. */
 void mx__heap_untake(void) {
   if (taken_brk)
     brk_lo = taken_brk;

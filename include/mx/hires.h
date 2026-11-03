@@ -6,8 +6,10 @@
    2 MiB), drawn into one framebuffer a strip at a time, just ahead of the
    beam, every field.
 
-   The framebuffer is three strips (MX_HIRES_PASSES) of the picture's width
-   and a third of its height (rounded up to whole pages). The frame stream
+   The framebuffer is three or more strips (mx_hires_passes()) of the
+   picture's width, each a whole number of pages high: a third of the
+   picture (rounded up to whole pages), or less when that leaves fewer than
+   three strips the beam reaches (640 x 224 at 16 bits: four 64-line strips). The frame stream
    (<mx/frame.h>) is not sent to VIF1: each frame's stream is recorded into
    memory (a chain ending in RET). When the beam starts showing strip k - 1,
    EE timer 0 counting H-blanks kicks pass k: strip k's drawing registers,
@@ -37,7 +39,7 @@
    into the once record (mx_hires_once).
 
    Not with the PATH3 stream (mx_frame3_*), mx_frame_present or
-   mx_frame_vu1_compute. The GS must draw a whole frame three times a field:
+   mx_frame_vu1_compute. The GS must draw a whole frame once per strip, every field:
    a pass whose turn comes while the one before is still being sent is left
    out (mx_hires_stats.late), and the beam shows that strip as it is (half
    drawn, or the Z of the pass before). */
@@ -46,7 +48,7 @@
 #include <mx/types.h>
 #include <mx/video.h>
 
-#define MX_HIRES_PASSES 3
+#define MX_HIRES_PASSES 8 /* strips at most */
 #define MX_HIRES_SLOTS 4 /* records: one played, three waiting or being built (a fast frame is kept for when a slow one comes) */
 
 struct mx_hires_stats {
@@ -62,7 +64,9 @@ struct mx_hires_stats {
 extern struct mx_hires_stats mx_hires_stats;
 
 /* DMAC, the GS and mode m (interlaced: FRAME mode), the framebuffer of
-   w x h pixels of psm (CT32, CT24 with Z32 / CT16, CT16S with Z16, Z16S),
+   w x h pixels of psm (CT32 with Z32; CT24 with Z24, which leaves the top
+   byte of every word of the strips as it is: room for T8H/T4HL/T4HH
+   textures, mx_hires_hbyte; CT16, CT16S with Z16, Z16S),
    shown on read circuit 2, and the frame pipeline in record mode: mem
    (64-byte aligned, uncached or not written by the EE) holds the
    MX_HIRES_SLOTS records; spr, spr_bytes as mx_frame_init. Load VU1
@@ -73,6 +77,12 @@ extern struct mx_hires_stats mx_hires_stats;
    another mode, with another pipeline (a mode change). */
 int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 h, u32 psm, void *mem, u32 bytes,
                   void *spr, u32 spr_bytes);
+/* The number of strips (passes a field) of the framebuffer, after
+   mx_hires_init. */
+u32 mx_hires_passes(void);
+/* The pages whose top byte no pass writes (CT24 strips: all of them), the
+   first in *page; 0 for another format. */
+u32 mx_hires_hbyte(u32 *page);
 /* The record of the frame being built (0 .. MX_HIRES_SLOTS - 1), after
    mx_frame_begin_n: data per frame can be kept per record. */
 u32 mx_hires_slot(void);

@@ -20,6 +20,7 @@
 #include "t.h"
 #include <mx/thread.h>
 #include <mx/timer.h>
+#include <mx/mem.h>
 #include <mx/vm.h>
 
 #define PAGE MX_VM_PAGE
@@ -140,21 +141,18 @@ int main(void) {
             s.us_swap_in / 1000, s.us_swap_out / 1000, s.us_lock / 1000, s.io_calls);
   CHECK(s.writer_outs > 0);
 
-  /* mx_core_stats: an allocation shows, and comes back when freed */
-  struct mx_core_stats c0, c1, c2;
-  mx_core_stats(&c0);
-  void *p = mx_core_alloc(100 * 1024, 64);
+  /* pinned memory: 100 KiB out of the pool (frames move), back when freed */
+  struct mx_vm_stats p0, p1, p2;
+  mx_vm_stats(&p0);
+  void *p = mx_heap_alloc(mx_heap_pinned, 100 * 1024, 64);
   CHECK(p != 0);
-  mx_core_stats(&c1);
-  mx_core_free(p);
-  mx_core_stats(&c2);
-  mx_printf("vm17: core heap %u KiB, %u in use, %u largest free; with 100 KiB more %u, %u\n",
-            c0.total / 1024, c0.used / 1024, c0.largest_free / 1024, c1.used / 1024,
-            c1.largest_free / 1024);
-  CHECK(c1.used - c0.used >= 100 * 1024);
-  CHECK(c1.largest_free + 100 * 1024 <= c0.largest_free + 1024);
-  CHECK_EQ(c2.used, c0.used);
-  CHECK_EQ(c2.largest_free, c0.largest_free);
+  mx_vm_stats(&p1);
+  mx_heap_free(mx_heap_pinned, p);
+  mx_vm_stats(&p2);
+  mx_printf("vm17: pinned frames %u, with 100 KiB more %u, free frames %u -> %u\n",
+            p0.pinned_frames, p1.pinned_frames, p0.free_frames, p1.free_frames);
+  CHECK(p1.pinned_frames - p0.pinned_frames >= 4);
+  CHECK(p2.pinned_frames <= p0.pinned_frames + 1); /* the heap's table: a frame */
   mx_dbg_heartbeat(0);
   return t_done("vm17");
 }
