@@ -256,6 +256,11 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   u32 per = mm.interlace && !mm.ffmd ? 1 : 2; /* field lines per 2 buffer lines */
   for (u32 j = 0; j < h.npass; j++)
     h.line[j] = top + j * h.strip_h * magv * per / 2;
+  /* line[npass - 1] kicks pass 0 of the next field, whose Z buffer is
+     strip 1 (its clear writes all of it): with three strips the beam has
+     only just left strip 1 there, so a few lines later (pass 0 still has
+     the last strip and the vblank) */
+  h.line[h.npass - 1] += 8;
 
   /* a slot: its main record, then its once record (a quarter) */
   u32 slot_qw = bytes / MX_HIRES_SLOTS / 16;

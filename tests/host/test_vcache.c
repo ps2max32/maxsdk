@@ -130,6 +130,8 @@ static void check_places(u32 max_pages) {
   mx_vcache_stats(&st);
   CHECK_EQ(bad, 0);
   CHECK_EQ(st.used_blocks, used);
+  int mx__vcache_check(void);
+  CHECK_EQ(mx__vcache_check(), 0);
   CHECK_EQ(st.hbyte_used, hused);
   CHECK_EQ(st.pages, mx_vram_count(MX_VRAM_CACHE));
   if (max_pages)

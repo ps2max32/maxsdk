@@ -10,6 +10,12 @@
 #include <mx/tex.h>
 #include <mx/vcache.h>
 #include <mx/vram.h>
+#ifdef MX_HOST
+#include <stdio.h>
+#define mx_printf printf
+#else
+#include <mx/mx.h>
+#endif
 
 const u8 *mx__vram_owners(void); /* vram.c: each page's owner */
 
@@ -66,6 +72,17 @@ static u16 pent[MX_VRAM_PAGES];
    h_first + h_n - 1, the entry of each (entry + 1, 0: free) */
 static u32 h_first, h_n, h_used;
 static u16 hown[MX_VRAM_BLOCKS];
+/* a page of top bytes whose blocks are all one entry's, or all free */
+static u8 h_uni[MX_VRAM_PAGES];
+
+static void h_note(u32 b, u32 n) {
+  for (u32 p = b / 32; p <= (b + n - 1) / 32; p++) {
+    u32 v = hown[p * 32], i = 1;
+    while (i < 32 && hown[p * 32 + i] == v)
+      i++;
+    h_uni[p] = i == 32;
+  }
+}
 /* while making room: each entry's weight, valid in frame wt_now (an
    entry's own changes update it) */
 static u64 wt[NE], ecost[NE];
@@ -163,6 +180,7 @@ static void ent_free(u32 e) {
   if (x->hn) {
     for (u32 b = x->hb; b < x->hb + x->hn; b++)
       hown[b] = 0;
+    h_note(x->hb, x->hn);
     h_used -= x->hn;
     x->hn = 0;
     i0 = x->levels; /* the levels are there, the CLUT in a page */
@@ -664,45 +682,107 @@ static int lookup(u64 key, const struct ent *want, struct mx_tex *t) {
 
 /* ---- the top bytes of 24-bit buffers ------------------------------------- */
 
+/* The entries of top-byte page p, each once, into l (stamps): the number */
+static u32 h_page_ents(u32 p, u16 *l) {
+  if (h_uni[p]) {
+    l[0] = hown[p * 32];
+    return l[0] != 0;
+  }
+  u32 k = 0;
+  stamp_n++;
+  for (u32 i = p * 32; i < p * 32 + 32; i++) {
+    u32 v = hown[i];
+    if (v && stamp[v - 1] != stamp_n)
+      stamp[v - 1] = stamp_n, l[k++] = (u16)v;
+  }
+  return k;
+}
+
 /* The run of len blocks from a multiple of align in the top bytes whose
    entries cost least (free blocks nothing); its first block (*cost), or
-   ~0u. The window slides on by align. */
+   ~0u. A page holds one entry or free blocks (h_uni) unless it has small
+   pieces: a run of pages slides on a page at a time, reading a page as
+   its entries (whole runs of pages: the first free one ends the search);
+   a run within a page (len, align < 32) is looked for in the pages with
+   small pieces, a free page first. */
 static u32 h_find(u32 len, u32 align, u64 *cost) {
-  u32 end = h_first + h_n, s = (h_first + align - 1) & ~(align - 1);
+  u32 p0 = h_first / 32, pn = p0 + h_n / 32;
   *cost = INF;
-  if (!h_n || s + len > end)
+  if (!h_n || len > h_n)
     return ~0u;
   weigh();
-  u64 sum = 0, best = INF;
-  u32 at = ~0u, ninf = 0, lo = s, hi = s;
-  for (; s + len <= end; s += align) {
-    for (; lo < s; lo++) {
-      u32 v = hown[lo];
-      if (!v)
-        continue;
-      if (wt[v - 1] == INF)
-        ninf--;
-      else if (--cnt[v - 1] == 0)
-        sum -= ecost[v - 1];
+  u64 best = INF;
+  u32 at = ~0u;
+  if (align < 32 && len <= 32) {
+    for (u32 p = p0; p < pn; p++) {
+      if (h_uni[p]) {
+        u32 v = hown[p * 32];
+        u64 c = v ? ecost[v - 1] : 0;
+        if (c < best && (!v || wt[v - 1] != INF))
+          best = c, at = p * 32;
+      } else
+        for (u32 t = 0; t + len <= 32; t += align) {
+          u64 c = 0;
+          stamp_n++;
+          for (u32 i = p * 32 + t; i < p * 32 + t + len && c != INF; i++) {
+            u32 v = hown[i];
+            if (!v || stamp[v - 1] == stamp_n)
+              continue;
+            stamp[v - 1] = stamp_n;
+            c = wt[v - 1] == INF ? INF : c + ecost[v - 1];
+          }
+          if (c < best)
+            best = c, at = p * 32 + t;
+        }
+      if (!best)
+        break;
     }
-    for (; hi < s + len; hi++) {
-      u32 v = hown[hi];
-      if (!v)
-        continue;
+    *cost = best;
+    return at;
+  }
+  /* k pages: the window's entries counted once (cnt), its sum, and the
+     pages in it with an entry that must stay */
+  static u16 plist[MX_VRAM_BLOCKS], pstart[MX_VRAM_PAGES + 1];
+  static u8 bad[MX_VRAM_PAGES];
+  u32 k = (len + 31) / 32, n = 0, nbad = 0, p;
+  u64 sum = 0;
+  if (p0 + k > pn)
+    return ~0u;
+  for (p = p0; p < pn; p++) {
+    pstart[p] = (u16)n;
+    u32 m = h_page_ents(p, plist + n);
+    bad[p] = 0;
+    for (u32 j = n; j < n + m; j++) {
+      u32 v = plist[j];
       if (wt[v - 1] == INF)
-        ninf++;
+        bad[p] = 1;
       else if (cnt[v - 1]++ == 0)
         sum += ecost[v - 1];
     }
-    if (!ninf && sum < best) {
-      best = sum, at = s;
+    n += m;
+    pstart[p + 1] = (u16)n;
+    nbad += bad[p];
+    if (p >= p0 + k) {
+      u32 q = p - k;
+      nbad -= bad[q];
+      for (u32 j = pstart[q]; j < pstart[q + 1]; j++) {
+        u32 v = plist[j];
+        if (wt[v - 1] != INF && --cnt[v - 1] == 0)
+          sum -= ecost[v - 1];
+      }
+    }
+    if (p + 1 >= p0 + k && !nbad && sum < best) {
+      best = sum, at = (p + 1 - k) * 32;
       if (!best)
         break;
     }
   }
-  for (u32 b = lo; b < hi; b++)
-    if (hown[b])
-      cnt[hown[b] - 1] = 0;
+  /* the counts of the pages still in the window back to 0 */
+  if (p == pn)
+    p--;
+  for (u32 q = p + 1 >= p0 + k ? p + 1 - k : p0; q <= p; q++)
+    for (u32 j = pstart[q]; j < pstart[q + 1]; j++)
+      cnt[plist[j] - 1] = 0;
   *cost = best;
   return at;
 }
@@ -751,6 +831,7 @@ static int h_try(u32 e) {
       evict(hown[b] - 1u);
   for (u32 b = s; b < s + len; b++)
     hown[b] = (u16)(e + 1);
+  h_note(s, len);
   h_used += len;
   x->hb = s, x->hn = (u16)len;
   for (u32 n = 0; n < x->levels; n++)
@@ -847,6 +928,8 @@ void mx_vcache_hpages(u32 page, u32 pages) {
     if (hown[b])
       ent_free(hown[b] - 1u);
   h_first = page * 32, h_n = pages * 32;
+  for (u32 p = page; p < page + pages; p++)
+    h_uni[p] = 1;
 }
 
 void mx_vcache_frame(u32 n, u32 d) {
@@ -856,6 +939,44 @@ void mx_vcache_frame(u32 n, u32 d) {
   wt_now = ~0u;
 }
 u32 mx__vcache_now(void) { return now; }
+
+/* Debugging: the places against the owner maps. Returns 0, or prints the
+   first fault and returns 1: a piece's block owned by another entry (or
+   none), an entry's block that is not its own page's kind, a block owned
+   by an entry that is not live. */
+int mx__vcache_check(void) {
+  for (u32 e = 0; e < ent_hi; e++) {
+    const struct ent *x = &ents[e];
+    if (!x->live || x->building)
+      continue;
+    for (u32 i = 0; i < x->npieces; i++) {
+      int in_h = x->hn && i < x->levels;
+      u32 b = x->bp[i], n = in_h ? 0 : x->nb[i];
+      for (u32 k = b; k < b + n; k++)
+        if (own[k] != e + 1) {
+          mx_printf("vcache check: entry %u (key %08x%08x) piece %u block %u owned by %u\n", e,
+                    (u32)(x->key >> 32), (u32)x->key, i, k, own[k]);
+          return 1;
+        }
+      if (n && (n >= 32 ? pkind[b / 32] != PG_BIG : pkind[b / 32] != PG_SMALL)) {
+        mx_printf("vcache check: entry %u piece %u at %u (%u blocks): page kind %u\n", e, i, b, n,
+                  pkind[b / 32]);
+        return 1;
+      }
+    }
+    for (u32 k = x->hb; x->hn && k < x->hb + x->hn; k++)
+      if (hown[k] != e + 1) {
+        mx_printf("vcache check: entry %u top byte block %u owned by %u\n", e, k, hown[k]);
+        return 1;
+      }
+  }
+  for (u32 k = 0; k < MX_VRAM_BLOCKS; k++)
+    if ((own[k] && !ents[own[k] - 1].live) || (hown[k] && !ents[hown[k] - 1].live)) {
+      mx_printf("vcache check: block %u owned by a free entry\n", k);
+      return 1;
+    }
+  return 0;
+}
 u32 mx__vcache_inits(void) { return inits; }
 void mx__vcache_count(int upgrade) { upgrade ? st.upgrades++ : st.proxies++; }
 
