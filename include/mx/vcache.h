@@ -180,17 +180,20 @@ struct mx_vcache_stats {
   u32 hbyte_blocks;       /* blocks of top bytes (mx_vcache_hpages) */
   u32 hbyte_used;         /* of them, holding T8H textures now */
   u32 hbyte_places;       /* textures placed there */
-  /* where GS memory goes (now; blocks): the entries' texels (whole blocks
-     of 256 bytes), the blocks between them in the page's block order (a
-     piece that is not a whole number of blocks wide and high), whole pages
-     of large pieces past that, free blocks in pages of small pieces; the
-     top bytes' texels (64 a block) */
-  u32 need_blocks, span_waste, round_waste, small_free, hbyte_need;
   /* making room: the blocks in use in the runs taken, and the blocks of
      the entries evicted for them (all of each entry: more when one lay
      only partly in the run) */
   u32 evict_run_blocks, evicted_blocks;
 };
 void mx_vcache_stats(struct mx_vcache_stats *s);
+/* Where GS memory goes now (blocks; for measuring, it walks every entry):
+   the entries' texels (whole blocks of 256 bytes), the blocks between them
+   in the page's block order (a piece that is not a whole number of blocks
+   wide and high), whole pages of large pieces past that, free blocks in
+   pages of small pieces; the top bytes' texels (64 a block). */
+struct mx_vcache_space {
+  u32 need_blocks, span_waste, round_waste, small_free, hbyte_need;
+};
+void mx_vcache_space(struct mx_vcache_space *s);
 
 #endif

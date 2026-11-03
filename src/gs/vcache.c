@@ -944,11 +944,13 @@ void mx_vcache_stats(struct mx_vcache_stats *s) {
   s->used_blocks = used_blocks;
   s->hbyte_blocks = h_n;
   s->hbyte_used = h_used;
+}
+
+void mx_vcache_space(struct mx_vcache_space *s) {
+  *s = (struct mx_vcache_space){0};
   /* where the blocks go (measured, for the packing): each piece's texels
      (whole blocks of 256 bytes; T8H 64 texels), its span in the page's
      block order (mx_tex_blocks), its blocks (a large one: whole pages) */
-  s->need_blocks = s->span_waste = s->round_waste = s->small_free = 0;
-  s->hbyte_need = 0;
   for (u32 e = 0; e < ent_hi; e++) {
     const struct ent *x = &ents[e];
     if (!x->live || x->building)
