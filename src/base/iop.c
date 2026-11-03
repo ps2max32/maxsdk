@@ -105,6 +105,19 @@ int mx_iop_find_module(const char *name, struct mx_iop_module *m) {
   return 0;
 }
 
+int mx_iop_last_module(void) {
+  struct mx_iop_module m;
+  int last = 0;
+  u32 a = FIRST_MODULE;
+  for (int k = 0; a && k < MAX_LIST; k++, a = m.next) {
+    if (mx_iop_read(a, &m, sizeof m) < 0)
+      return -1;
+    if (m.id > last)
+      last = m.id;
+  }
+  return last;
+}
+
 /* An export library: its header, then the function addresses up to a 0. */
 struct exp_lib {
   u32 prev, caller;

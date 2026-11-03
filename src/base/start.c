@@ -13,6 +13,8 @@ struct mx_loader_args *mx__loader_args;
 /* mxload's arguments, copied: its memory is the heap's now */
 static struct mx_args mxload_args;
 static int by_mxload;
+/* mxlink's way back (<mx/loader.h>), 0 for the BIOS's Exit */
+static void (*loader_ret)(int status) __attribute__((noreturn));
 
 int mx_loader_mxload(void) { return by_mxload; }
 
@@ -74,6 +76,9 @@ void mx_exit(int status) {
   mx_debug_flush();
   /* the BIOS's TLB back for ps2link (with VM on) */
   mx__vm_shutdown();
+  /* back to mxlink without a reboot, if it started us */
+  if (loader_ret)
+    loader_ret(status);
   mx_bios_exit(status);
 }
 
@@ -84,6 +89,9 @@ void mx__main(void) {
 
   struct mx_args *a = &mx__kernel_args;
   struct mx_loader_args *l = mx__loader_args;
+  if (loader_args_ok(l) && l->ret_magic == MX_LOADER_RET && l->ret &&
+      !((u32)(uintptr_t)l->ret & 3) && (u32)(uintptr_t)l->ret < 0x02000000u)
+    loader_ret = l->ret;
   if (loader_args_ok(l) && l->pid == MX_LOADER_MAGIC) {
     by_mxload = 1;
     a = copy_mxload_args(&l->args);

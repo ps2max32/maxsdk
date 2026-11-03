@@ -41,6 +41,9 @@ struct mx_iop_module {
 /* The module named name (exactly): returns its id and its record in *m, 0 if
    it is not loaded. */
 int mx_iop_find_module(const char *name, struct mx_iop_module *m);
+/* The highest id of the loaded modules (ids only grow: a higher one than
+   before means a module was loaded since), < 0 on an error. */
+int mx_iop_last_module(void);
 /* The export library named name (e.g. "modload"): its first max function
    addresses go in exports (if exports); returns how many it has, 0 if none. */
 int mx_iop_find_exports(const char *name, u32 *exports, int max);
