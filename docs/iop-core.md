@@ -51,7 +51,7 @@ Open unless marked. The IOP bench (`apps/llvm_bench/iop`) measures real patterns
 | 2 | The assembler accepts `cache` and `pref`, but `cache` is a reserved instruction here and `pref` traps as coprocessor unusable | Assembled code traps. In ps2sdk `pref` sits behind `USE_PREFETCH` in sysclib (seen in `memset.S`) | Reject, or keep for assembling only and say so |
 | 3 | `.set reorder` adds no load, HI/LO or `mfc0` delay: `lw; addu` and `mflo; mult` come out as written | Hand-written `.S` and inline asm that counts on gas's nops is wrong here | Add it to the assembler, or document that asm must be scheduled by hand |
 | 4 | `mfc0` is not in `HasLoadDelaySlot`, and inline asm is not looked into: `mfc0 $1, $12` was followed directly by `addiu $1, $1, 1` | The use reads the **old** register (measured). Silent wrong value | Rule for asm authors: end with a `nop`. Or treat `=r` asm outputs as late on r3000a |
-| 5 | Model: mult latency 12, div 35. Measured `mflo` issue distance: 7, 10 or 14 after mult, 37 after div | Only scheduling quality. `mult`'s cost depends on rs, which a static model cannot see | Div 37, mult 14 (or 10), check code size and speed |
+| 5 | Model: mult latency 12, div 35. Measured `mflo` issue distance: 7, 10 or 14 after mult, 37 after div | Only scheduling quality. `mult`'s cost depends on rs, which a static model cannot see | **Done:** mult 14, div 37, stores 2 cycles, `mfc0` delay. No kernel of the bench changed |
 | 6 | i64 multiply spills HI/LO through the stack and reloads with `mtlo`/`mthi` just to `mflo` again | **Fixed:** the scheduler kept all multiplies apart from their results; `MipsAccOrderDAGMutation` | - |
 | 7 | `lw`/`lwl` to one register: `lwl` or `lwr` in the slot of a plain load gets the loaded value, but `SafeInLoadDelaySlot` only allows lwl/lwr pairs | One `nop` too many, rarely | Low priority |
 
@@ -70,10 +70,10 @@ Issue is one instruction per cycle.
 | Load, I_STAT register | - | Not modelled | 4.93 | measured |
 | Load, BIOS ROM | - | Not modelled | 33.93 | measured |
 | `lwl` + `lwr` | Pair needs no nop | Pair allowed | 2.00 | measured |
-| Store | Write buffer, 4 entries | Latency 1 | One per 2 cycles at most; 1.83 in a burst of 16 (see below) | measured |
+| Store | Write buffer, 4 entries | Own unit, busy 2 | One per 2 cycles at most; 1.83 in a burst of 16 (see below) | measured |
 | Store then load, cached | - | - | 2.00: no penalty | measured |
 | Store then load, uncached | Buffer drains first | - | 10.96 | measured |
-| `mfc0` | Result 1 late | Not modelled | 1.00 issue, 1 delay slot; SR, Cause, EPC, PRId alike | measured |
+| `mfc0` | Result 1 late | Latency 2 | 1.00 issue, 1 delay slot; SR, Cause, EPC, PRId alike | measured |
 | `mtc0` (SR) | Result 1 late | Not modelled | 1.00 | measured |
 | `rfe` | - | Not modelled | 1.00 | measured |
 | `mfhi`, `mflo` idle, `mthi`, `mtlo` | - | - | 1.00, no delay on the result | measured |
@@ -82,10 +82,10 @@ Issue is one instruction per cycle.
 | Call and return, `jal` + `jr`, both with a `nop` | - | - | 4.00: no penalty | measured |
 | Trap round trip: trap, vector `j` + slot, 9 handler instructions with `rfe` | - | - | 14.1 for these 12 instructions; `syscall`, `break`, reserved and coprocessor unusable within 0.1 | measured |
 | Result of one unit into another: ALU to load address, branch, store data; `mflo` to ALU | - | - | No stall | measured |
-| `mult`, `multu` issue | - | Unit busy 12 | 1.00: never stalls, a new one replaces the running one | measured |
-| `mult` + `mflo` | 12 clocks, "11 late" | Latency 12 | **8, 11 or 15**, see below | measured |
-| `div`, `divu` issue | - | Unit busy 35 | 1.00 | measured |
-| `div` + `mflo` | 35 | Latency 35 | **38**, whatever the operands, also /0 | measured |
+| `mult`, `multu` issue | - | Unit busy 14 | 1.00: never stalls, a new one replaces the running one | measured |
+| `mult` + `mflo` | 12 clocks, "11 late" | Latency 14 | **8, 11 or 15**, see below | measured |
+| `div`, `divu` issue | - | Unit busy 37 | 1.00 | measured |
+| `div` + `mflo` | 35 | Latency 37 | **38**, whatever the operands, also /0 | measured |
 | Fetch, cached (kuseg, kseg0) | - | - | 1.00 | measured |
 | Fetch, uncached (kseg1) | - | - | 6.06 per instruction | measured |
 
