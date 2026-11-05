@@ -4,6 +4,7 @@
    frame number is the newest. */
 
 #include <mx/cpu.h>
+#include <mx/mx.h>
 #include <mx/pad.h>
 #include <mx/sif.h>
 
@@ -83,7 +84,11 @@ u32 mx_pad_buttons(int port) {
   if (!mx_pad_connected(port))
     return 0;
   volatile struct pad_record *n = newest(port);
-  return ~(u32)(n->data[2] | n->data[3] << 8) & 0xFFFF;
+  u32 b = ~(u32)(n->data[2] | n->data[3] << 8) & 0xFFFF;
+  /* the way out of any program: back to the loader */
+  if ((b & MX_PAD_QUIT) == MX_PAD_QUIT)
+    mx_exit(0);
+  return b;
 }
 
 /* A DualShock starts digital: once it is stable, ask for analog mode,

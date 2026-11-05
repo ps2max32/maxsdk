@@ -25,6 +25,10 @@
 #define MX_PAD_CROSS 0x4000
 #define MX_PAD_SQUARE 0x8000
 
+/* Held together, these end the program (mx_exit(0)) when the pad is read: a
+   way back to the loader from any program, whatever its menus offer. */
+#define MX_PAD_QUIT (MX_PAD_SELECT | MX_PAD_START | MX_PAD_L1 | MX_PAD_R1)
+
 /* Open port 0 and 1 (slot 0). Returns < 0 if the pad driver is not there. */
 int mx_pad_init(void);
 /* 1 if a pad on port (0/1) is connected and its state is being read. */
