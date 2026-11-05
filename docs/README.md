@@ -8,6 +8,7 @@ decision in maxsdk and in the compiler.
 |---|---|
 | [measuring.md](measuring.md) | How to measure: counters, probes, repetitions, cache state |
 | [ee-core.md](ee-core.md) | R5900 pipelines, latencies, pairing, hazards |
+| [iop-core.md](iop-core.md) | R3000A: every instruction, latencies, hazards, LLVM status, tests (real R3000A only, no Deckard) |
 | [fpu.md](fpu.md) | FPU deviations from IEEE 754, multiplier behaviour |
 | [memory.md](memory.md) | Caches, uncached/UCAB/SPR, cache operation costs |
 | [interrupts.md](interrupts.md) | Interrupt latency and BIOS dispatch costs |
