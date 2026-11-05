@@ -8,7 +8,7 @@ set -e
 here=$1
 shift
 PS2MAX=${PS2MAX:-$(cd "$here/../../.." && pwd)}
-PCSX2_RUN=${PCSX2_RUN:-$HOME/.claude/skills/ps2-pcsx2-test/run.sh}
+PCSX2_RUN=${PCSX2_RUN:-pcsx2-run}
 PCSX2_DIR=${PCSX2_DIR:-$PS2MAX/build/pcsx2-test}
 for elf in "$@"; do
   step=$(basename "$elf" .elf)

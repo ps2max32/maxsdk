@@ -85,7 +85,7 @@ vpath %.vsm $(VSM_DIRS)
 
 $(OUT)/vu/%.vu.elf: %.vsm
 	@mkdir -p $(dir $@)
-	$(LLVM)/llvm-mc -triple=vu -mcpu=vu1 -filetype=obj $< -o $@
+	$(LLVM)/llvm-mc -triple=vu -mcpu=vu1 -filetype=obj $(VSM_FLAGS) $< -o $@
 
 $(OUT)/vu/%.bin: $(OUT)/vu/%.vu.elf
 	$(LLVM)/llvm-objcopy -O binary --only-section=.vutext $< $@
@@ -146,6 +146,10 @@ $(OUT)/hlsl/%.o: $(OUT)/hlsl/%.bin
 	printf '%s\n' '.section .vutext, "a"' '.balign 16' '.globl $*_vu' '$*_vu:' \
 	  '.incbin "$<"' '.globl $*_vu_end' '$*_vu_end:' > $(@:.o=.S)
 	$(CC) $(CFLAGS) -c $(@:.o=.S) -o $@
+
+# `make run` of the apps: the command that runs an ELF in PCSX2 headlessly and
+# stops it at the end marker (@@PS2TEST_END@@): PCSX2_RUN <elf> <timeout in seconds>
+PCSX2_RUN ?= pcsx2-run
 
 .SECONDARY:
 .DEFAULT_GOAL := $(MX_GOAL)
