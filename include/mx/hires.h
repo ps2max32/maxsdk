@@ -24,7 +24,10 @@
    the two fields of a 1080-line picture (examples/field).
 
    What the frame stream may write: the GS registers of both contexts but
-   FRAME, ZBUF, XYOFFSET and SCISSOR, which belong to the passes. Context 1
+   ZBUF and SCISSOR, which belong to the passes (SCISSOR chooses the strip);
+   XYOFFSET is the passes' too (the lower field's half line). FRAME is the
+   same in every pass (mx_hires_frame): the stream may write it, for FBMSK or
+   another format of the same buffer. Context 1
    (PRIM.CTXT 0) writes Z, context 2 (CTXT 1) has ZMSK set: draw with
    context 2 for no Z writes, and set the other registers of the context a
    primitive uses. Window coordinates are those of a w x h target
@@ -80,6 +83,8 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 h, u32 psm, void *me
 /* The number of strips (passes a field) of the framebuffer, after
    mx_hires_init. */
 u32 mx_hires_passes(void);
+/* FRAME of the framebuffer with mask, for the stream (it must be set back). */
+u64 mx_hires_frame(u32 mask);
 /* The pages whose top byte no pass writes (CT24 strips: all of them), the
    first in *page; 0 for another format. */
 u32 mx_hires_hbyte(u32 *page);

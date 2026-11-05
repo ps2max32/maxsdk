@@ -87,6 +87,8 @@ int mx_gs_init_video(const struct mx_video_mode *m);
    mx_vram_free gives a target's pages back. mx_vram_reset frees every page
    (the cache's too); mx_gs_init* do it. */
 u32 mx_vram_alloc(u32 pages);
+/* The same at page, or ~0u if a page of it is taken. */
+u32 mx_vram_alloc_at(u32 page, u32 pages);
 void mx_vram_free(u32 page, u32 pages);
 void mx_vram_reset(void);
 

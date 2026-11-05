@@ -85,9 +85,13 @@ static u64 *pass_chain(int s, u32 k, int shifted, int finish, int once) {
   u32 y0 = k * h.strip_h;
   /* the lines of the strip that are shown (the last one is shorter) */
   u32 rows = h.rt.h - y0 < h.strip_h ? h.rt.h - y0 : h.strip_h;
-  u32 oy = h.rt.oy + (y0 << 4) + (shifted ? 8 : 0);
-  u32 fbp = h.rt.fbp + k * h.strip_pages;
-  u32 zbp = h.rt.fbp + ((k + 1) % h.npass) * h.strip_pages;
+  u32 oy = h.rt.oy + (shifted ? 8 : 0);
+  /* one FRAME for all strips: the stream may write it. Line y is line y of the buffer,
+     SCISSOR chooses the strip. ZBUF is the pass's: at line y of strip k, Z is in strip
+     k + 1, so ZBP is a strip after FRAME's base; the last strip's Z is strip 0, n - 1
+     strips before it (mx_hires_init leaves room for that base, not memory it uses) */
+  u32 fbp = h.rt.fbp;
+  u32 zbp = fbp + ((k + 1) % h.npass) * h.strip_pages - k * h.strip_pages;
   u32 rgb = h.slot[s].rgb;
   u64 *c0 = MX_UNCACHED(pass_mem[h.nchain]);
   h.nchain = (h.nchain + 1) % NPASS_CHAINS;
@@ -105,14 +109,15 @@ static u64 *pass_chain(int s, u32 k, int shifted, int finish, int once) {
     c = mx_e_ad(c, mx_gs_ctx(MX_GS_REG_FRAME_1, ctx), mx_gs_frame(fbp, h.rt.fbw, h.rt.psm, 0));
     c = mx_e_ad(c, mx_gs_ctx(MX_GS_REG_ZBUF_1, ctx), mx_gs_zbuf(zbp, h.zpsm, (u32)ctx));
     c = mx_e_ad(c, mx_gs_ctx(MX_GS_REG_XYOFFSET_1, ctx), mx_gs_xyoffset(h.rt.ox, oy));
-    c = mx_e_ad(c, mx_gs_ctx(MX_GS_REG_SCISSOR_1, ctx), mx_gs_scissor(0, h.rt.w - 1, 0, rows - 1));
+    c = mx_e_ad(c, mx_gs_ctx(MX_GS_REG_SCISSOR_1, ctx), mx_gs_scissor(0, h.rt.w - 1, y0, y0 + rows - 1));
   }
   /* the strip and its Z cleared */
   c = mx_e_ad(c, MX_GS_REG_TEST_1, mx_gs_test(0, 0, 0, 0, 0, 0, 1, 1));
   c = mx_e_ad(c, MX_GS_REG_PRIM, mx_gs_prim(MX_GS_PRIM_SPRITE, 0, 0, 0, 0, 0, 0, 0, 0));
   c = mx_e_ad(c, MX_GS_REG_RGBAQ, mx_gs_rgbaq(rgb & 0xFF, rgb >> 8 & 0xFF, rgb >> 16 & 0xFF, 0x80, 1));
-  c = mx_e_ad(c, MX_GS_REG_XYZ2, mx_gs_xyz(h.rt.ox, oy, 0));
-  c = mx_e_ad(c, MX_GS_REG_XYZ2, mx_gs_xyz(h.rt.ox + (h.rt.w << 4), oy + (h.strip_h << 4), 0));
+  c = mx_e_ad(c, MX_GS_REG_XYZ2, mx_gs_xyz(h.rt.ox, oy + (y0 << 4), 0));
+  c = mx_e_ad(c, MX_GS_REG_XYZ2,
+              mx_gs_xyz(h.rt.ox + (h.rt.w << 4), oy + ((y0 + h.strip_h) << 4), 0));
   if (finish) {
     c = mx_e_end(c, 2, mx_vif_flush(), mx_vif_direct(2));
     c = mx_e_ad_tag(c, 1, 1);
@@ -213,6 +218,8 @@ static void vsync_hook(void) {
 
 static u32 align_up(u32 v, u32 a) { return (v + a - 1) / a * a; }
 
+u64 mx_hires_frame(u32 mask) { return mx_gs_frame(h.rt.fbp, h.rt.fbw, h.rt.psm, mask); }
+
 int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *mem, u32 bytes,
                   void *spr, u32 spr_bytes) {
   struct mx_video_mode mm = *m;
@@ -237,7 +244,9 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
     return -1;
   u32 fbw = (w + 63) / 64;
   h.strip_pages = fbw * h.strip_h / h.page_h;
-  u32 fbp = mx_vram_alloc(h.npass * h.strip_pages);
+  /* the last strip's ZBP is n - 1 strips below the buffer (pass_chain): the buffer
+     that high; the pages below it stay free for textures */
+  u32 fbp = mx_vram_alloc_at((h.npass - 1) * h.strip_pages, h.npass * h.strip_pages);
   if (fbp == ~0u)
     return -1;
   mx_rt_init(&h.rt, fbp, w, hgt, psm, MX_RT_NOZ, MX_RT_NOZ);

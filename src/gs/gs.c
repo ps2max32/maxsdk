@@ -112,6 +112,13 @@ u32 mx_vram_alloc(u32 pages) {
   return p;
 }
 
+u32 mx_vram_alloc_at(u32 page, u32 pages) {
+  if (mx_vram_take(page, pages, MX_VRAM_FIXED) != 0)
+    return ~0u;
+  vram_mark();
+  return page;
+}
+
 void mx_vram_free(u32 page, u32 pages) {
   for (u32 p = page; p < page + pages && p < MX_VRAM_PAGES; p++)
     if (mx_vram_owner(p) == MX_VRAM_FIXED)
