@@ -27,12 +27,28 @@ struct mx_loader_args {
      Exit (which reboots the PS2). mx_exit calls it. */
   u32 ret_magic;
   void (*ret)(int status) __attribute__((noreturn));
+  /* mxlink only, launch_magic being MX_LOADER_LAUNCH: end this program and
+     start another with the IOP as it is (its modules and open devices stay).
+     mx_loader_launch calls it. swap: the system's swap file, used in place of
+     the program's own, or 0. */
+  u32 launch_magic;
+  void (*launch)(int argc, const char *args, u32 args_len, const char *swap)
+      __attribute__((noreturn));
+  const char *swap;
 };
 
 #define MX_LOADER_RET 0x4b4c584du /* "MXLK" */
+#define MX_LOADER_LAUNCH 0x4e4c584du /* "MXLN" */
 
 /* 1 if the program was started by mxload (argv[0] is then the path of its
    ELF), 0 if not. */
 int mx_loader_mxload(void);
+
+/* End this program and have mxlink start another, the IOP kept: args is
+   argc strings one after the other, the first the path of its ELF; swap (or
+   0) is the swap file all programs share, used in place of the one they ask
+   for. Returns -1 if the program was not started by an mxlink that can do
+   this. */
+int mx_loader_launch(int argc, const char *args, u32 args_len, const char *swap);
 
 #endif

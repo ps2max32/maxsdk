@@ -463,9 +463,11 @@ u32 mx__vm_tlb_entries(void) {
    entries and the fixed ones it wrote are cleared first, then the BIOS's
    written; the entries kept never changed, so the code running here stays
    mapped. VM is off after it: nothing of it may be touched. */
+static int swap_left = -1; /* the swap file, for mx__vm_swap_close */
 void mx__vm_shutdown(void) {
   if (!tlb_saved)
     return;
+  swap_left = vm.fd;
   int was = mx_di();
   vm.active = 0;
   F.npages = 0;
@@ -482,6 +484,14 @@ void mx__vm_shutdown(void) {
   for (int c = 1; c <= 3; c++)
     if (bios_handler[c])
       mx_bios_set_tlb_handler(c, (void (*)(void))bios_handler[c]);
+}
+
+/* After mx__vm_shutdown, at a normal end: on FAT and exFAT a file that is not
+   closed keeps its old size, and its clusters stay taken. */
+void mx__vm_swap_close(void) {
+  if (swap_left >= 0)
+    mx_fio_close(swap_left);
+  swap_left = -1;
 }
 
 /* ---- pages and frames ------------------------------------------------------- */
@@ -1787,9 +1797,13 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
     return -1;
   vm.fd = -1;
   if (cfg->swap[0]) {
-    vm.fd = mx_fio_open(cfg->swap, 3 /* RDWR */ | MX_FIO_CREAT | MX_FIO_TRUNC);
+    /* not emptied: a swap file made ahead keeps its clusters, so paging on
+       FAT and exFAT changes no file system data, and a power cut none */
+    extern const char *mx__loader_swap;
+    const char *swap = mx__loader_swap ? mx__loader_swap : cfg->swap;
+    vm.fd = mx_fio_open(swap, 3 /* RDWR */ | MX_FIO_CREAT);
     if (vm.fd < 0) {
-      mx_printf("mx_vm_init: cannot open the swap file %s (%d)\n", cfg->swap, vm.fd);
+      mx_printf("mx_vm_init: cannot open the swap file %s (%d)\n", swap, vm.fd);
       return -1;
     }
   }

@@ -15,6 +15,9 @@ static struct mx_args mxload_args;
 static int by_mxload;
 /* mxlink's way back (<mx/loader.h>), 0 for the BIOS's Exit */
 static void (*loader_ret)(int status) __attribute__((noreturn));
+static void (*loader_launch)(int argc, const char *args, u32 args_len, const char *swap)
+    __attribute__((noreturn));
+const char *mx__loader_swap; /* the swap file mxlink gave, or 0 */
 
 int mx_loader_mxload(void) { return by_mxload; }
 
@@ -70,18 +73,32 @@ void mx__test_end(int status) {
 }
 
 void mx__vm_shutdown(void);
+void mx__vm_swap_close(void);
 
 void mx_exit(int status) {
   report();
   mx_debug_flush();
   /* the BIOS's TLB back for ps2link (with VM on) */
   mx__vm_shutdown();
+  /* not after a crash: it may have come in the file server's lock */
+  if (status != 255)
+    mx__vm_swap_close();
   /* back to mxlink without a reboot, if it started us */
   if (loader_ret)
     loader_ret(status);
   mx_bios_exit(status);
 }
 
+int mx_loader_launch(int argc, const char *args, u32 args_len, const char *swap) {
+  if (!loader_launch)
+    return -1;
+  mx_debug_flush();
+  mx__vm_shutdown();
+  mx__vm_swap_close();
+  loader_launch(argc, args, args_len, swap);
+}
+
+void mx__fio_base(const char *argv0);
 void mx__main(void) __attribute__((noreturn));
 void mx__main(void) {
   heap_end = mx_bios_setup_heap(_end, -1);
@@ -92,12 +109,17 @@ void mx__main(void) {
   if (loader_args_ok(l) && l->ret_magic == MX_LOADER_RET && l->ret &&
       !((u32)(uintptr_t)l->ret & 3) && (u32)(uintptr_t)l->ret < 0x02000000u)
     loader_ret = l->ret;
+  if (loader_ret && l->launch_magic == MX_LOADER_LAUNCH && l->launch &&
+      !((u32)(uintptr_t)l->launch & 3) && (u32)(uintptr_t)l->launch < 0x02000000u)
+    loader_launch = l->launch, mx__loader_swap = l->swap;
   if (loader_args_ok(l) && l->pid == MX_LOADER_MAGIC) {
     by_mxload = 1;
     a = copy_mxload_args(&l->args);
   } else if (a->argc == 0 && loader_args_ok(l) && l->args.argc != 0)
     a = &l->args;
 
+  if (a->argc > 0 && a->argv[0])
+    mx__fio_base(a->argv[0]);
   mx_debug_init();
   mx_exception_init();
   mx_vif_reset(0);

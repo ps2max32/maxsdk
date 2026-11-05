@@ -67,7 +67,9 @@ int mx_iop_load_module(const char *path);
 int mx_tty_write(const char *s, u32 n);
 
 /* Files of the IOP file server, e.g. "host:shot.tga" (ps2link: the directory
-   of ps2client; PCSX2: its host root). Return < 0 on failure. */
+   of ps2client; PCSX2: its host root). A path without a device is in the
+   directory of the program's ELF: "id1/pak0.pak" of usb0:/games/q.elf is
+   usb0:/games/id1/pak0.pak. Return < 0 on failure. */
 #define MX_FIO_RDONLY 0x0001
 #define MX_FIO_WRONLY 0x0002
 #define MX_FIO_CREAT 0x0200

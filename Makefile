@@ -155,7 +155,9 @@ $(OUT)/libc/%.cc.o: $(HERE)/libc/%.cc
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(OUT)/rt/%.o: $(RT_DIR)/%.c
+# on the compiler too: these sources rarely change, so objects of an old
+# compiler would stay, and they are in every program
+$(OUT)/rt/%.o: $(RT_DIR)/%.c $(LLVM)/clang
 	@mkdir -p $(dir $@)
 	$(CC) $(RT_CFLAGS) -c $< -o $@
 

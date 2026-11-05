@@ -846,9 +846,43 @@ static struct {
   char path[256];
 } op_arg MX_DMA_LINES;
 
+/* Where a path without a device is: the directory of the program's ELF, so
+   one ELF finds its files on host: as on usb0:. Under the fio lock. */
+static char fio_base[128];
+void mx__fio_base(const char *argv0) {
+  u32 end = 0, colon = 0;
+  for (u32 i = 0; argv0[i] && i < sizeof fio_base - 1; i++) {
+    if (argv0[i] == ':')
+      colon = 1;
+    if (argv0[i] == ':' || argv0[i] == '/')
+      end = i + 1;
+  }
+  if (!colon)
+    end = 0;
+  for (u32 i = 0; i < end; i++)
+    fio_base[i] = argv0[i];
+  fio_base[end] = 0;
+}
+static const char *fio_resolve(const char *path) {
+  static char full[256];
+  if (!fio_base[0])
+    return path;
+  for (const char *p = path; *p; p++)
+    if (*p == ':')
+      return path;
+  u32 n = 0;
+  for (; fio_base[n]; n++)
+    full[n] = fio_base[n];
+  for (; *path && n < sizeof full - 1; path++)
+    full[n++] = *path;
+  full[n] = 0;
+  return full;
+}
+
 static int fio_open_unlocked(const char *path, int flags) {
   if (fio_bind() < 0)
     return -1;
+  path = fio_resolve(path);
   __typeof__(op_arg) *a = MX_UNCACHED(&op_arg);
   a->flags = flags;
   u32 i = 0;
@@ -1027,6 +1061,7 @@ int mx_fio_close(int fd) {
 static int fio_dopen_unlocked(const char *path) {
   if (fio_bind() < 0)
     return -1;
+  path = fio_resolve(path);
   static u32 patched; /* sif_epoch + 1: patched in this boot of the IOP */
   if (patched != sif_epoch + 1) {
     patched = sif_epoch + 1;
@@ -1073,9 +1108,13 @@ static int fio_dread_unlocked(int fd, char *name, u32 room, u32 *size) {
   if (r[0] <= 0)
     return r[0];
   volatile __typeof__(de) *e = MX_UNCACHED(&de);
+  /* drivers written for iomanX (bdmfs_fatfs: mass:) fill in its larger
+     dirent: 64 bytes of stat, so the name comes 24 bytes later */
+  volatile const char *src = e->name[0] ? e->name : e->name + 24;
+  u32 max = e->name[0] ? sizeof de.name : sizeof de.name - 24;
   u32 i = 0;
-  for (; room && i < room - 1 && i < sizeof de.name && e->name[i]; i++)
-    name[i] = e->name[i];
+  for (; room && i < room - 1 && i < max && src[i]; i++)
+    name[i] = src[i];
   if (room)
     name[i] = 0;
   if (size)
@@ -1114,6 +1153,7 @@ int mx_fio_dclose(int fd) {
 static int fio_path_call_unlocked(int fn, const char *path) {
   if (fio_bind() < 0)
     return -1;
+  path = fio_resolve(path);
   static u32 patched; /* sif_epoch + 1: patched in this boot of the IOP */
   if (patched != sif_epoch + 1) {
     patched = sif_epoch + 1;
