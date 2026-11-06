@@ -37,6 +37,7 @@ enum {
   MXFAST_DATA = 5,
   MXFAST_WRITE = 6,  /* data: handle, offset in the file, offset in the transfer */
   MXFAST_COMMIT = 7, /* answer: a 0, b one bit for each frame of this id received */
+  MXFAST_HELLO = 8,  /* from the host, every second: here is the file server */
   MXFAST_ANSWER = 0x80 /* or'ed to the request's op */
 };
 
@@ -60,7 +61,7 @@ enum {
 /* RPC of the IOP for the EE: 16-byte aligned arguments, one s32 back. */
 #define MXFAST_SID 0x4D584601
 enum {
-  MXFAST_RPC_OPEN,  /* u32 host IP (network order), path */
+  MXFAST_RPC_OPEN,  /* u32 host IP (network order; 0: the one that said HELLO), path */
   MXFAST_RPC_READ,  /* u32 handle, offset in the file, size, EE address: bytes read */
   MXFAST_RPC_CLOSE, /* u32 handle */
   MXFAST_RPC_LOG,   /* u32 host IP, text */

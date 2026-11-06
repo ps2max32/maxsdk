@@ -51,14 +51,17 @@ int mxfast_rx(struct pbuf *p) {
       f[36] != (MXFAST_PORT >> 8) || f[37] != (MXFAST_PORT & 255) || f[42] != 'M' ||
       f[43] != 'F')
     return 0;
-  if (f[44] & MXFAST_ANSWER) { /* lwIP's socket takes it: this only learns the way back */
-    if (!have_peer) {
-      memcpy(eth_ip, f + 6, 6);     /* its MAC */
-      memcpy(eth_ip + 6, f, 6);     /* ours */
-      memcpy(eth_ip + 12, f + 12, 2);
-      memcpy(eth_ip + 26, f + 30, 4); /* our IP */
-      memcpy(eth_ip + 30, f + 26, 4); /* its IP */
-      have_peer = 1;
+  if (f[44] & MXFAST_ANSWER || f[44] == MXFAST_HELLO) {
+    /* the way back; lwIP's socket takes the answers */
+    memcpy(eth_ip, f + 6, 6);       /* its MAC */
+    memcpy(eth_ip + 6, f, 6);       /* ours */
+    memcpy(eth_ip + 12, f + 12, 2);
+    memcpy(eth_ip + 26, f + 30, 4); /* our IP */
+    memcpy(eth_ip + 30, f + 26, 4); /* its IP */
+    have_peer = 1;
+    if (f[44] == MXFAST_HELLO) {
+      pbuf_free(p);
+      return 1;
     }
     return 0;
   }
@@ -328,6 +331,8 @@ static int ask(u8 *b, u32 n, u32 id) {
 }
 
 static void set_host(u32 ip) {
+  if (!ip && have_peer)
+    memcpy(&ip, eth_ip + 30, 4);
   memset(&host, 0, sizeof host);
   host.sin_family = AF_INET;
   host.sin_port = htons(MXFAST_PORT);
@@ -348,6 +353,10 @@ static void *rpc(int fno, void *data, int size) {
     if (n > 256)
       n = 256;
     set_host(a[0]);
+    if (!host.sin_addr.s_addr) {
+      rpc_out[0] = -6; /* no server yet */
+      break;
+    }
     header(b, fno == MXFAST_RPC_LOG ? MXFAST_LOG : MXFAST_OPEN, id,
            fno == MXFAST_RPC_OPEN_WRITE, 0, 0);
     memcpy(b + MXFAST_HDR, a + 1, n);

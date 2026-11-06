@@ -3,7 +3,9 @@
    then writes the same words to fastw.bin, to compare with it on the host.
 
      p27_fast host:poweroff.irx host:ps2dev9.irx host:netman.irx host:smap.irx
-              ip=<ip>,<mask>,<gateway> host:ps2ip-nm.irx host=<a.b.c.d> file=<name>
+              ip=<ip>,<mask>,<gateway> host:ps2ip-nm.irx [host=<a.b.c.d>] file=<name>
+
+   Without host= the server is the one that says HELLO.
 
    The file holds word i = i * 2654435761 ^ 0x5A, MIB MiB of it. The reset ends
    host: and the console, so results go to the server, which prints them. */
@@ -188,8 +190,8 @@ int main(int argc, char **argv) {
       n++;
     }
   }
-  if (!n || !host || !file) {
-    mx_printf("p27: need modules, host= and file=\n");
+  if (!n || !file) {
+    mx_printf("p27: need modules and file=\n");
     MX_TEST_END(1);
     return 1;
   }
@@ -213,6 +215,8 @@ int main(int argc, char **argv) {
     req[0] = host;
     char *d = cat((char *)(req + 1), file);
     fd = call(RPC_OPEN, (u32)(d - (char *)req) + 1);
+    if (fd == -6) /* no server has said HELLO yet */
+      mx_delay_us(1000000);
   }
   if (fd < 0)
     return 5;
