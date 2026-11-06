@@ -56,6 +56,8 @@ Retail PS2s have 32 MiB; never count on more.
    engine asks for `Y`. Quit must be reachable from the menu.
 10. **Saves and configs** go next to the ELF, by relative path. Writes are slow (about 600 KB/s
     on USB) and FAT keeps a file's size until it is closed: close files.
+  Files go through mxio when the card has it (`kernel.md`): nothing changes for a program, but keep
+  read buffers 16-byte aligned and sizes whole quadwords: anything else takes a copy on the EE.
 
 Provided for every program: Select + Start + L1 + R1 ends it (`mx_pad`); L3 + R3 toggles libgl's
 counters, off by default. Do not bind these combinations.

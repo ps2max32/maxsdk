@@ -136,6 +136,79 @@ static int write_pass(int fd, u32 stride, u32 piece) {
   return 0;
 }
 
+/* The same through mx_fio_*, as a program uses it */
+#define FAIL(what)                                                                         \
+  do {                                                                                     \
+    log_text("p27: FAILED: " what "\n");                                                   \
+    return 1;                                                                              \
+  } while (0)
+
+static int fio_test(const char *file, const char *wfile) {
+  u8 *b = (u8 *)data;
+  u32 bytes = MIB * 1024 * 1024, cycles = 0;
+  char line[96];
+  int fd = mx_fio_open(file, MX_FIO_RDONLY);
+  if (fd < 64)
+    FAIL("open did not go through mxio");
+  if (mx_fio_lseek(fd, 0, MX_FIO_SEEK_END) != (int)bytes)
+    FAIL("size");
+  if (mx_fio_lseek(fd, 0, MX_FIO_SEEK_SET) != 0)
+    FAIL("seek");
+  for (u32 at = 0; at < bytes; at += 32768) {
+    u32 t0 = mx_count();
+    if (mx_fio_read(fd, b, 32768) != 32768)
+      FAIL("read");
+    cycles += mx_count() - t0;
+    for (u32 i = 0; i < 8192; i++)
+      if (data[i] != ((at / 4 + i) * 2654435761u ^ 0x5Au))
+        FAIL("words");
+  }
+  u32 ms = cycles / (MX_EE_HZ / 1000u);
+  mx_snprintf(line, sizeof line, "p27: mx_fio_read: %u ms, %u KiB/s\n", ms, bytes / 1024u * 1000u / ms);
+  log_text(line);
+  /* not aligned, an odd size: word 250 starts at byte 1000 */
+  if (mx_fio_lseek(fd, 1000, MX_FIO_SEEK_SET) != 1000 || mx_fio_read(fd, b + 3, 5001) != 5001)
+    FAIL("unaligned read");
+  for (u32 i = 0; i < 5001; i++) {
+    u32 at = 1000 + i, w = (at / 4) * 2654435761u ^ 0x5Au;
+    if (b[3 + i] != (u8)(w >> (at % 4 * 8)))
+      FAIL("unaligned bytes");
+  }
+  /* aligned with a tail, then the next read goes on from there */
+  if (mx_fio_lseek(fd, 64, MX_FIO_SEEK_SET) != 64 || mx_fio_read(fd, b, 1000) != 1000 ||
+      mx_fio_lseek(fd, 0, MX_FIO_SEEK_CUR) != 1064)
+    FAIL("tail");
+  if (mx_fio_lseek(fd, -10, MX_FIO_SEEK_END) != (int)bytes - 10 || mx_fio_read(fd, b, 100) != 10)
+    FAIL("end of file");
+  if (mx_fio_read(fd, b, 100) != 0)
+    FAIL("past the end");
+  if (mx_fio_close(fd) < 0)
+    FAIL("close");
+  if (mx_fio_open("host:no-such-file", MX_FIO_RDONLY) >= 0)
+    FAIL("a missing file");
+
+  fd = mx_fio_open(wfile, 3 | MX_FIO_CREAT | MX_FIO_TRUNC);
+  if (fd < 64)
+    FAIL("open to write");
+  cycles = 0;
+  for (u32 at = 0; at < bytes; at += 32768) {
+    for (u32 i = 0; i < 8192; i++)
+      data[i] = (at / 4 + i) * 2654435761u ^ 0x5Au;
+    u32 t0 = mx_count();
+    /* odd pieces at first, then as the pager does */
+    if (!at ? mx_fio_write(fd, b, 1001) || mx_fio_write(fd, b + 1001, 31767)
+            : mx_fio_write(fd, b, 32768))
+      FAIL("write");
+    cycles += mx_count() - t0;
+  }
+  ms = cycles / (MX_EE_HZ / 1000u);
+  mx_snprintf(line, sizeof line, "p27: mx_fio_write: %u ms, %u KiB/s\n", ms, bytes / 1024u * 1000u / ms);
+  log_text(line);
+  if (mx_fio_close(fd) < 0)
+    FAIL("close after writing");
+  return 0;
+}
+
 static int starts(const char *s, const char *with) {
   while (*with)
     if (*s++ != *with++)
@@ -245,6 +318,8 @@ int main(int argc, char **argv) {
       call(MXIO_CLOSE, 16);
     }
   }
+  if (wfile && !bad)
+    bad += (u32)fio_test(path, wfile);
   int st = call(MXIO_STATS, 16);
   const volatile s32 *r = MX_UNCACHED(ans);
   char line[96];

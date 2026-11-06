@@ -34,7 +34,7 @@ of at least its own version.
 | Program | `<mx/loader.h>`, `mx_exit` | the kernel's (version 1) |
 | SIF | `<mx/sif.h>` | the kernel's (version 2) |
 | Exceptions | `<mx/debug.h>` (`mx_exception_init`, `mx_crash_last`) | the kernel's (version 3) |
-| Files | `<mx/sif.h>` (`mx_fio_*`) | the kernel's (version 4) |
+| Files | `<mx/sif.h>` (`mx_fio_*`) | the kernel's (version 4), through mxio if the IOP has it, else FILEIO |
 | Memory | `<mx/vm.h>`, `<mx/mem.h>` | the kernel's (version 4) |
 | IOP | `<mx/iop.h>`, `<mx/sif.h>` | over the kernel's SIF |
 | Pad, sound | `<mx/pad.h>`, `<mx/snd.h>` | program's own, over the kernel's SIF |
@@ -79,3 +79,16 @@ belongs to the program that ended last: the next return replaces it, and a reset
   status 255.
 - A program without maxsdk (ps2sdk) is reported by the kernel on the serial port only: it
   has its own SIF. The report is kept, and status 255 is set.
+
+## Files: mxio
+
+`iop/fs/mxio` is the file service in place of `rom0:FILEIO`, loaded by mxlink when it is on the
+card (`common/include/mxio.h`). `mx_fio_open` uses it if it is there: its descriptors start at 64,
+each call names its position, so a seek costs no call. Directories, remove, mkdir and appending
+stay with FILEIO.
+
+`host:` takes the fast path when a `ps2client` has said HELLO: data goes past lwIP (`iop/tcpip/mxnet`,
+`common/include/mxfast.h`), straight between SMAP and EE memory. Any other path, and `host:`
+without HELLO, takes the driver through ioman. In 32 KiB, measured on a PS2: 7.6 MiB/s reading and
+4.6 MiB/s writing on `host:`, against 2.1 and 1.6 through FILEIO. USB and the memory card are limited
+by the device or its driver.

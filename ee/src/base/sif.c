@@ -13,6 +13,7 @@
 #include <mx/timer.h>
 #include <mx/string.h>
 #include <mx/vm.h>
+#include "../../../common/include/mxio.h"
 
 /* System command IDs */
 /* libmxk (MX_KERNEL) under mx-kernel: the kernel has the one client of the
@@ -55,6 +56,7 @@ static const void *core_of(const void *p, u32 n) {
 #define DMA_INT_O 0x4
 #define DMA_ERT 0x40
 
+#define MXIO_READ_MAX (256u * 1024u)
 #define FILEIO_SID 0x80000001u
 #define FILEIO_OPEN 0
 #define FILEIO_CLOSE 1
@@ -833,6 +835,152 @@ u32 mx__fio_read_chunk = FIO_READ_CHUNK;
 /* the same, changed by probes (probe/p23_blocksize.c; 0: FIO_CHUNK) */
 u32 mx__fio_write_chunk = FIO_CHUNK;
 
+/* ---- mxio (common/include/mxio.h), the file service in place of FILEIO -------
+
+   Files go through it when the IOP has it. Its descriptors start at MXIO_FD,
+   so everything else sees file numbers as before; directories, remove and
+   appending stay with FILEIO. It takes positions: they are kept here. */
+#define MXIO_FD 64
+static struct mx_sif_client mxio;
+static struct {
+  u32 pos, stride, piece;
+} mxio_file[MXIO_FILES];
+static u32 mxio_arg[80] MX_DMA_LINES;
+static s32 mxio_out[MXIO_ANSWER] MX_DMA_LINES;
+static u8 mxio_bounce[16 * 1024] MX_DMA_LINES;
+static u8 mxio_frames[MXIO_BUFFER] MX_DMA_LINES;
+
+static int is_mxio(int fd) { return fd >= MXIO_FD && fd < MXIO_FD + MXIO_FILES; }
+
+static int mxio_up(void) {
+  if (!mx_sif_bound(&mxio) && (mx_sif_init() < 0 || mx_sif_bind_tries(&mxio, MXIO_SID, 1) < 0))
+    return 0;
+  return mxio.server != 0;
+}
+
+/* One call: its first answer word, < 0 if the call itself failed */
+static int mxio_call(int fno, const void *send, u32 ssize) {
+  volatile s32 *r = MX_UNCACHED(mxio_out);
+  r[0] = -1;
+  if (sif_call(&mxio, fno, send, (ssize + 15) & ~15u, (void *)r, MXIO_ANSWER * 4,
+               12u * 294912000u) < 0)
+    return -1;
+  return r[0];
+}
+
+static int mxio_open(const char *path, int flags) {
+  volatile u32 *a = MX_UNCACHED(mxio_arg);
+  volatile char *d = (volatile char *)(a + 1);
+  u32 i = 0;
+  a[0] = (u32)flags;
+  for (; path[i] && i < 250; i++)
+    d[i] = path[i];
+  d[i] = 0;
+  int fd = mxio_call(MXIO_OPEN, (void *)a, 4 + i + 1);
+  if (fd < 0)
+    return fd;
+  const volatile s32 *r = MX_UNCACHED(mxio_out);
+  mxio_file[fd].pos = 0;
+  mxio_file[fd].stride = (u32)r[1];
+  mxio_file[fd].piece = (u32)r[2];
+  return fd + MXIO_FD;
+}
+
+static int mxio_read_at(int fd, u32 pos, u32 size, u32 ee) {
+  volatile u32 *a = MX_UNCACHED(mxio_arg);
+  a[0] = (u32)fd, a[1] = pos, a[2] = size, a[3] = ee;
+  return mxio_call(MXIO_READ, (void *)a, 16);
+}
+
+/* As fio_read1: at most n bytes into pa, the CPU's view of them at d. Whole
+   quadwords at an aligned address go there directly; DMA only writes those. */
+static int mxio_read1(int fd, u8 *d, mx_paddr pa, u32 n) {
+  int f = fd - MXIO_FD;
+  u32 done = 0, direct = pa.v & 15 ? 0 : n & ~15u;
+  if (direct) {
+    mx_dcache_writeback(d, direct);
+    mx_dcache_invalidate(d, direct);
+    int got = mxio_read_at(f, mxio_file[f].pos, direct, pa.v);
+    mx_dcache_invalidate(d, direct);
+    if (got < 0)
+      return got;
+    mxio_file[f].pos += (u32)got;
+    done = (u32)got;
+    if (done < direct)
+      return (int)done;
+  }
+  while (done < n) {
+    u32 len = n - done > sizeof mxio_bounce ? sizeof mxio_bounce : n - done;
+    mx_dcache_invalidate(mxio_bounce, sizeof mxio_bounce);
+    int got = mxio_read_at(f, mxio_file[f].pos, len, mx_paddr_of(mxio_bounce).v);
+    if (got < 0)
+      return done ? (int)done : got;
+    const volatile u8 *b = MX_UNCACHED(mxio_bounce);
+    for (int i = 0; i < got; i++)
+      d[done + (u32)i] = b[i];
+    mxio_file[f].pos += (u32)got;
+    done += (u32)got;
+    if ((u32)got < len)
+      break;
+  }
+  return (int)done;
+}
+
+/* n bytes from p, in the pieces OPEN asked for: returns 0, else -1 */
+static int mxio_write(int fd, const u8 *p, u32 n) {
+  int f = fd - MXIO_FD;
+  u32 stride = mxio_file[f].stride, piece = mxio_file[f].piece;
+  while (n) {
+    u32 len = n > MXIO_MAX_WRITE ? MXIO_MAX_WRITE : n, last = 0, done = 0;
+    for (u32 i = 0; done < len; i++) {
+      u32 c = len - done > piece ? piece : len - done;
+      memcpy(mxio_frames + MXIO_HEAD + i * stride, p + done, c);
+      last = MXIO_HEAD + i * stride + c;
+      done += c;
+    }
+    u32 *a = (u32 *)mxio_frames;
+    a[0] = (u32)f, a[1] = mxio_file[f].pos, a[2] = len;
+    mx_dcache_writeback(mxio_frames, last);
+    if (mxio_call(MXIO_WRITE, mxio_frames, last) != (int)len)
+      return -1;
+    mxio_file[f].pos += len, p += len, n -= len;
+  }
+  return 0;
+}
+
+static int mxio_seek(int fd, s32 offset, int whence) {
+  int f = fd - MXIO_FD;
+  s32 base = 0;
+  if (whence == MX_FIO_SEEK_CUR)
+    base = (s32)mxio_file[f].pos;
+  else if (whence == MX_FIO_SEEK_END) {
+    volatile u32 *a = MX_UNCACHED(mxio_arg);
+    a[0] = (u32)f;
+    base = mxio_call(MXIO_SIZE, (void *)a, 16);
+    if (base < 0)
+      return base;
+  }
+  if (base + offset < 0)
+    return -1;
+  mxio_file[f].pos = (u32)(base + offset);
+  return base + offset;
+}
+
+static int mxio_close(int fd) {
+  volatile u32 *a = MX_UNCACHED(mxio_arg);
+  a[0] = (u32)(fd - MXIO_FD);
+  return mxio_call(MXIO_CLOSE, (void *)a, 16);
+}
+
+/* A program ended: what it left open */
+void mx__mxio_cleanup(void) {
+  if (mxio_up()) {
+    volatile u32 *a = MX_UNCACHED(mxio_arg);
+    a[0] = 0;
+    mxio_call(MXIO_CLOSE_ALL, (void *)a, 16);
+  }
+}
+
 /* One WRITE of n bytes that the IOP reads from pa (the CPU's view of them
    at p): the bytes before the first quadword boundary go in the call (mis,
    as ps2sdk's fioWrite), the rest the IOP takes from memory. Returns the
@@ -893,6 +1041,13 @@ int mx_fio_write(int fd, const void *data, u32 n) {
   if (vm && mx_vm_pin(s, n, 0) < 0)
     return -1;
   fio_lock();
+  if (is_mxio(fd)) {
+    r = mxio_write(fd, s, n);
+    fio_unlock();
+    if (vm)
+      mx_vm_unpin(s, n);
+    return r;
+  }
   if (n >= 256 && !mx_is_spr(s) && ((uintptr_t)s & 0xF0000000u) != 0x20000000u) {
     u32 chunk = mx__fio_write_chunk ? mx__fio_write_chunk : FIO_CHUNK;
     for (u32 done = 0; done < n && r == 0;) {
@@ -963,6 +1118,11 @@ static int fio_open_unlocked(const char *path, int flags) {
   if (fio_bind() < 0)
     return -1;
   path = fio_resolve(path);
+  if (!(flags & 0x0100 /* APPEND */) && mxio_up()) {
+    int fd = mxio_open(path, flags);
+    /* a missing file is an answer too: FILEIO would say the same */
+    return fd;
+  }
   __typeof__(op_arg) *a = MX_UNCACHED(&op_arg);
   a->flags = flags;
   u32 i = 0;
@@ -1042,14 +1202,15 @@ int mx_fio_read(int fd, void *data, u32 n) {
   fio_lock();
   u32 total = 0;
   int r = 0;
-  u32 chunk = mx__fio_read_chunk ? mx__fio_read_chunk : FIO_READ_CHUNK;
+  u32 chunk = is_mxio(fd) ? MXIO_READ_MAX : mx__fio_read_chunk ? mx__fio_read_chunk : FIO_READ_CHUNK;
   while (total < n) {
     /* at most the file server's transfer buffer a READ (16 KiB): reads it
        had to send in two pieces stalled after the first under ps2link */
     u32 len = n - total > chunk ? chunk : n - total;
     struct mx_vm_piece pc = mx_vm_first_piece(d + total, len);
     len = pc.bytes;
-    int got = fio_read1(fd, d + total, pc.addr, len);
+    int got = is_mxio(fd) ? mxio_read1(fd, d + total, pc.addr, len)
+                          : fio_read1(fd, d + total, pc.addr, len);
     if (got < 0) {
       r = total ? (int)total : got;
       pos_add(fd, -1, 0);
@@ -1104,6 +1265,11 @@ static int fio_lseek_unlocked(int fd, s32 offset, int whence) {
 int mx_fio_lseek(int fd, s32 offset, int whence) {
   fio_lock();
   int r;
+  if (is_mxio(fd)) {
+    r = mxio_seek(fd, offset, whence);
+    fio_unlock();
+    return r;
+  }
   if (whence == MX_FIO_SEEK_SET && offset >= 0 && (u32)fd < NPOS && fpos[fd] == offset)
     r = offset; /* there already */
   else {
@@ -1129,7 +1295,7 @@ static int fio_close_unlocked(int fd) {
 int mx_fio_close(int fd) {
   fio_lock();
   pos_set(fd, -1);
-  int r = fio_close_unlocked(fd);
+  int r = is_mxio(fd) ? mxio_close(fd) : fio_close_unlocked(fd);
   fio_unlock();
   return r;
 }

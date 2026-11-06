@@ -30,7 +30,8 @@ enum {
   MXIO_WRITE, /* fd, position, size; data as OPEN said; answer: bytes or < 0 */
   MXIO_SIZE,  /* fd; answer: the file's size or < 0 */
   MXIO_LOG,   /* text, to the host's console; < 0 without a host */
-  MXIO_STATS  /* answer: frames, doubles, drops, asked again (the fast path) */
+  MXIO_STATS, /* answer: frames, doubles, drops, asked again (the fast path) */
+  MXIO_CLOSE_ALL /* what a program left open */
 };
 
 #endif

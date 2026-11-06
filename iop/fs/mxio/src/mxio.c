@@ -67,8 +67,7 @@ static int do_open(int flags, const char *path) {
       rpc_out[1] = MXFAST_FRAME, rpc_out[2] = MXFAST_CHUNK;
       return fd;
     }
-    if (h != -6)
-      return h;
+    /* no host, or it went away: the driver may still have it */
   }
   int h = open(path, flags);
   if (h < 0)
@@ -157,6 +156,17 @@ static void *rpc(int fno, void *data, int size) {
       rpc_out[0] = lseek(files[fd].h, 0, 2);
       lseek(files[fd].h, (int)files[fd].pos, 0);
     }
+    break;
+  case MXIO_CLOSE_ALL:
+    for (fd = 0; fd < MXIO_FILES; fd++)
+      if (files[fd].used) {
+        if (files[fd].host)
+          FAST(close, 1)(files[fd].h);
+        else
+          close(files[fd].h);
+        files[fd].used = 0;
+      }
+    rpc_out[0] = 0;
     break;
   case MXIO_LOG:
     rpc_out[0] = fast() ? FAST(log, 5)((char *)a) : -6;
