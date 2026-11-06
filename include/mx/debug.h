@@ -25,8 +25,24 @@ void mx_debug_write(const char *s, u32 n);
    the top of the stack and a "trace:" line (EPC, ra and the likely return
    addresses on the stack), then exit with status 255. tools/symbolize.py
    turns the trace into functions and source lines. The startup installs it
-   before main. */
+   before main. Under mx-kernel (libmxk) the kernel makes the report, and
+   keeps it for mx_crash_last. */
 void mx_exception_init(void);
+
+/* What is known of a crash. what and note: text, 0 for no note; the trace as
+   in the "trace:" line. */
+#define MX_CRASH_TRACE 18
+#define MX_CRASH_NOTE 120
+struct mx_crash {
+  u32 code, epc, badvaddr, status, cause, sp, ra, ntrace;
+  u32 trace[MX_CRASH_TRACE];
+  const char *what, *note;
+};
+
+/* The report of the program that ended last, if it crashed: 1 and *c filled
+   in, its text valid until the next program. 0: it did not, or no kernel
+   (libmx). The way a shell tells what happened. */
+int mx_crash_last(struct mx_crash *c);
 
 /* The debug screen: where a program is when it hangs, on the TV, for when no
    text comes back. A background colour and 32 hex words (8 lines of 4,

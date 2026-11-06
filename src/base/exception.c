@@ -6,6 +6,7 @@
 #include <mx/bios.h>
 #include <mx/cpu.h>
 #include <mx/debug.h>
+#include <mx/kernel.h>
 #include <mx/mx.h>
 
 /* Filled in by mx__exception_vector (exception.S): the GPRs, 128 bits each,
@@ -26,6 +27,14 @@ struct mx_exception_state mx__exception_state MX_ALIGNED(16);
 /* Set by whoever sends an exception here with more to say (the VM). */
 const char *mx__exception_note;
 u8 mx__exception_stack[8192] MX_ALIGNED(16);
+/* Under a kernel: its vector, where exception.S goes at once. The program's
+   exceptions are the kernel's to report (<mx/kernel.h>). */
+void (*mx__exception_kernel)(void);
+/* The code to look for return addresses in, 0: this program's. The kernel
+   sets the program's. */
+u32 mx__text_lo, mx__text_hi;
+/* The kernel keeps the report, and may add to it. */
+void mx__crash_kept(struct mx_crash *c) __attribute__((weak));
 
 extern const u32 __text_start[], __text_end[];
 
@@ -60,26 +69,57 @@ static double fpr(const struct mx_exception_state *s, int i) {
   return f;
 }
 
-/* A return address: in .text, right after a jal or jalr and its delay slot. */
+/* A return address: in the code, right after a jal or jalr and its delay
+   slot. Code in VM is not read: a page fault here may never end, and only the
+   host's symbolize.py needs to tell. */
 static int return_address(u32 addr) {
-  if ((addr & 3) || addr < (u32)__text_start + 8 || addr > (u32)__text_end)
+  u32 lo = mx__text_hi ? mx__text_lo : (u32)__text_start;
+  u32 hi = mx__text_hi ? mx__text_hi : (u32)__text_end;
+  if ((addr & 3) || addr < lo + 8 || addr > hi)
     return 0;
+  if (!readable(addr - 8))
+    return 1;
   u32 call = *(const u32 *)(addr - 8);
   return (call >> 26) == 3 || ((call >> 26) == 0 && (call & 0x3f) == 9);
 }
 
 void mx__exception_report(void) {
+  /* a fault in the report itself: no report of that */
+  static int reporting;
+  if (reporting++)
+    mx_bios_exit(255);
   const struct mx_exception_state *s = &mx__exception_state;
   u32 code = s->cause >> 2 & 31;
   u32 sp = (u32)s->gpr[29][0];
+  static struct mx_crash c;
+  c.code = code;
+  c.epc = s->epc;
+  c.badvaddr = s->badvaddr;
+  c.status = s->status;
+  c.cause = s->cause;
+  c.sp = sp;
+  c.ra = (u32)s->gpr[31][0];
+  c.what = code < 14 ? names[code] : "?";
+  c.note = mx__exception_note;
+  c.trace[0] = s->epc;
+  c.trace[1] = c.ra;
+  c.ntrace = 2;
+  for (u32 a = sp; c.ntrace < MX_CRASH_TRACE && a < sp + 2048 && readable(a); a += 4) {
+    u32 w = *(const u32 *)a;
+    if (return_address(w))
+      c.trace[c.ntrace++] = w;
+  }
+  if (mx__crash_kept)
+    mx__crash_kept(&c);
+
   mx_ei();
   mx_debug_hold(0);
   mx_printf("\nEXCEPTION %u (%s)%s: EPC %08x BadVAddr %08x BadPAddr %08x Status %08x Cause "
             "%08x\n",
-            code, code < 14 ? names[code] : "?", s->cause >> 31 ? " in a branch delay slot" : "",
-            s->epc, s->badvaddr, s->badpaddr, s->status, s->cause);
-  if (mx__exception_note)
-    mx_printf("  %s\n", mx__exception_note);
+            code, c.what, s->cause >> 31 ? " in a branch delay slot" : "", s->epc, s->badvaddr,
+            s->badpaddr, s->status, s->cause);
+  if (c.note)
+    mx_printf("  %s\n", c.note);
   for (int i = 0; i < 32; i += 4)
     mx_printf("  %s %08x  %s %08x  %s %08x  %s %08x\n", reg_names[i], (u32)s->gpr[i][0],
               reg_names[i + 1], (u32)s->gpr[i + 1][0], reg_names[i + 2], (u32)s->gpr[i + 2][0],
@@ -100,24 +140,35 @@ void mx__exception_report(void) {
       mx_printf("    %08x: %08x %08x %08x %08x\n", a, ((const u32 *)a)[0], ((const u32 *)a)[1],
                 ((const u32 *)a)[2], ((const u32 *)a)[3]);
   }
-  mx_printf("  trace: %08x %08x", s->epc, (u32)s->gpr[31][0]);
-  int found = 0;
-  for (u32 a = sp; found < 16 && a < sp + 2048 && readable(a); a += 4) {
-    u32 w = *(const u32 *)a;
-    if (return_address(w)) {
-      mx_printf(" %08x", w);
-      found++;
-    }
-  }
+  mx_printf("  trace:");
+  for (u32 i = 0; i < c.ntrace; i++)
+    mx_printf(" %08x", c.trace[i]);
   mx_printf("\n");
   MX_TEST_END(255);
   mx_exit(255);
 }
 
 void mx_exception_init(void) {
+#ifdef MX_KERNEL
+  if (mx__kernel) {
+    mx__exception_kernel = mx__kernel->exception_vector;
+    mx__kernel->exception_setup(&mx__exception_note);
+    return;
+  }
+#endif
   for (int c = 1; c <= 3; c++)
     mx_bios_set_tlb_handler(c, mx__exception_vector);
   static const u8 common[] = {4, 5, 6, 7, 9, 10, 12, 13};
   for (u32 i = 0; i < sizeof common; i++)
     mx_bios_set_common_handler(common[i], mx__exception_vector);
+}
+
+int mx_crash_last(struct mx_crash *c) {
+#ifdef MX_KERNEL
+  if (mx__kernel)
+    return mx__kernel->crash(c);
+#else
+  (void)c;
+#endif
+  return 0;
 }

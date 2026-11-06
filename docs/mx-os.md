@@ -18,7 +18,7 @@ memory: [vm.md](vm.md).
 
 | Who | Owns |
 |---|---|
-| Kernel (mxlink) | IOP, SIF, program start and end, BIOS TLB; later files, VM, exceptions |
+| Kernel (mxlink) | IOP, SIF, program start and end, BIOS TLB, exceptions; later files, VM |
 | Program | GS, VIF, VU, DMAC, its frame loop |
 
 ## Memory (EE)
@@ -78,5 +78,6 @@ too. `tools/mxlink/package-games.sh` writes this layout.
 
 - Without the PC: start it from the shell. A test with `ps2client` connected can hide `host:` use:
   look for `open name host:` in the run's log, it must be absent.
-- Quit must return to the shell with status 0; a crash reports status 255.
+- Quit must return to the shell with status 0. A crash ends with status 255, and the shell
+  shows the kernel's report (`kernel.md`, Crashes).
 - Run on the real PS2 at 32 MiB (`/ps2-hw-test`). PCSX2 needs `PCSX2_EE=interp` for VM.

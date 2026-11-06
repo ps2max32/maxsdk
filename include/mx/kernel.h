@@ -9,11 +9,12 @@
    at the end, with a new version; libmxk reads a table of at least its own
    version, which it checks with size. */
 
+#include <mx/debug.h>
 #include <mx/sif.h>
 #include <mx/types.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 2
+#define MX_KERNEL_VERSION 3
 
 struct mxk_services {
   u32 magic;   /* MX_KERNEL_MAGIC */
@@ -41,6 +42,13 @@ struct mxk_services {
   int (*iop_read)(u32 iop, void *dst, u32 size);
   int (*iop_reset)(const char *arg);
   void (*sif_waits)(u32 out[4]);
+
+  /* exceptions (version 3): the vector for what the program's VM cannot
+     handle, the handlers set again with note read at a crash (text for the
+     report), and the report of the last program */
+  void (*exception_vector)(void);
+  void (*exception_setup)(const char **note);
+  int (*crash)(struct mx_crash *c);
 };
 
 /* The kernel's side of sif_call (src/base/sif.c). */

@@ -189,6 +189,7 @@ interrupt in slots 30–31 (it stops when interrupts stay off), and at the end b
 | `vm17_writer` | the writer thread (`clean_frames` 4, 16 frames): 400 random whole-page writes and checks of 48 pages and a second thread, the tables checked every 50; most write outs by the writer, most evictions drops; 100 KiB of pinned memory out of the pool and back |
 | `vm19_undo` | an `mx_vm_init` that fails (too few frames, no memory for the trace, no TLB misses) gives back the physical allocator's tables and the break |
 | `vm20_heaps` | the trimmed TLB (30 entries or more, no two for one address, `MX_PHYS_WIN` reads what the BIOS's mapping reads); 40 small pinned allocations in 64 KiB runs, written through `MX_UCAB`; 512 KiB pinned while 3 MiB of pages churn (pages moved and written out), sent by DMA; an asset heap's 64 KiB locked, swapped out, `mx_mem_lock_try` -1 until the pager brought it in; `mx_heap_paged`, `mx_dma_alloc` |
+| `vm21_crash` | in a program linked into VM: a break, and with `note` a store outside the VM in use: mx-kernel reports it, with the VM's note, and keeps the report. Ends with status 255 |
 | `vm18_trace` | the trace (8 frames, 64 KiB, 100 ms): known touches between marks recorded once an interval, read or written; 24 pages written and checked twice with 8 KiB TLB entries, `mx__vm_check`; the trace saved, read back and checked |
 
 Steps 1–15 pass on the PS2 (2026-11-01), step 16 on PCSX2 (not run on the PS2 yet), and Quake1 linked into VM (`MX_MEMORY=vm`, 600 demo frames at 53–72 fps) (`vm11_vmlink`'s first version, with 2650 swap

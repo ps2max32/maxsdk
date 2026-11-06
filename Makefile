@@ -83,7 +83,7 @@ $(OUT)/objk/%.c.o: $(HERE)/%.c $(HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -DMX_KERNEL=1 -c $< -o $@
 
-LIBK_SRCS = src/base/start.c src/base/sif.c
+LIBK_SRCS = src/base/start.c src/base/sif.c src/base/exception.c
 LIBK_OBJS = $(filter-out $(LIBK_SRCS:%=$(OUT)/obj/%.o),$(LIB_OBJS)) $(LIBK_SRCS:%=$(OUT)/objk/%.o)
 
 $(LIBK): $(LIBK_OBJS)
@@ -99,10 +99,9 @@ $(MX_LOADER): $(HERE)/loader/mxload.c $(LIB) $(CRT0) $(HDRS) $(MX_LD)
 	$(call link,$@,--defsym=__mx_base=$(MXLOAD_BASE) $(CRT0) $(OUT)/loader/mxload.o $(LIB))
 
 # tests linked into VM (ld/maxsdk-vm.ld), started by mxload.elf
-$(OUT)/tests/vm11_vmlink.elf $(OUT)/tests/vm12_elfpage.elf $(OUT)/tests/vm13_guards.elf \
-  $(OUT)/tests/vm16_lock.elf: MX_MEMORY = vm
-$(OUT)/tests/vm11_vmlink.elf $(OUT)/tests/vm12_elfpage.elf $(OUT)/tests/vm13_guards.elf \
-  $(OUT)/tests/vm16_lock.elf: $(LIBK)
+VM_TESTS = vm11_vmlink vm12_elfpage vm13_guards vm16_lock vm21_crash
+$(VM_TESTS:%=$(OUT)/tests/%.elf): MX_MEMORY = vm
+$(VM_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
 
 # Each test, probe or example is one C file, linked with crt0 and libmx only
 # (libmx has the compiler helper functions; no libgcc).
