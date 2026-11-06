@@ -1,7 +1,7 @@
 # IOP probes: clang for the code, the IOP gcc for what has no replacement yet (the
 # linker with ps2sdk's link script, iopfixup), as tools/mxlink does.
 #
-#   make [OUT=<dir>]    <dir>/r3000a.irx
+#   make [OUT=<dir>]    <dir>/r3000a.irx, <dir>/net.irx, <dir>/rawnet.irx
 #
 # Run with the EE side, probe/p25_iop.c (see docs/iop-core.md).
 
@@ -18,7 +18,7 @@ CFLAGS  = -D_IOP -fno-builtin -ffreestanding -G0 -O2 -Wall -Werror -Wno-unused-b
           -I$(PS2MAX_IOP_SDK)/iop/include -I$(PS2MAX_IOP_SDK)/common/include -I.
 OBJS    = $(OUT)/r3000a.o $(OUT)/r3000a_asm.o $(OUT)/imports.o
 
-all: $(OUT)/r3000a.irx
+all: $(OUT)/r3000a.irx $(OUT)/net.irx $(OUT)/rawnet.irx
 
 $(OUT)/%.o: %.c irx_imports.h
 	@mkdir -p $(OUT)
@@ -33,10 +33,24 @@ $(OUT)/imports.o: imports.lst irx_imports.h
 	{ echo '#include "irx_imports.h"'; cat $<; } > $(@:.o=.c)
 	$(CC) $(CFLAGS) -c $(@:.o=.c) -o $@
 
+$(OUT)/net.o: net_imports.h
+$(OUT)/rawnet.o: rawnet_imports.h
+
+$(OUT)/%_imports.o: %_imports.lst %_imports.h irx_imports.h
+	@mkdir -p $(OUT)
+	{ echo '#include "$*_imports.h"'; cat $<; } > $(@:.o=.c)
+	$(CC) $(CFLAGS) -c $(@:.o=.c) -o $@
+
 $(OUT)/r3000a.elf: $(OBJS)
 	$(PS2MAX_IOP_BIN)/mipsel-none-elf-gcc -T$(PS2MAX_IOP_SDK)/iop/startup/linkfile -o $@ $^ -nostdlib -dc -r
 
-$(OUT)/r3000a.irx: $(OUT)/r3000a.elf
+$(OUT)/net.elf: $(OUT)/net.o $(OUT)/net_imports.o
+	$(PS2MAX_IOP_BIN)/mipsel-none-elf-gcc -T$(PS2MAX_IOP_SDK)/iop/startup/linkfile -o $@ $^ -nostdlib -dc -r
+
+$(OUT)/rawnet.elf: $(OUT)/rawnet.o $(OUT)/rawnet_imports.o
+	$(PS2MAX_IOP_BIN)/mipsel-none-elf-gcc -T$(PS2MAX_IOP_SDK)/iop/startup/linkfile -o $@ $^ -nostdlib -dc -r
+
+$(OUT)/%.irx: $(OUT)/%.elf
 	$(PS2MAX_IOP_BIN)/mipsel-none-elf-strip --strip-unneeded --remove-section=.pdr \
 	  --remove-section=.comment --remove-section=.mdebug.abi32 --remove-section=.gnu.attributes \
 	  -o $(@:.irx=.stripped.elf) $<
