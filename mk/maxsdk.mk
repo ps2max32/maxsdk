@@ -35,7 +35,8 @@ CC       = $(LLVM)/clang
 CFLAGS   = $(COMMON_CFLAGS) --target=mips64el -mcpu=r5900 -mabi=n32 -fno-pic -mno-abicalls \
            -fomit-frame-pointer -I$(OUT)/hlsl
 CFLAGS  += $(EXTRA_CFLAGS)
-MX_LIB   = $(MAXSDK_OUT)/libmx.a
+# libmxk with MX_MEMORY=vm: under mx-kernel (docs/kernel.md)
+MX_LIB   = $(MAXSDK_OUT)/libmx$(if $(filter vm,$(MX_MEMORY)),k).a
 MX_CRT0  = $(MAXSDK_OUT)/obj/crt0.o
 # MX_MEMORY=vm: the program's own objects linked into VM (docs/vm.md),
 # started by mxlink (tools/mxlink, the PS2's loader) or mxload.elf (MX_LOADER); phys (the default):

@@ -35,6 +35,11 @@ struct mx_loader_args {
   void (*launch)(int argc, const char *args, u32 args_len, const char *swap)
       __attribute__((noreturn));
   const char *swap;
+  /* mx-kernel (<mx/kernel.h>): the table of its services for libmxk, and
+     kernel_magic MX_KERNEL_MAGIC. The fields above stay for libmx and older
+     programs. */
+  u32 kernel_magic;
+  const struct mxk_services *kernel;
 };
 
 #define MX_LOADER_RET 0x4b4c584du /* "MXLK" */

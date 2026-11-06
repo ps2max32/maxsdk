@@ -3,6 +3,7 @@
 #include <mx/bios.h>
 #include <mx/cpu.h>
 #include <mx/debug.h>
+#include <mx/kernel.h>
 #include <mx/loader.h>
 #include <mx/mx.h>
 #include <mx/vm.h>
@@ -19,12 +20,33 @@ static void (*loader_launch)(int argc, const char *args, u32 args_len, const cha
     __attribute__((noreturn));
 const char *mx__loader_swap; /* the swap file mxlink gave, or 0 */
 
+const struct mxk_services *mx__kernel;
+
 int mx_loader_mxload(void) { return by_mxload; }
 
 /* a0 is garbage when no loader passed one (the BIOS, PCSX2 -elf) */
 static int loader_args_ok(const struct mx_loader_args *l) {
   u32 p = (u32)(uintptr_t)l;
   return p && !(p & 3) && p < 0x02000000u - sizeof *l;
+}
+
+/* libmxk (MX_KERNEL): the kernel's table, if a kernel started this program */
+static void find_kernel(const struct mx_loader_args *l) {
+#ifdef MX_KERNEL
+  if (!loader_args_ok(l) || l->kernel_magic != MX_KERNEL_MAGIC)
+    return;
+  const struct mxk_services *k = l->kernel;
+  u32 p = (u32)(uintptr_t)k;
+  if (p & 3 || p >= 0x00100000u || k->magic != MX_KERNEL_MAGIC ||
+      k->version < MX_KERNEL_VERSION || k->size < sizeof *k)
+    return;
+  mx__kernel = k;
+  loader_ret = k->exit;
+  loader_launch = k->launch;
+  mx__loader_swap = k->swap();
+#else
+  (void)l;
+#endif
 }
 
 static struct mx_args *copy_mxload_args(const struct mx_args *from) {
@@ -112,6 +134,7 @@ void mx__main(void) {
   if (loader_ret && l->launch_magic == MX_LOADER_LAUNCH && l->launch &&
       !((u32)(uintptr_t)l->launch & 3) && (u32)(uintptr_t)l->launch < 0x02000000u)
     loader_launch = l->launch, mx__loader_swap = l->swap;
+  find_kernel(l);
   if (loader_args_ok(l) && l->pid == MX_LOADER_MAGIC) {
     by_mxload = 1;
     a = copy_mxload_args(&l->args);

@@ -19,6 +19,8 @@ HOSTCC     ?= cc
 LIB_SRCS := $(wildcard $(HERE)/src/*/*.c) $(wildcard $(HERE)/src/*/*.S)
 LIB_OBJS := $(patsubst $(HERE)/%,$(OUT)/obj/%.o,$(LIB_SRCS))
 LIB       = $(MX_LIB)
+# libmxk: the same but for what reaches the kernel (docs/kernel.md)
+LIBK      = $(OUT)/libmxk.a
 CRT0      = $(MX_CRT0)
 HDRS      = $(MX_HDRS)
 # the library's own VU microcode (src/*/*.vsm) goes into libmx.a
@@ -55,8 +57,8 @@ PROBES   := $(patsubst $(HERE)/probe/%.c,$(OUT)/probe/%.elf,$(wildcard $(HERE)/p
 EXAMPLES := $(patsubst %.c,$(OUT)/examples/%.elf,$(notdir $(wildcard $(HERE)/examples/*/*.c)))
 vpath %.c $(EXAMPLE_DIRS)
 
-all: $(LIB) $(CRT0) $(MX_LOADER) $(TESTS) $(PROBES) $(EXAMPLES) $(OUT)/batch/ps2batch.elf
-lib: $(LIB) $(CRT0) $(MX_LOADER)
+all: $(OUT)/libmx.a $(LIBK) $(CRT0) $(MX_LOADER) $(TESTS) $(PROBES) $(EXAMPLES) $(OUT)/batch/ps2batch.elf
+lib: $(OUT)/libmx.a $(LIBK) $(CRT0) $(MX_LOADER)
 
 $(OUT)/obj/%.c.o: $(HERE)/%.c $(HDRS)
 	@mkdir -p $(dir $@)
@@ -73,7 +75,17 @@ $(CRT0): $(HERE)/crt/crt0.S
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(LIB): $(LIB_OBJS)
+$(OUT)/libmx.a: $(LIB_OBJS)
+	rm -f $@
+	$(LLVM)/llvm-ar rcs $@ $^
+
+$(OUT)/objk/%.c.o: $(HERE)/%.c $(HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -DMX_KERNEL=1 -c $< -o $@
+
+LIBK_OBJS = $(filter-out $(OUT)/obj/src/base/start.c.o,$(LIB_OBJS)) $(OUT)/objk/src/base/start.c.o
+
+$(LIBK): $(LIBK_OBJS)
 	rm -f $@
 	$(LLVM)/llvm-ar rcs $@ $^
 
@@ -88,6 +100,8 @@ $(MX_LOADER): $(HERE)/loader/mxload.c $(LIB) $(CRT0) $(HDRS) $(MX_LD)
 # tests linked into VM (ld/maxsdk-vm.ld), started by mxload.elf
 $(OUT)/tests/vm11_vmlink.elf $(OUT)/tests/vm12_elfpage.elf $(OUT)/tests/vm13_guards.elf \
   $(OUT)/tests/vm16_lock.elf: MX_MEMORY = vm
+$(OUT)/tests/vm11_vmlink.elf $(OUT)/tests/vm12_elfpage.elf $(OUT)/tests/vm13_guards.elf \
+  $(OUT)/tests/vm16_lock.elf: $(LIBK)
 
 # Each test, probe or example is one C file, linked with crt0 and libmx only
 # (libmx has the compiler helper functions; no libgcc).
