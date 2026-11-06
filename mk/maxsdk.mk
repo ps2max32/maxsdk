@@ -37,6 +37,8 @@ CFLAGS   = $(COMMON_CFLAGS) --target=mips64el -mcpu=r5900 -mabi=n32 -fno-pic -mn
 CFLAGS  += $(EXTRA_CFLAGS)
 # libmxk with MX_MEMORY=vm or MX_KERNEL=1 (all in core): under mx-kernel
 # (docs/kernel.md)
+# BSD sockets (ee/compat/net): for a program's own CFLAGS
+MX_NET_CFLAGS = -I$(MAXSDK)/ee/compat/net
 MX_LIB   = $(MAXSDK_OUT)/libmx$(if $(filter vm,$(MX_MEMORY))$(MX_KERNEL),k).a
 MX_CRT0  = $(MAXSDK_OUT)/obj/crt0.o
 # MX_MEMORY=vm: the program's own objects linked into VM (docs/vm.md),

@@ -60,7 +60,9 @@ Retail PS2s have 32 MiB; never count on more.
   read buffers 16-byte aligned and sizes whole quadwords: anything else takes a copy on the EE.
 
 Sockets: `<mx/net.h>`, for the LAN. No call waits (`MX_NET_AGAIN`), so a game polls each frame; at most
-4 KiB moves per call. No DNS yet.
+4 KiB moves per call. A port with BSD socket code adds `$(MX_NET_CFLAGS)`: `socket`, `select`, `fcntl` and
+the rest are in libmxc (`ee/libc/net.c`), blocking unless made non-blocking. Not there: DNS (dotted
+addresses only), `MSG_PEEK`, `FIONREAD`, broadcast, and options, which are accepted and ignored.
 
 Provided for every program: Select + Start + L1 + R1 ends it (`mx_pad`); L3 + R3 toggles libgl's
 counters, off by default. Do not bind these combinations.

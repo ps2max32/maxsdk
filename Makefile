@@ -172,6 +172,7 @@ LIBMXC        = $(OUT)/libmxc.a
 LIBC_LIBS     = $(OUT)/libc/glue.c.o $(LIBMXC) $(PICOLIBC)/lib/libc.a $(LIB) $(RT_BUILTINS)
 HAVE_LIBC    := $(wildcard $(PICOLIBC)/lib/libc.a)
 
+$(OUT)/libc/net.c.o $(OUT)/libc/tests/sockets.elf: LIBC_CFLAGS += -I$(HERE)/ee/compat/net
 $(OUT)/libc/%.c.o: $(HERE)/ee/libc/%.c $(HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(LIBC_CFLAGS) -c $< -o $@
@@ -191,7 +192,7 @@ $(RT_BUILTINS): $(patsubst $(RT_DIR)/%.c,$(OUT)/rt/%.o,$(RT_SRCS))
 	$(LLVM)/llvm-ar rcs $@ $^
 
 $(LIBMXC): $(OUT)/libc/glue.c.o $(OUT)/libc/compat.c.o $(OUT)/libc/atomic.c.o $(OUT)/libc/malloc.c.o \
-           $(OUT)/libc/cxx.cc.o
+           $(OUT)/libc/cxx.cc.o $(OUT)/libc/net.c.o
 	rm -f $@
 	$(LLVM)/llvm-ar rcs $@ $^
 
