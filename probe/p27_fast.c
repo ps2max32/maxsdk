@@ -1,4 +1,4 @@
-/* mxlink's fast path (tools/mxlink/iop/mxnet/mxfast.h) on a fresh IOP: reads a
+/* mxlink's fast path (common/include/mxfast.h) on a fresh IOP: reads a
    file from ps2client serve into EE memory, past lwIP, and checks every word,
    then writes the same words to fastw.bin, to compare with it on the host.
 
@@ -12,14 +12,24 @@
 #include <mx/mx.h>
 #include <mx/sif.h>
 #include <mx/timer.h>
+#include "../common/include/mxfast.h"
 
 #define MAX 8
-#define SID 0x4D584601
 #define MIB 8u
-enum { RPC_OPEN, RPC_READ, RPC_CLOSE, RPC_LOG, RPC_STATS, RPC_WRITE, RPC_OPEN_WRITE, RPC_TIMES };
-#define DATA_AT 64u
-#define CHUNK 1408u
-#define FRAME (DATA_AT + CHUNK)
+#define SID MXFAST_SID
+#define DATA_AT MXFAST_DATA_AT
+#define CHUNK MXFAST_CHUNK
+#define FRAME MXFAST_FRAME
+enum {
+  RPC_OPEN = MXFAST_RPC_OPEN,
+  RPC_READ = MXFAST_RPC_READ,
+  RPC_CLOSE = MXFAST_RPC_CLOSE,
+  RPC_LOG = MXFAST_RPC_LOG,
+  RPC_STATS = MXFAST_RPC_STATS,
+  RPC_WRITE = MXFAST_RPC_WRITE,
+  RPC_OPEN_WRITE = MXFAST_RPC_OPEN_WRITE,
+  RPC_TIMES = MXFAST_RPC_TIMES
+};
 
 static u8 mem[512 * 1024] MX_ALIGNED(64);
 static struct {

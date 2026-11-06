@@ -9,6 +9,9 @@ and their shaders live in other repos under `ps2max/` (split 2026-10-28). Keep i
 | `libs/libmxm` | the MXM format, its converter (`tools/gltf2mxm.py`), and the PS2 side of MXM models: loading, LOD, skinning, animation, building DMA chains for an app's shader. It builds chains, never sends them. | pipeline set-up, sending, shaders |
 | `apps/model`, `apps/procgen` | the HLSL shaders, which route a model takes, sending, and app-only techniques (supersampling tiles, culling, terrain) | anything a second app would reuse: move that to `libs/libmxm` or here |
 
+Layout, as ps2sdk: the EE's code in `src/`, `include/mx/`; IOP modules in `iop/<group>/<module>/{src,include}`
+(`iop/Rules.mk` builds them); what EE and IOP share in `common/include/`.
+
 Rules for changes here:
 - Nothing in maxsdk includes or names a model format, an app, or an app's shader.
 - New hardware or pipeline features go here; model or scene logic goes to `libs/libmxm`; the look

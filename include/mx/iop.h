@@ -3,7 +3,7 @@
 
 /* IOP memory, modules and the patches of the ROM modules (ps2sdk's sbv), all
    from the EE: IOP RAM is read over SIF (RPC RDATA) and written by SIF DMA.
-   There is still no IOP code in maxsdk. Not for interrupt handlers, nor for
+   maxsdk's IOP modules are in iop/. Not for interrupt handlers, nor for
    two threads at once. */
 
 #include <mx/types.h>
