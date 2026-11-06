@@ -3,9 +3,8 @@
 
 /* What a loader passes in a0 to a program's __start (crt/crt0.S): ps2link
    ({ pid; argc; argv[16]; payload }, the pid being the address of its
-   thread id), or mxload, which puts MX_LOADER_MAGIC in place of the pid.
-   mxload (loader/mxload.c) loads a program and then jumps to it in its own
-   thread, as ps2link starts one. */
+   thread id), or mxlink, which puts MX_LOADER_MAGIC in place of the pid for
+   a program linked into VM. */
 
 #include <mx/types.h>
 
@@ -19,7 +18,7 @@ struct mx_args {
 };
 
 struct mx_loader_args {
-  u32 pid; /* ps2link: the address of its thread id; mxload: MX_LOADER_MAGIC */
+  u32 pid; /* ps2link: the address of its thread id; mxlink: MX_LOADER_MAGIC */
   struct mx_args args;
   /* mxlink (ps2max/tools/mxlink) only, after ps2link's block (programs of
      ps2sdk and older maxsdk ones do not read them): ret_magic is
@@ -45,8 +44,8 @@ struct mx_loader_args {
 #define MX_LOADER_RET 0x4b4c584du /* "MXLK" */
 #define MX_LOADER_LAUNCH 0x4e4c584du /* "MXLN" */
 
-/* 1 if the program was started by mxload (argv[0] is then the path of its
-   ELF), 0 if not. */
+/* 1 if the program has MX_LOADER_MAGIC from mxlink (argv[0] is then the path
+   of its ELF), 0 if not. */
 int mx_loader_mxload(void);
 
 /* End this program and have mxlink start another, the IOP kept: args is

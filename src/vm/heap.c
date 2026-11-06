@@ -25,13 +25,19 @@ static u8 *core_lo;    /* the core heap is [core_lo, top) */
 static u8 *core_floor; /* how far down it may grow: the break, or the frames' end */
 static u8 *top;
 
-static void heap_setup(void) {
-  if (top)
-    return;
-  brk_lo = (u8 *)(((uintptr_t)mx_heap_start() + 15) & ~(uintptr_t)15);
-  top = (u8 *)((uintptr_t)mx_heap_end() & ~(uintptr_t)15);
+static void heap_set(void *lo, void *hi) {
+  brk_lo = (u8 *)(((uintptr_t)lo + 15) & ~(uintptr_t)15);
+  top = (u8 *)((uintptr_t)hi & ~(uintptr_t)15);
   core_lo = top;
 }
+
+static void heap_setup(void) {
+  if (!top)
+    heap_set(mx_heap_start(), mx_heap_end());
+}
+
+/* In the kernel: the heap is the program's, not the kernel's. */
+void mx__heap_range(void *lo, void *hi) { heap_set(lo, hi); }
 
 static struct blk *next_blk(struct blk *b) { return (struct blk *)((u8 *)b + b->size); }
 

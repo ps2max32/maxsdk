@@ -11,7 +11,7 @@
 
 struct mx_args mx__kernel_args;
 struct mx_loader_args *mx__loader_args;
-/* mxload's arguments, copied: its memory is the heap's now */
+/* the loader's arguments, copied */
 static struct mx_args mxload_args;
 static int by_mxload;
 /* mxlink's way back (<mx/loader.h>), 0 for the BIOS's Exit */
@@ -43,7 +43,6 @@ static void find_kernel(const struct mx_loader_args *l) {
   mx__kernel = k;
   loader_ret = k->exit;
   loader_launch = k->launch;
-  mx__loader_swap = k->swap();
 #else
   (void)l;
 #endif
@@ -131,6 +130,7 @@ int mx_loader_launch(int argc, const char *args, u32 args_len, const char *swap)
 }
 
 void mx__fio_base(const char *argv0);
+void mx__kstart(void *heap_lo, void *heap_hi);
 void mx__main(void) __attribute__((noreturn));
 void mx__main(void) {
   heap_end = mx_bios_setup_heap(_end, -1);
@@ -145,14 +145,25 @@ void mx__main(void) {
       !((u32)(uintptr_t)l->launch & 3) && (u32)(uintptr_t)l->launch < 0x02000000u)
     loader_launch = l->launch, mx__loader_swap = l->swap;
   find_kernel(l);
+#ifdef MX_KERNEL
+  /* no way to go on: its memory, files and VM are the kernel's */
+  if (!mx__kernel) {
+    mx_debug_sinks(MX_SINK_SIO);
+    mx_printf("maxsdk: this program needs mx-kernel: start it with mxlink (tools/mxlink)\n");
+    mx_bios_exit(255);
+  }
+  mx__kstart(_end, heap_end);
+#endif
   if (loader_args_ok(l) && l->pid == MX_LOADER_MAGIC) {
     by_mxload = 1;
     a = copy_mxload_args(&l->args);
   } else if (a->argc == 0 && loader_args_ok(l) && l->args.argc != 0)
     a = &l->args;
 
+#ifndef MX_KERNEL
   if (a->argc > 0 && a->argv[0])
     mx__fio_base(a->argv[0]);
+#endif
   mx_debug_init();
   mx_exception_init();
   mx_vif_reset(0);
@@ -165,7 +176,7 @@ void mx__main(void) {
     static const struct mx_vm_config none;
     if (!by_mxload) {
       mx_printf("maxsdk: this program is linked into VM: start it with mxlink (the PS2's loader, "
-                "tools/mxlink) or mxload.elf\n");
+                "tools/mxlink)\n");
       mx_exit(255);
     }
     if (mx_vm_init(&mx_vm_config ? &mx_vm_config : &none) < 0 ||

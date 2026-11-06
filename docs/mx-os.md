@@ -18,7 +18,7 @@ memory: [vm.md](vm.md).
 
 | Who | Owns |
 |---|---|
-| Kernel (mxlink) | IOP, SIF, program start and end, BIOS TLB, exceptions; later files, VM |
+| Kernel (mxlink) | IOP, SIF, program start and end, TLB and VM, heaps, files, exceptions; later pad, sound |
 | Program | GS, VIF, VU, DMAC, its frame loop |
 
 ## Memory (EE)
@@ -36,7 +36,7 @@ Retail PS2s have 32 MiB; never count on more.
 
 ## Rules for a port
 
-1. **Link.** `MX_MEMORY=vm` (libmxk, 128 MiB virtual) for anything large, `phys` (libmx, 31 MiB)
+1. **Link.** `MX_MEMORY=vm` (libmxk, 128 MiB virtual) for anything large, `MX_KERNEL=1` with `phys` (libmxk, all in core), `phys` alone (libmx, 31 MiB, no VM, also without a kernel)
    otherwise. Same source for both, no `#ifdef`.
 2. **Paths are relative.** A path without a device is in the directory of the ELF, so one ELF runs
    from `host:` and `usb0:`. Never write `host:` or a device name in a game; make engine base

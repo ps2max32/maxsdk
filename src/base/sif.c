@@ -16,8 +16,7 @@
 
 /* System command IDs */
 /* libmxk (MX_KERNEL) under mx-kernel: the kernel has the one client of the
-   IOP's SIF, and the functions it offers go there (docs/kernel.md). What
-   is above them here (the file server's client) stays, for it knows VM. */
+   IOP's SIF, and the functions it offers go there (docs/kernel.md). */
 #ifdef MX_KERNEL
 #include <mx/kernel.h>
 #define KERNEL(call) \
@@ -730,6 +729,7 @@ int mx_iop_load_module(const char *path) {
 
 /* ---- tty ---------------------------------------------------------------- */
 
+#ifndef MX_KERNEL /* the kernel has the file server's client: src/base/kstubs.c */
 struct fio_write_arg {
   s32 fd;
   u32 ptr;
@@ -793,8 +793,10 @@ static int fio_bind(void) {
    with interrupts off (debug output there), which cannot wait. */
 static int fio_sema = -1;
 
+static int fio_nolock;
+
 static void fio_lock(void) {
-  if (!mx_vm_active() || !(mx_status() & (1u << 16)))
+  if (fio_nolock || !mx_vm_active() || !(mx_status() & (1u << 16)))
     return;
   if (fio_sema < 0) {
     struct {
@@ -807,9 +809,18 @@ static void fio_lock(void) {
 }
 
 static void fio_unlock(void) {
-  if (fio_sema >= 0 && mx_vm_active() && (mx_status() & (1u << 16))) {
+  if (!fio_nolock && fio_sema >= 0 && mx_vm_active() && (mx_status() & (1u << 16))) {
     mx_bios_signal_sema(fio_sema);
   }
+}
+
+/* A crash: the report goes through here, and the thread that crashed may hold
+   the lock. Another one gets a moment to finish. */
+void mx__fio_crash(void) {
+  if (fio_sema >= 0)
+    for (int i = 0; i < 100 && mx_bios_poll_sema(fio_sema) < 0; i++)
+      mx_delay_us(1000);
+  fio_nolock = 1;
 }
 
 /* The most one READ asks for: the file server's transfer buffer. */
@@ -1253,6 +1264,7 @@ int mx_fio_mkdir(const char *path, int mode) {
   return fio_path_call(FILEIO_MKDIR, path);
 }
 int mx_fio_rmdir(const char *path) { return fio_path_call(FILEIO_RMDIR, path); }
+#endif /* !MX_KERNEL */
 
 /* ---- IOP reset ---------------------------------------------------------- */
 
@@ -1269,8 +1281,6 @@ int mx_iop_reset(const char *arg) {
   if (mx__kernel) {
     int r = mx__kernel->iop_reset(arg);
     sif_epoch++;
-    for (int i = 0; i < NPOS; i++)
-      fpos[i] = -1;
     return r;
   }
 #endif
@@ -1308,8 +1318,10 @@ int mx_iop_reset(const char *arg) {
   ndeferred = 0;
   for (int i = 0; i < 32; i++)
     sregs[i] = 0;
+#ifndef MX_KERNEL
   for (int i = 0; i < NPOS; i++)
     fpos[i] = -1;
+#endif
   u32 t0 = mx_count();
   while (!(mx_bios_sif_get_reg(REG_SMFLAG) & SMFLAG_BOOTEND))
     if (mx_count() - t0 > 10u * 294912000u) /* 10 s (the counter wraps at 14.5) */

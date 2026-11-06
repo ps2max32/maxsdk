@@ -35,11 +35,12 @@ CC       = $(LLVM)/clang
 CFLAGS   = $(COMMON_CFLAGS) --target=mips64el -mcpu=r5900 -mabi=n32 -fno-pic -mno-abicalls \
            -fomit-frame-pointer -I$(OUT)/hlsl
 CFLAGS  += $(EXTRA_CFLAGS)
-# libmxk with MX_MEMORY=vm: under mx-kernel (docs/kernel.md)
-MX_LIB   = $(MAXSDK_OUT)/libmx$(if $(filter vm,$(MX_MEMORY)),k).a
+# libmxk with MX_MEMORY=vm or MX_KERNEL=1 (all in core): under mx-kernel
+# (docs/kernel.md)
+MX_LIB   = $(MAXSDK_OUT)/libmx$(if $(filter vm,$(MX_MEMORY))$(MX_KERNEL),k).a
 MX_CRT0  = $(MAXSDK_OUT)/obj/crt0.o
 # MX_MEMORY=vm: the program's own objects linked into VM (docs/vm.md),
-# started by mxlink (tools/mxlink, the PS2's loader) or mxload.elf (MX_LOADER); phys (the default):
+# started by mxlink (tools/mxlink, the PS2's loader; on PCSX2 MX_LOADER); phys (the default):
 # all in core
 MX_MEMORY ?= phys
 MX_LD_phys = $(MAXSDK)/ld/maxsdk.ld
@@ -47,8 +48,9 @@ MX_LD_phys = $(MAXSDK)/ld/maxsdk.ld
 MX_VM_TEXT ?= vm
 MX_LD_vm   = $(MAXSDK)/ld/maxsdk-vm$(if $(filter core,$(MX_VM_TEXT)),-coretext).ld
 MX_LD    = $(MX_LD_$(MX_MEMORY))
-# the loader for programs with VM segments (loader/mxload.c)
-MX_LOADER = $(MAXSDK_OUT)/mxload.elf
+# PCSX2: mx-kernel without network, for programs on libmxk. It starts what
+# host:mxload.txt says.
+MX_LOADER = $(abspath $(MAXSDK)/../../build/tools/mxlink-emu/mxlink.elf)
 MX_HDRS := $(wildcard $(MAXSDK)/include/mx/*.h $(MAXSDK)/include/mx/hw/*.h)
 # $(call link,out,objs)
 # With MX_MEMORY=vm, the objects of objs also in MX_CORE_OBJS (a library
@@ -74,6 +76,9 @@ $(MX_LIB): $(wildcard $(MAXSDK)/src/*/*) $(MX_HDRS)
 $(MX_CRT0): $(MX_LIB)
 endif
 endif
+
+$(MX_LOADER):
+	$(MAKE) -C $(MAXSDK)/../../tools/mxlink emu
 
 # ---- VU microcode -------------------------------------------------------------
 # *.vsm, assembled by llvm-mc -triple=vu: each becomes an EE object with the

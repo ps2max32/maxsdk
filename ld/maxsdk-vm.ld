@@ -1,7 +1,7 @@
 /* Linker script for maxsdk programs linked into VM (MX_MEMORY=vm in
-   mk/maxsdk.mk, docs/vm.md). Started by mxload.elf only.
+   mk/maxsdk.mk, docs/vm.md). Started by mxlink only.
 
-   Core (from 0x100000, physical, loaded by mxload): crt0, every archive
+   Core (from 0x100000, physical, loaded by mxlink): crt0, every archive
    member (libmx, libmxc, picolibc, compiler-rt), libmxc's glue, the VU
    and HLSL objects (in directories vu/ and hlsl/), and what the program marks
    MX_CORE_FN / MX_CORE_DATA (<mx/cpu.h>); VU microcode, constructors,
@@ -105,4 +105,4 @@ SECTIONS {
   PROVIDE(__stack_size = 128 * 1024);
 }
 
-ASSERT(_end <= 0x01F00000, "the core reaches mxload (MXLOAD_BASE in the Makefile)")
+ASSERT(_end <= 0x01F00000, "the core takes all memory")

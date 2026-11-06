@@ -1,5 +1,5 @@
 /* Programs linked into VM (ld/maxsdk-vm.ld): the segments at MX_VM_BASE
-   and up come from the program's ELF (argv[0], the path mxload gives),
+   and up come from the program's ELF (argv[0], the path mxlink gives),
    which stays open: once VM is on, before the constructors, their pages
    are registered with the pager (mx__vm_file_pages), and each is read when
    it is first touched. A page not written since is dropped when evicted
@@ -16,9 +16,17 @@ extern char __mx_vm_end[] __attribute__((weak));
 void mx__vm_code(void);
 int mx__vm_file_pages(int fd, u32 va, u32 filesz, u32 offset);
 
-int mx__vm_image(void) { return (uintptr_t)__mx_vm_end > (uintptr_t)__mx_vm_start; }
+/* The program's VM part: its own, or in the kernel the one it says it has. */
+static char *image_lo, *image_hi;
+void mx__vm_image_range(void *lo, void *hi) { image_lo = lo, image_hi = hi; }
 
-void *mx__vm_image_end(void) { return mx__vm_image() ? __mx_vm_end : mx_vm_base(); }
+static char *image_end(void) { return image_hi ? image_hi : __mx_vm_end; }
+
+int mx__vm_image(void) {
+  return image_hi ? image_hi > image_lo : (uintptr_t)__mx_vm_end > (uintptr_t)__mx_vm_start;
+}
+
+void *mx__vm_image_end(void) { return mx__vm_image() ? image_end() : mx_vm_base(); }
 
 struct ehdr {
   u8 ident[16];
@@ -41,7 +49,7 @@ static int bad(const char *path, const char *what) {
 }
 
 int mx__vm_load_image(const char *path) {
-  u32 end = (u32)(uintptr_t)__mx_vm_end;
+  u32 end = (u32)(uintptr_t)image_end();
   if (end - MX_VM_BASE > mx_vm_size())
     return bad(path, "the program's VM part is larger than VM (mx_vm_config: a swap file?)");
   static struct ehdr eh;

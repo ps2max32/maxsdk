@@ -12,14 +12,6 @@
 	.type mx__exception_vector, @function
 	.ent mx__exception_vector
 mx__exception_vector:
-	# under a kernel (libmxk), the kernel's own vector does all of this
-	lui $26, %hi(mx__exception_kernel)
-	lw $26, %lo(mx__exception_kernel)($26)
-	beqz $26, 0f
-	nop
-	jr $26
-	nop
-0:
 	lui $26, %hi(mx__exception_state)
 	addiu $26, $26, %lo(mx__exception_state)
 	sq $0, 0($26)

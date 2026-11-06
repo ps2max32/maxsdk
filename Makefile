@@ -3,7 +3,7 @@
 # include mk/maxsdk.mk (the flags, the link and the VU and HLSL rules).
 #
 #   make [OUT=<dir>]                        library, test, probe and example ELFs
-#   make lib                                libmx.a, crt0 and mxload.elf only
+#   make lib                                the libraries and crt0 only
 #   make test-host                          host tests (generated fields, packets)
 #   make check-deps                         fail if anything links ps2sdk
 #   make gen                                regenerate the hardware headers
@@ -16,11 +16,12 @@ OUT        ?= $(PS2MAX)/build/libs/maxsdk
 MAXSDK_OUT := $(OUT)
 HOSTCC     ?= cc
 
-LIB_SRCS := $(wildcard $(HERE)/src/*/*.c) $(wildcard $(HERE)/src/*/*.S)
+LIB_SRCS := $(filter-out %/kstubs.c %/novm.c,$(wildcard $(HERE)/src/*/*.c)) $(wildcard $(HERE)/src/*/*.S)
 LIB_OBJS := $(patsubst $(HERE)/%,$(OUT)/obj/%.o,$(LIB_SRCS))
 LIB       = $(MX_LIB)
 # libmxk: the same but for what reaches the kernel (docs/kernel.md)
 LIBK      = $(OUT)/libmxk.a
+LIBKERN   = $(OUT)/libmxkern.a
 CRT0      = $(MX_CRT0)
 HDRS      = $(MX_HDRS)
 # the library's own VU microcode (src/*/*.vsm) goes into libmx.a
@@ -57,8 +58,8 @@ PROBES   := $(patsubst $(HERE)/probe/%.c,$(OUT)/probe/%.elf,$(wildcard $(HERE)/p
 EXAMPLES := $(patsubst %.c,$(OUT)/examples/%.elf,$(notdir $(wildcard $(HERE)/examples/*/*.c)))
 vpath %.c $(EXAMPLE_DIRS)
 
-all: $(OUT)/libmx.a $(LIBK) $(CRT0) $(MX_LOADER) $(TESTS) $(PROBES) $(EXAMPLES) $(OUT)/batch/ps2batch.elf
-lib: $(OUT)/libmx.a $(LIBK) $(CRT0) $(MX_LOADER)
+all: $(OUT)/libmx.a $(LIBK) $(LIBKERN) $(CRT0) $(TESTS) $(PROBES) $(EXAMPLES) $(OUT)/batch/ps2batch.elf
+lib: $(OUT)/libmx.a $(LIBK) $(LIBKERN) $(CRT0)
 
 $(OUT)/obj/%.c.o: $(HERE)/%.c $(HDRS)
 	@mkdir -p $(dir $@)
@@ -75,7 +76,15 @@ $(CRT0): $(HERE)/crt/crt0.S
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(OUT)/libmx.a: $(LIB_OBJS)
+# Three libraries (docs/kernel.md). libmxkern: all of it, the VM too: for the
+# kernel, and the tests of the VM's inside. libmx: without the VM. libmxk: for
+# programs under the kernel, in libk below.
+VM_OBJS = $(patsubst %,$(OUT)/obj/src/vm/%.o,vm.c image.c tlb.S)
+$(OUT)/libmx.a: $(filter-out $(VM_OBJS),$(LIB_OBJS)) $(OUT)/obj/src/vm/novm.c.o
+	rm -f $@
+	$(LLVM)/llvm-ar rcs $@ $^
+
+$(LIBKERN): $(LIB_OBJS)
 	rm -f $@
 	$(LLVM)/llvm-ar rcs $@ $^
 
@@ -83,25 +92,27 @@ $(OUT)/objk/%.c.o: $(HERE)/%.c $(HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -DMX_KERNEL=1 -c $< -o $@
 
-LIBK_SRCS = src/base/start.c src/base/sif.c src/base/exception.c
-LIBK_OBJS = $(filter-out $(LIBK_SRCS:%=$(OUT)/obj/%.o),$(LIB_OBJS)) $(LIBK_SRCS:%=$(OUT)/objk/%.o)
+LIBK_SRCS = src/base/start.c src/base/sif.c src/base/kstubs.c
+# what is the kernel's: no code in libmxk
+LIBK_OUT  = src/base/start.c src/base/sif.c src/base/exception.c src/base/exception.S \
+            src/vm/vm.c src/vm/mem.c src/vm/heap.c src/vm/image.c src/vm/tlb.S
+LIBK_OBJS = $(filter-out $(LIBK_OUT:%=$(OUT)/obj/%.o),$(LIB_OBJS)) $(LIBK_SRCS:%=$(OUT)/objk/%.o)
 
 $(LIBK): $(LIBK_OBJS)
 	rm -f $@
 	$(LLVM)/llvm-ar rcs $@ $^
 
-# mxload (loader/mxload.c) is linked high and loads programs below itself.
-MXLOAD_BASE := 0x01F00000
-$(MX_LOADER): override MX_MEMORY = phys
-$(MX_LOADER): $(HERE)/loader/mxload.c $(LIB) $(CRT0) $(HDRS) $(MX_LD)
-	@mkdir -p $(OUT)/loader
-	$(CC) $(CFLAGS) -c $< -o $(OUT)/loader/mxload.o
-	$(call link,$@,--defsym=__mx_base=$(MXLOAD_BASE) $(CRT0) $(OUT)/loader/mxload.o $(LIB))
-
-# tests linked into VM (ld/maxsdk-vm.ld), started by mxload.elf
+# tests linked into VM (ld/maxsdk-vm.ld), started by mxlink (or mxlink's EMU build)
 VM_TESTS = vm11_vmlink vm12_elfpage vm13_guards vm16_lock vm21_crash
 $(VM_TESTS:%=$(OUT)/tests/%.elf): MX_MEMORY = vm
 $(VM_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
+
+# tests of the VM's inside: the VM in the program, on a bare PS2 or PCSX2
+VM_INSIDE = $(filter-out $(VM_TESTS:%=$(OUT)/tests/%.elf),$(patsubst $(HERE)/tests/ps2/%.c,$(OUT)/tests/%.elf,\
+              $(shell grep -lE 'mx_vm_|mx__vm_|mx_mem_|mx_heap_' $(HERE)/tests/ps2/*.c))) \
+            $(patsubst $(HERE)/probe/%.c,$(OUT)/probe/%.elf,$(shell grep -lE 'mx_vm_|mx__vm_' $(HERE)/probe/*.c))
+$(VM_INSIDE): LIB = $(LIBKERN)
+$(VM_INSIDE): $(LIBKERN)
 
 # Each test, probe or example is one C file, linked with crt0 and libmx only
 # (libmx has the compiler helper functions; no libgcc).

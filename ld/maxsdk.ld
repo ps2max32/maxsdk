@@ -6,8 +6,7 @@ ENTRY(__start)
 /* EE main memory below 0x100000 is the kernel's and the loader's (ps2link
    at 0x88000 - 0x100000); the kernel puts the stack at the top of memory
    (__stack -1), the heap is from _end up to it. A program linked with
-   --defsym=__mx_base=<address> starts there instead (mxload, which loads
-   programs below itself). One linked with --defsym=__mx_top=<address> also
+   --defsym=__mx_base=<address> starts there instead. One linked with --defsym=__mx_top=<address> also
    ends there, its stack just below it: a resident program that leaves the
    memory above to others (mxlink has a script of its own). The stack's size
    is 128 KiB, or --defsym=__mx_stack_size=<bytes> (a --defsym of

@@ -17,7 +17,7 @@ void mx_irq_dmac(int ch, mx_irq_fn fn, void *arg);
 void mx_irq_intc(int cause, mx_irq_fn fn, void *arg);
 
 /* Disables and removes every slot's BIOS handler, for a program that hands
-   the machine to another (mxload). */
+   the machine to another (a loader). */
 void mx_irq_exit(void);
 
 /* Number of times each slot ran (for tests and traces). */

@@ -6,7 +6,6 @@
 #include <mx/bios.h>
 #include <mx/cpu.h>
 #include <mx/debug.h>
-#include <mx/kernel.h>
 #include <mx/mx.h>
 
 /* Filled in by mx__exception_vector (exception.S): the GPRs, 128 bits each,
@@ -27,9 +26,6 @@ struct mx_exception_state mx__exception_state MX_ALIGNED(16);
 /* Set by whoever sends an exception here with more to say (the VM). */
 const char *mx__exception_note;
 u8 mx__exception_stack[8192] MX_ALIGNED(16);
-/* Under a kernel: its vector, where exception.S goes at once. The program's
-   exceptions are the kernel's to report (<mx/kernel.h>). */
-void (*mx__exception_kernel)(void);
 /* The code to look for return addresses in, 0: this program's. The kernel
    sets the program's. */
 u32 mx__text_lo, mx__text_hi;
@@ -149,13 +145,6 @@ void mx__exception_report(void) {
 }
 
 void mx_exception_init(void) {
-#ifdef MX_KERNEL
-  if (mx__kernel) {
-    mx__exception_kernel = mx__kernel->exception_vector;
-    mx__kernel->exception_setup(&mx__exception_note);
-    return;
-  }
-#endif
   for (int c = 1; c <= 3; c++)
     mx_bios_set_tlb_handler(c, mx__exception_vector);
   static const u8 common[] = {4, 5, 6, 7, 9, 10, 12, 13};
@@ -163,12 +152,8 @@ void mx_exception_init(void) {
     mx_bios_set_common_handler(common[i], mx__exception_vector);
 }
 
+/* only a kernel keeps a report */
 int mx_crash_last(struct mx_crash *c) {
-#ifdef MX_KERNEL
-  if (mx__kernel)
-    return mx__kernel->crash(c);
-#else
   (void)c;
-#endif
   return 0;
 }

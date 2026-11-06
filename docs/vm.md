@@ -40,11 +40,9 @@ virtual memory at 0x0800_0000, in 32 KiB pages held in the physical memory left 
   12.0 fps with its code in VM, 12.6 in core; 14.0 against 3.8 million refills in 80 s of
   `timedemo four` (with the code in VM 27% of them were code, and its entries pushed the
   data's out of the TLB), and 591 against 671 swap ins (2.2 MiB fewer frames).
-* Started by mxlink, the PS2's loader (`ps2max/tools/mxlink`: `execee host:app.elf args...`), which
-  loads the core segments the same way, or by `mxload.elf host:app.elf args...` (`loader/mxload.c`,
-  linked at 0x01F0_0000; under plain ps2link, and on PCSX2 with `host:mxload.txt`):
-  it loads the core segments itself, leaves the VM ones, and jumps to the program in its own
-  thread, argv[0] the program's path. The start-up turns VM on (`mx_vm_config`, or no swap
+* Started by mxlink, the PS2's loader (`ps2max/tools/mxlink`: `execee host:app.elf args...`; on
+  PCSX2 its EMU build, `kernel.md`): it loads the core segments itself, leaves the VM ones, and
+  starts the program in its own thread, argv[0] the program's path. The start-up turns VM on (`mx_vm_config`, or no swap
   file and every frame), opens argv[0] and registers the VM segments' pages with the pager
   (`src/vm/image.c`), and starts the VM heap after them. Started otherwise, the program stops
   with a message.
@@ -179,8 +177,7 @@ interrupt in slots 30–31 (it stops when interrupts stay off), and at the end b
 | `vm7_swap` | paging through `host:`: 32 frames for 96 pages, random touches, two threads faulting |
 | `vm8_dma` | DMA from and to VM with every frame in use: scratchpad, VIF1 and GIF scatter-gather, `MX_VM_PIN_DMA` (the gather), queue unpin, fio |
 | `vm9_pins` | 200 gathers of 1–4 pages at random places with every frame in use, the tables and the TLB checked after each (`mx__vm_check`: no two TLB entries match one address) |
-| `vm10_mxload` | started by `mxload.elf` (`loader/mxload.c`), a physical program: argv (argv[0] its own path), .data, .rodata and a 256 KiB .bss, interrupts, `host:` I/O after the hand-over. Run as `mxload.elf host:vm10_mxload.elf a bc`; on PCSX2, which passes no arguments, they are in `host:mxload.txt` |
-| `vm11_vmlink` | a program linked into VM (`MX_MEMORY=vm`, `ld/maxsdk-vm.ld`), started by mxload, with 16 frames and a swap file: its own code and data in VM, maxsdk and `MX_CORE_FN`/`MX_CORE_DATA` in core, core calling VM, four functions on pages of their own at one I-cache index called between rounds of heap writes (their frames reused for each other's code), a thread whose function is in VM |
+| `vm11_vmlink` | a program linked into VM (`MX_MEMORY=vm`, `ld/maxsdk-vm.ld`), started by mxlink, with 16 frames and a swap file: its own code and data in VM, maxsdk and `MX_CORE_FN`/`MX_CORE_DATA` in core, core calling VM, four functions on pages of their own at one I-cache index called between rounds of heap writes (their frames reused for each other's code), a thread whose function is in VM |
 | `vm12_elfpage` | a program linked into VM paged from its ELF: few pages read at `main`, a 128 KiB table and a 64 KiB array read when touched, evicted and read from the ELF again, half the array written and then from the swap file |
 | `vm13_guards` | in a program linked into VM, `MX_CORE_FN` handlers with `MX_CORE_DATA` data run (a timer, the vblank start); each guard refuses a VM handler or argument (with a test hook instead of the report): timer, INTC, DMAC, SIF server, a DMA queue's `on_done` |
 | `vm14_mapfile` | a 300 KiB file mapped with 8 frames and no swap file: in the file window, read twice (read again, dropped, never written out), random reads, a DMA pin and a VIF1 transfer of mapped data, a write pin refused, `mx_fio_write` from the mapping, two files mapped, unmapped and mapped again at the same places. `vm14_mapfile.elf store`: a store into the mapping, which ends the program (status 255) |

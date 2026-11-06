@@ -23,7 +23,7 @@ struct mx_sif_client {
 int mx_sif_init(void);
 int mx_sif_ready(void);
 /* Removes the SIF0 handler, for a program that hands the machine to another
-   (mxload). SIF0 stays on (ps2link's handler needs it); the IOP still has our
+   (a loader). SIF0 stays on (ps2link's handler needs it); the IOP still has our
    receive buffer until the next program's mx_sif_init sends its own. */
 void mx_sif_exit(void);
 /* 1 if c is bound to a server of the IOP as it runs now: a binding made
