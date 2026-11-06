@@ -3,7 +3,7 @@
 #
 #   make [OUT=<dir>]    <dir>/*.irx
 
-SUBDIRS = tcpip/mxnet fs/mxio
+SUBDIRS = tcpip/mxnet tcpip/mxsock fs/mxio
 
 all: $(SUBDIRS)
 $(SUBDIRS):

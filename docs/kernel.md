@@ -39,7 +39,7 @@ of at least its own version.
 | IOP | `<mx/iop.h>`, `<mx/sif.h>` | over the kernel's SIF |
 | Pad, sound | `<mx/pad.h>`, `<mx/snd.h>` | program's own, over the kernel's SIF |
 | Threads | `<mx/thread.h>`, `<mx/sched.h>` | program's own |
-| Network | to be defined | |
+| Network | `<mx/net.h>` | a service on the IOP, `iop/tcpip/mxsock`, loaded by mxlink when it is on the card; closed when a program ends |
 
 The program's first call gives the kernel its core memory after `_end` and its VM part;
 the heaps and the program break work in those. The kernel's VM state is cleared by the

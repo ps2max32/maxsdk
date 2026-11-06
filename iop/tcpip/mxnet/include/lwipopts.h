@@ -112,6 +112,10 @@
  * MEMP_NUM_NETCONN: the number of struct netconns.
  * (only needed if you use the sequential API, like api_lib.c)
  */
+/* lwIP's defaults are 5 and 4, and mxlink's own users take all four UDP ones:
+   ps2link, udptty, DNS and the fast path. Programs need sockets too. */
+#define MEMP_NUM_TCP_PCB       16
+#define MEMP_NUM_UDP_PCB       16
 #define MEMP_NUM_NETCONN       (MEMP_NUM_TCP_PCB+MEMP_NUM_UDP_PCB)
 
 /**
