@@ -6,11 +6,11 @@ hardware facts are in [docs/](docs/README.md).
 
 ```
 make                 # libmx.a, crt0.o, tests/*.elf, probe/*.elf (clang, ps2max build/libs/maxsdk)
-make picolibc        # picolibc 1.8.9 (checkout + libc/picolibc-r5900.patch) for the R5900
+make picolibc        # picolibc 1.8.9 (checkout + ee/libc/picolibc-r5900.patch) for the R5900
 make libc            # libmxc.a, librt.a and the C/C++ tests
 make test-host       # host tests: generated fields, packet bytes
 make check-deps      # fails if anything references ps2sdk
-make gen             # regenerate include/mx/hw/*.h, include/mx/bios.h, src/base/syscalls.S
+make gen             # regenerate ee/include/mx/hw/*.h, ee/include/mx/bios.h, ee/src/base/syscalls.S
 ```
 
 VU programs are HLSL (`examples/*/*.hlsl`, `tests/ps2/*.hlsl`, [docs/hlsl.md](docs/hlsl.md)).
@@ -78,19 +78,19 @@ the PS2; the measurements are in `docs/`. maxsdk is built with clang only.
 
 | Path | |
 |---|---|
-| `include/mx/` | public headers; `hw/` is generated from `gen/hw_desc.py` |
-| `src/base/` | syscall stubs, startup, mini C runtime, printf, SIF client (tty, files, IOP modules), cache ops; IOP memory over SIF and the patches of the ROM modules, after ps2sdk's sbv (`<mx/iop.h>`, `iop.c`) |
-| `src/irq/`, `src/dma/` | interrupt dispatcher, DMA channels and the DMA engine |
-| `src/pkt/`, `src/gs/` | DMA/VIF/GIF packets, chains (`<mx/chain.h>`: built once, sent or called many times), GS setup and interrupts, the VIF packets of HLSL programs and their mesh chains (`shader.c`) |
-| `src/vu/` | VU control, kernels and streaming |
-| `src/vm/` | optional virtual memory (`<mx/vm.h>`, [docs/vm.md](docs/vm.md)): up to 128 MiB in 32 KiB pages, a swap file through the IOP; the core heap (`mx_core_alloc`, `mx_dma_alloc`) and the program break |
-| `src/gs/video.c`, `rt.c`, `display.c` | video modes (`<mx/video.h>`), render targets in either GS context, also read as textures (`<mx/rt.h>`), what the two read circuits show and how they merge, per frame (`<mx/display.h>`) |
-| `src/gs/frame3.c`, `src/vu/vu0r.c`, `vu0scei.vsm` | a second frame stream of GS packets over PATH3 next to VU1's (`mx_frame3_*` in `<mx/frame.h>`, GS context 2); the SCEI renderer on the EE and VU0 fed through VF registers into it (`<mx/vu0r.h>`) |
-| `src/gs/hud.c`, `src/vu/render.vsm` | on-screen text and boxes (`<mx/hud.h>`); the VU1 render kernel of the frame pipeline (`render_vu`) |
-| `src/gs/tex.c` | textures with MIPMAP levels (`<mx/tex.h>`): the level layout, TEX0/TEX1/MIPTBP of either context, uploads, K from the texel density, levels made by the GS for render targets |
-| `src/gs/vram.c`, `src/gs/vcache.c` | GS memory by pages, one owner each (`<mx/vram.h>`: render targets through `mx_vram_alloc`, the cache, the application); GS memory as a cache of textures and buffers by key (`<mx/vcache.h>`): levels placed one by one (pages, or blocks in shared pages), eviction by cost (in STREAM by next use: textures done for the frame, by their uses against the frame before, go before those still to come), or in ring order; an entry's small pieces placed together; T8 textures in the top byte of 24-bit buffers as T8H (`mx_vcache_hpages`), with fences per mode (STREAM, REPLAY, ASYNC) |
-| `src/gs/frame.c`, `src/sched/`, `src/thread/` | the render pipeline, the scheduler, threads |
-| `libc/`, `compat/ps2sdk/` | picolibc glue, C++ runtime, atomics; the ps2sdk headers bench needs |
+| `ee/include/mx/` | public headers; `hw/` is generated from `ee/gen/hw_desc.py` |
+| `ee/src/base/` | syscall stubs, startup, mini C runtime, printf, SIF client (tty, files, IOP modules), cache ops; IOP memory over SIF and the patches of the ROM modules, after ps2sdk's sbv (`<mx/iop.h>`, `iop.c`) |
+| `ee/src/irq/`, `ee/src/dma/` | interrupt dispatcher, DMA channels and the DMA engine |
+| `ee/src/pkt/`, `ee/src/gs/` | DMA/VIF/GIF packets, chains (`<mx/chain.h>`: built once, sent or called many times), GS setup and interrupts, the VIF packets of HLSL programs and their mesh chains (`shader.c`) |
+| `ee/src/vu/` | VU control, kernels and streaming |
+| `ee/src/vm/` | optional virtual memory (`<mx/vm.h>`, [docs/vm.md](docs/vm.md)): up to 128 MiB in 32 KiB pages, a swap file through the IOP; the core heap (`mx_core_alloc`, `mx_dma_alloc`) and the program break |
+| `ee/src/gs/video.c`, `rt.c`, `display.c` | video modes (`<mx/video.h>`), render targets in either GS context, also read as textures (`<mx/rt.h>`), what the two read circuits show and how they merge, per frame (`<mx/display.h>`) |
+| `ee/src/gs/frame3.c`, `ee/src/vu/vu0r.c`, `vu0scei.vsm` | a second frame stream of GS packets over PATH3 next to VU1's (`mx_frame3_*` in `<mx/frame.h>`, GS context 2); the SCEI renderer on the EE and VU0 fed through VF registers into it (`<mx/vu0r.h>`) |
+| `ee/src/gs/hud.c`, `ee/src/vu/render.vsm` | on-screen text and boxes (`<mx/hud.h>`); the VU1 render kernel of the frame pipeline (`render_vu`) |
+| `ee/src/gs/tex.c` | textures with MIPMAP levels (`<mx/tex.h>`): the level layout, TEX0/TEX1/MIPTBP of either context, uploads, K from the texel density, levels made by the GS for render targets |
+| `ee/src/gs/vram.c`, `ee/src/gs/vcache.c` | GS memory by pages, one owner each (`<mx/vram.h>`: render targets through `mx_vram_alloc`, the cache, the application); GS memory as a cache of textures and buffers by key (`<mx/vcache.h>`): levels placed one by one (pages, or blocks in shared pages), eviction by cost (in STREAM by next use: textures done for the frame, by their uses against the frame before, go before those still to come), or in ring order; an entry's small pieces placed together; T8 textures in the top byte of 24-bit buffers as T8H (`mx_vcache_hpages`), with fences per mode (STREAM, REPLAY, ASYNC) |
+| `ee/src/gs/frame.c`, `ee/src/sched/`, `ee/src/thread/` | the render pipeline, the scheduler, threads |
+| `libc/`, `ee/compat/ps2sdk/` | picolibc glue, C++ runtime, atomics; the ps2sdk headers bench needs |
 | `crt/`, `ld/` | crt0 and the linker script |
 | `tests/host/`, `tests/ps2/` | host tests, PCSX2/PS2 tests |
 | `probe/` | one ELF per hardware question; results go to `docs/` |
@@ -104,7 +104,7 @@ the PS2; the measurements are in `docs/`. maxsdk is built with clang only.
 |---|---|
 | D0 | Name `maxsdk`, prefix `mx_`, headers `<mx/…>`; own repo in `generic/llvm/maxsdk/` |
 | D1 | C11, static inline headers + small .c files; assembly only in crt0, stubs and interrupt entry |
-| D2 | One description file (`gen/hw_desc.py`) → generated headers, syscall stubs and host tests (committed) |
+| D2 | One description file (`ee/gen/hw_desc.py`) → generated headers, syscall stubs and host tests (committed) |
 | D3 | Interrupts through BIOS dispatch with one SDK dispatcher per cause; polling in hot loops; own level-1 handler only if the measured gap is too large |
 | D4 | Fence counters bumped by the interrupt handlers; an event is a (fence, value) pair |
 | D5 | Packet builder with checks for general use, inline cursor emitters for hot loops, constant packets for static chains |

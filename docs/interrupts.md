@@ -1,7 +1,7 @@
 # Interrupts
 
 Measured on the PS2 (2026-10-23) with BIOS dispatch (AddDmacHandler/AddIntcHandler through maxsdk's
-dispatcher, `src/irq/irq.c`). Cycles are EE cycles (294.912 MHz), min / median of 8–16 runs.
+dispatcher, `ee/src/irq/irq.c`). Cycles are EE cycles (294.912 MHz), min / median of 8–16 runs.
 
 | Fact | Value | Conditions | Source |
 |---|---|---|---|

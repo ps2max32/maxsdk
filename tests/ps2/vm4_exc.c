@@ -1,6 +1,6 @@
 /* VM step 4: from an exception to thread code and back, as a page fault
    that needs the swap file goes, but without the TLB: a break instruction
-   enters the VM's exception vector (src/vm/tlb.S, at EXL = 1), which only
+   enters the VM's exception vector (ee/src/vm/tlb.S, at EXL = 1), which only
    saves the registers and sends the thread on to the slow path in thread
    code (mx__vm_slow) on its own stack; that calls on_break() here, which
    may do host: I/O, then resumes after the break by the VM's syscall.

@@ -1,4 +1,4 @@
-/* Chains (<mx/chain.h>) and mesh chains (src/gs/shader.c): tags, overflow,
+/* Chains (<mx/chain.h>) and mesh chains (ee/src/gs/shader.c): tags, overflow,
    and a mesh chain holding the same bytes as the draw's batches one by
    one. */
 

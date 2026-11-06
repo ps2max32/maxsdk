@@ -1,4 +1,4 @@
-/* Programs linked into VM (ld/maxsdk-vm.ld): the segments at MX_VM_BASE
+/* Programs linked into VM (ee/ld/maxsdk-vm.ld): the segments at MX_VM_BASE
    and up come from the program's ELF (argv[0], the path mxlink gives),
    which stays open: once VM is on, before the constructors, their pages
    are registered with the pager (mx__vm_file_pages), and each is read when

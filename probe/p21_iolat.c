@@ -4,7 +4,7 @@
    then while a sound stream plays. The VM pager's swap transfers are such
    calls (docs/vm.md, "Costs"): a swap in a seek and the READs of 32 KiB, a
    write out a seek and a WRITE.
-   A 32 KiB READ is one call here (mx__fio_read_chunk, src/base/sif.c), not
+   A 32 KiB READ is one call here (mx__fio_read_chunk, ee/src/base/sif.c), not
    the two of 16 KiB that mx_fio_read makes: its data is checked, as such
    reads once stalled under ps2link. A third run waits spinning
    (mx__sif_spin), as the SIF layer did before its waits slept. */

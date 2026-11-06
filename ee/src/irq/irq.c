@@ -29,8 +29,8 @@ static int dmac_entry(int ch, void *a, void *addr) {
 volatile u32 mx__irq_epc;
 
 /* the SDK's own work at each vblank start, next to the slot's handler
-   (the SIF waits' timeouts, src/base/sif.c; the VM trace's sweeps,
-   src/vm/vm.c) */
+   (the SIF waits' timeouts, ee/src/base/sif.c; the VM trace's sweeps,
+   ee/src/vm/vm.c) */
 static void (*vbon_hook[2])(void);
 
 static int intc_entry(int cause, void *a, void *addr) {

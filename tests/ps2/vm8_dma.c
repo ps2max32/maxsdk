@@ -13,7 +13,7 @@
    31.
    Slots 28 and 29 (if not blank): the VM, or a wait for the IOP, found
    interrupts off where they must be on (where << 24 | Status; see
-   mx__vm_irq_lost in src/vm/vm.c).
+   mx__vm_irq_lost in ee/src/vm/vm.c).
      1 mx_vm_init with host:vm8swap.bin, then 128 pages written (the frames
        full, half the pages in the file)
      2 12 KiB over a page boundary to the scratchpad and back (pinned for

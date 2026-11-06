@@ -1,5 +1,5 @@
 /* VM step 12: a program linked into VM whose pages come from its ELF when
-   first touched (src/vm/image.c, the pager's file_in), not at the start.
+   first touched (ee/src/vm/image.c, the pager's file_in), not at the start.
    Run as
      run.sh mxload.elf 60 host:vm12_elfpage.elf
    (PCSX2, with the EE interpreter: host:mxload.txt holding

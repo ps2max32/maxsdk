@@ -1,5 +1,8 @@
-/* Linker script for maxsdk programs linked into VM (MX_MEMORY=vm in
-   mk/maxsdk.mk, docs/vm.md). Started by mxlink only.
+/* Linker script for maxsdk programs linked into VM with their code in
+   core (MX_MEMORY=vm MX_VM_TEXT=core in mk/maxsdk.mk, docs/vm.md): as
+   maxsdk-vm.ld, but all text is core, so the code takes no VM TLB entries
+   and is never paged (it takes as many frames from the pager). Started by
+   mxlink only.
 
    Core (from 0x100000, physical, loaded by mxlink): crt0, every archive
    member (libmx, libmxc, picolibc, compiler-rt), libmxc's glue, the VU
@@ -8,7 +11,7 @@
    packets and MX_DMA_LINES buffers wherever they come from.
    VM (from MX_VM_BASE, 0x0800_0000): the rest of the program's own objects,
    text and rodata in one segment, data and bss in another, each starting
-   on a page (32 KiB). The program's start-up (src/vm/image.c) turns VM on
+   on a page (32 KiB). The program's start-up (ee/src/vm/image.c) turns VM on
    and reads them from the ELF (argv[0]); the VM heap starts after them.
    jal reaches between the two (one 256 MiB region). */
 
@@ -37,6 +40,7 @@ SECTIONS {
     */vu/*.o(.text .text.*)
     */hlsl/*.o(.text .text.*)
     *(.text.mx.core .text.mx.core.*)
+    *(.text .text.*)
     __text_end = .;
   } >ram :text
 
@@ -88,11 +92,10 @@ SECTIONS {
   _end = .;
 
   /* VM: the program's own objects */
-  .vm.text ORIGIN(vm) : {
+  .vm.rodata ORIGIN(vm) : {
     __mx_vm_start = .;
-    *(.text .text.*)
+    *(.rodata .rodata.*) *(.rdata)
   } >vm :vmtext
-  .vm.rodata : ALIGN(128) { *(.rodata .rodata.*) *(.rdata) } >vm :vmtext
   .vm.data : ALIGN(32768) { *(.data .data.*) } >vm :vmdata
   .vm.bss (NOLOAD) : ALIGN(128) { *(.bss .bss.*) *(COMMON) } >vm :vmdata
   __mx_vm_end = ALIGN(32768);

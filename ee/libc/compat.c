@@ -1,4 +1,4 @@
-/* The few ps2sdk EE calls that bench uses (the headers in compat/ps2sdk;
+/* The few ps2sdk EE calls that bench uses (the headers in ee/compat/ps2sdk;
    D10a). */
 
 #include <timer.h>

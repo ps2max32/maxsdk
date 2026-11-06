@@ -160,7 +160,7 @@ void mx_frame_present(void);
 
 /* ---- shaders (HLSL vertex programs, PLAN_PROCGEN) ---------------------------- */
 
-/* A VU1 render program compiled from an HLSL vertex shader (include/vu.hlsli):
+/* A VU1 render program compiled from an HLSL vertex shader (ee/include/vu.hlsli):
    per vertex it reads one quadword per input and writes nreg GIF registers.
    Each input is its own stream in memory, in its UNPACK format, so position,
    normal and colour can each take as few bytes as they need. */

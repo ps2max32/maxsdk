@@ -57,7 +57,7 @@ Out t3_move(In v) {
   time.
 - **Outputs** (`Out`) are GIF registers, written in the order of the struct: here RGBAQ, then
   XYZ2, the same as tutorial 2's PACKED packets.
-- **`vu::ftoi4`** (`include/vu.hlsli`) converts to the 12.4 fixed point of XYZ2: times 16,
+- **`vu::ftoi4`** (`ee/include/vu.hlsli`) converts to the 12.4 fixed point of XYZ2: times 16,
   as integers.
 
 Floats are the VU's strength. `int` and `uint` are 16 bits on the VU (its integer registers),

@@ -30,7 +30,7 @@ MAXSDK_OUT ?= $(PS2MAX)/build/libs/maxsdk
 # finite math; without the flag it calls soft-float helpers (not in libmx).
 # -fno-math-errno: the math functions do not set errno, so sqrtf is sqrt.s.
 COMMON_CFLAGS = -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter -ffreestanding \
-                -fno-common -ffinite-math-only -fno-math-errno -I$(MAXSDK)/include -G0
+                -fno-common -ffinite-math-only -fno-math-errno -I$(MAXSDK)/ee/include -G0
 CC       = $(LLVM)/clang
 CFLAGS   = $(COMMON_CFLAGS) --target=mips64el -mcpu=r5900 -mabi=n32 -fno-pic -mno-abicalls \
            -fomit-frame-pointer -I$(OUT)/hlsl
@@ -43,19 +43,19 @@ MX_CRT0  = $(MAXSDK_OUT)/obj/crt0.o
 # started by mxlink (tools/mxlink, the PS2's loader; on PCSX2 MX_LOADER); phys (the default):
 # all in core
 MX_MEMORY ?= phys
-MX_LD_phys = $(MAXSDK)/ld/maxsdk.ld
+MX_LD_phys = $(MAXSDK)/ee/ld/maxsdk.ld
 # MX_VM_TEXT=core (with MX_MEMORY=vm): the program's code stays core
 MX_VM_TEXT ?= vm
-MX_LD_vm   = $(MAXSDK)/ld/maxsdk-vm$(if $(filter core,$(MX_VM_TEXT)),-coretext).ld
+MX_LD_vm   = $(MAXSDK)/ee/ld/maxsdk-vm$(if $(filter core,$(MX_VM_TEXT)),-coretext).ld
 MX_LD    = $(MX_LD_$(MX_MEMORY))
 # PCSX2: mx-kernel without network, for programs on libmxk. It starts what
 # host:mxload.txt says.
 MX_LOADER = $(abspath $(MAXSDK)/../../build/tools/mxlink-emu/mxlink.elf)
-MX_HDRS := $(wildcard $(MAXSDK)/include/mx/*.h $(MAXSDK)/include/mx/hw/*.h)
+MX_HDRS := $(wildcard $(MAXSDK)/ee/include/mx/*.h $(MAXSDK)/ee/include/mx/hw/*.h)
 # $(call link,out,objs)
 # With MX_MEMORY=vm, the objects of objs also in MX_CORE_OBJS (a library
 # linked as objects, e.g. libgl's) stay core: they are linked from an
-# archive of their own ($(out:.elf=.core.a)), and ld/maxsdk-vm.ld keeps
+# archive of their own ($(out:.elf=.core.a)), and ee/ld/maxsdk-vm.ld keeps
 # archive members core.
 link_objs = $(filter-out $(MX_CORE_OBJS),$(2)) --whole-archive $(1:.elf=.core.a) --no-whole-archive
 link     = $(if $(filter vm,$(MX_MEMORY)),$(if $(MX_CORE_OBJS),rm -f $(1:.elf=.core.a) && \
@@ -68,10 +68,10 @@ ifneq ($(MAXSDK_OUT),$(OUT))
 # one make of maxsdk for both, not two at once under -j: a grouped target
 # (&:, GNU make 4.3), or before 4.3 the crt0 made with the library
 ifneq ($(filter grouped-target,$(.FEATURES)),)
-$(MX_LIB) $(MX_CRT0) &: $(wildcard $(MAXSDK)/src/*/*) $(MX_HDRS)
+$(MX_LIB) $(MX_CRT0) &: $(wildcard $(MAXSDK)/ee/src/*/*) $(MX_HDRS)
 	$(MAKE) -C $(MAXSDK) OUT=$(MAXSDK_OUT) lib
 else
-$(MX_LIB): $(wildcard $(MAXSDK)/src/*/*) $(MX_HDRS)
+$(MX_LIB): $(wildcard $(MAXSDK)/ee/src/*/*) $(MX_HDRS)
 	$(MAKE) -C $(MAXSDK) OUT=$(MAXSDK_OUT) lib
 $(MX_CRT0): $(MX_LIB)
 endif
@@ -102,7 +102,7 @@ $(OUT)/vu/%.o: $(OUT)/vu/%.bin
 	$(CC) $(CFLAGS) -c $(@:.o=.S) -o $@
 
 # ---- HLSL programs --------------------------------------------------------------
-# include/vu.hlsli: clang's HLSL for SPIR-V, then opt and llc for the VU
+# ee/include/vu.hlsli: clang's HLSL for SPIR-V, then opt and llc for the VU
 # (VUHLSLAdapter, VUEntryLowering); the layout header <name>.h from section
 # .vu.header, wrapped like the microcode above. HLSL_VU0 lists the programs
 # for VU0; the others run on VU1. (-Wno-deprecated-builtins: clang's own HLSL
@@ -122,10 +122,10 @@ HLSL_HDRS     = $(patsubst %,$(OUT)/hlsl/%.h,$(HLSL_NAMES))
 vpath %.hlsl $(HLSL_DIRS)
 VU_CPU        = $(if $(filter $*,$(HLSL_VU0)),vu0,vu1)
 
-$(OUT)/hlsl/%.spv.ll: %.hlsl $(MAXSDK)/include/vu.hlsli $(LLVM)/clang
+$(OUT)/hlsl/%.spv.ll: %.hlsl $(MAXSDK)/ee/include/vu.hlsli $(LLVM)/clang
 	@mkdir -p $(dir $@)
 	$(LLVM)/clang -cc1 -triple spirv-unknown-vulkan1.3-library -x hlsl -emit-llvm -O2 \
-	  -finclude-default-header -I$(MAXSDK)/include -Wno-deprecated-builtins $< -o $@
+	  -finclude-default-header -I$(MAXSDK)/ee/include -Wno-deprecated-builtins $< -o $@
 
 $(OUT)/hlsl/%.vu.ll: $(OUT)/hlsl/%.spv.ll $(LLVM)/opt
 	$(LLVM)/opt -mtriple=vu -O2 -vu-cpu=$(VU_CPU) $(VU_OPT_FLAGS) $< -S -o $@

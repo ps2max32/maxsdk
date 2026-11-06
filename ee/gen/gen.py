@@ -141,7 +141,7 @@ def main():
     write("include/mx/hw/formats.h", gen_formats())
     write("include/mx/bios.h", gen_bios_h())
     write("src/base/syscalls.S", gen_syscalls_s())
-    write("tests/host/test_gen.c", gen_test())
+    write("../tests/host/test_gen.c", gen_test())
 
 
 if __name__ == "__main__":

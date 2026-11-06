@@ -1,4 +1,4 @@
-/* The EE side of the VU0 renderer (<mx/vu0r.h>, src/vu/vu0scei.vsm). Built
+/* The EE side of the VU0 renderer (<mx/vu0r.h>, ee/src/vu/vu0scei.vsm). Built
    with -mvu0 and every VF register fixed: the programs' inputs and results
    stay in VF registers between the asm statements. */
 

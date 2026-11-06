@@ -21,7 +21,7 @@ int main(int argc, char **argv) {
 
 `<mx/mx.h>` brings in all of maxsdk's core: printing, the cycle counter, DMA, the GS, the frame
 pipeline and the VUs. There is no ps2sdk below it. maxsdk calls the BIOS itself, and its own
-start code (`crt/crt0.S`) sets up the stack, the heap and the arguments before `main`.
+start code (`ee/crt/crt0.S`) sets up the stack, the heap and the arguments before `main`.
 
 **Printing.** `mx_printf` writes to the debug console: PCSX2's EE console, or ps2client's
 terminal on a PS2. It understands the usual formats, including `%f`.

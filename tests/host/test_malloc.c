@@ -1,4 +1,4 @@
-/* libc/malloc.c on the host: random malloc, free, realloc, memalign and
+/* ee/libc/malloc.c on the host: random malloc, free, realloc, memalign and
    calloc over a fake sbrk, the heap checked after each, the blocks' bytes
    kept and compared. */
 

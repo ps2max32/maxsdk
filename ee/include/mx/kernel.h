@@ -20,7 +20,7 @@
 
 /* The kernel's side of what libmxk has no code for: virtual memory, heaps and
    the file server's client, with the same arguments (version 4). libmxk's
-   stubs (src/base/kstubs.c) and the table come from this list. */
+   stubs (ee/src/base/kstubs.c) and the table come from this list. */
 #define MXK_CALLS(X)                                                                         \
   X(int, mx_vm_init, (const struct mx_vm_config *c), (c))                                    \
   X(int, mx_vm_active, (void), ())                                                           \
@@ -121,7 +121,7 @@ struct mxk_services {
 #undef MXK_FIELD
 };
 
-/* The kernel's side of sif_call (src/base/sif.c). */
+/* The kernel's side of sif_call (ee/src/base/sif.c). */
 int mx__sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,
                  u32 rsize, u32 wait);
 

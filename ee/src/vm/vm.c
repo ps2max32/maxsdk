@@ -87,7 +87,7 @@ static struct {
   int lock;
   struct mx_vm_stats st;
   u32 modified_seen;
-  int code; /* the program runs code from VM (src/vm/image.c) */
+  int code; /* the program runs code from VM (ee/src/vm/image.c) */
   int wsema;        /* wakes the writer thread; -1: none */
   int swapsema;     /* the swap file's seek and transfer (swap_io) */
   u32 clean_frames; /* what it keeps free or clean */
@@ -306,7 +306,7 @@ static void tr_tick(void) {
   tr_push((u32)MX_VM_TR_TICK << 30 | (ms & 0x3FFFFFFFu));
 }
 
-void mx__irq_vbon_hook(void (*fn)(void)); /* src/irq/irq.c */
+void mx__irq_vbon_hook(void (*fn)(void)); /* ee/src/irq/irq.c */
 
 /* At each vblank: the VM's entries out of the TLB, so a page in use
    refills (and gets a new stamp, for evict) at least once a vblank: 24
@@ -801,7 +801,7 @@ static int file_pages(int fd, u32 pg, u32 filesz, u32 offset) {
   return (int)i;
 }
 
-/* src/vm/image.c: pages [va, va + filesz) come from the ELF open as fd, at
+/* ee/src/vm/image.c: pages [va, va + filesz) come from the ELF open as fd, at
    offset; va on a page. The rest of the segment is new pages (zero). */
 int mx__vm_file_pages(int fd, u32 va, u32 filesz, u32 offset) {
   if ((va & (PAGE - 1)) || va < MX_VM_BASE || va - MX_VM_BASE + filesz > vm.npages * PAGE)

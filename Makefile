@@ -16,7 +16,7 @@ OUT        ?= $(PS2MAX)/build/libs/maxsdk
 MAXSDK_OUT := $(OUT)
 HOSTCC     ?= cc
 
-LIB_SRCS := $(filter-out %/kstubs.c %/novm.c,$(wildcard $(HERE)/src/*/*.c)) $(wildcard $(HERE)/src/*/*.S)
+LIB_SRCS := $(filter-out %/kstubs.c %/novm.c,$(wildcard $(HERE)/ee/src/*/*.c)) $(wildcard $(HERE)/ee/src/*/*.S)
 LIB_OBJS := $(patsubst $(HERE)/%,$(OUT)/obj/%.o,$(LIB_SRCS))
 LIB       = $(MX_LIB)
 # libmxk: the same but for what reaches the kernel (docs/kernel.md)
@@ -24,11 +24,11 @@ LIBK      = $(OUT)/libmxk.a
 LIBKERN   = $(OUT)/libmxkern.a
 CRT0      = $(MX_CRT0)
 HDRS      = $(MX_HDRS)
-# the library's own VU microcode (src/*/*.vsm) goes into libmx.a
-LIB_VSMS := $(wildcard $(HERE)/src/*/*.vsm)
+# the library's own VU microcode (ee/src/*/*.vsm) goes into libmx.a
+LIB_VSMS := $(wildcard $(HERE)/ee/src/*/*.vsm)
 LIB_OBJS += $(patsubst %.vsm,$(OUT)/vu/%.o,$(notdir $(LIB_VSMS)))
 vpath %.vsm $(sort $(dir $(LIB_VSMS)))
-# IOP modules of ps2sdk that libmx loads (the sound driver, src/base/snd.c),
+# IOP modules of ps2sdk that libmx loads (the sound driver, ee/src/base/snd.c),
 # as data between the symbols <name>_irx and <name>_irx_end. They are the
 # prebuilt modules of ps2dev: ps2max has no IOP toolchain of its own.
 PS2MAX_IRX ?= $(PS2MAX)/../ps2dev/install/ps2sdk/iop/irx
@@ -40,7 +40,7 @@ $(OUT)/irx/%.o: $(PS2MAX_IRX)/%.irx
 	  '.incbin "$<"' '.globl $*_irx_end' '$*_irx_end:' > $(@:.o=.S)
 	$(CC) $(CFLAGS) -c $(@:.o=.S) -o $@
 # the VU0 renderer's feeder: its asm statements keep VF registers live
-$(OUT)/obj/src/vu/vu0r.c.o: CFLAGS += -mvu0 $(foreach r,$(shell seq 1 31),-ffixed-vf$(r))
+$(OUT)/obj/ee/src/vu/vu0r.c.o: CFLAGS += -mvu0 $(foreach r,$(shell seq 1 31),-ffixed-vf$(r))
 
 # Each example has a directory in examples/; the tests' and probes' VU and
 # HLSL programs and the examples' share one namespace (VSM_DIRS, HLSL_DIRS).
@@ -70,17 +70,17 @@ $(OUT)/obj/%.S.o: $(HERE)/%.S
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # The mem*/str* bodies must not be turned into calls to themselves.
-$(OUT)/obj/src/base/string.c.o: CFLAGS += -fno-builtin
+$(OUT)/obj/ee/src/base/string.c.o: CFLAGS += -fno-builtin
 
-$(CRT0): $(HERE)/crt/crt0.S
+$(CRT0): $(HERE)/ee/crt/crt0.S
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Three libraries (docs/kernel.md). libmxkern: all of it, the VM too: for the
 # kernel, and the tests of the VM's inside. libmx: without the VM. libmxk: for
 # programs under the kernel, in libk below.
-VM_OBJS = $(patsubst %,$(OUT)/obj/src/vm/%.o,vm.c image.c tlb.S)
-$(OUT)/libmx.a: $(filter-out $(VM_OBJS),$(LIB_OBJS)) $(OUT)/obj/src/vm/novm.c.o
+VM_OBJS = $(patsubst %,$(OUT)/obj/ee/src/vm/%.o,vm.c image.c tlb.S)
+$(OUT)/libmx.a: $(filter-out $(VM_OBJS),$(LIB_OBJS)) $(OUT)/obj/ee/src/vm/novm.c.o
 	rm -f $@
 	$(LLVM)/llvm-ar rcs $@ $^
 
@@ -92,17 +92,17 @@ $(OUT)/objk/%.c.o: $(HERE)/%.c $(HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -DMX_KERNEL=1 -c $< -o $@
 
-LIBK_SRCS = src/base/start.c src/base/sif.c src/base/kstubs.c
+LIBK_SRCS = ee/src/base/start.c ee/src/base/sif.c ee/src/base/kstubs.c
 # what is the kernel's: no code in libmxk
-LIBK_OUT  = src/base/start.c src/base/sif.c src/base/exception.c src/base/exception.S \
-            src/vm/vm.c src/vm/mem.c src/vm/heap.c src/vm/image.c src/vm/tlb.S
+LIBK_OUT  = ee/src/base/start.c ee/src/base/sif.c ee/src/base/exception.c ee/src/base/exception.S \
+            ee/src/vm/vm.c ee/src/vm/mem.c ee/src/vm/heap.c ee/src/vm/image.c ee/src/vm/tlb.S
 LIBK_OBJS = $(filter-out $(LIBK_OUT:%=$(OUT)/obj/%.o),$(LIB_OBJS)) $(LIBK_SRCS:%=$(OUT)/objk/%.o)
 
 $(LIBK): $(LIBK_OBJS)
 	rm -f $@
 	$(LLVM)/llvm-ar rcs $@ $^
 
-# tests linked into VM (ld/maxsdk-vm.ld), started by mxlink (or mxlink's EMU build)
+# tests linked into VM (ee/ld/maxsdk-vm.ld), started by mxlink (or mxlink's EMU build)
 VM_TESTS = vm11_vmlink vm12_elfpage vm13_guards vm16_lock vm21_crash
 $(VM_TESTS:%=$(OUT)/tests/%.elf): MX_MEMORY = vm
 $(VM_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
@@ -163,7 +163,7 @@ RT_CFLAGS     = -std=gnu11 -O2 -ffreestanding -fno-builtin -w -G0 --target=mips6
 # hosted, not freestanding: libc is there, and C++ only treats main as the
 # program's entry (unmangled) in a hosted build
 LIBC_CFLAGS   = $(filter-out -ffreestanding,$(CFLAGS)) -isystem $(PICOLIBC)/include \
-                -I$(HERE)/compat/ps2sdk
+                -I$(HERE)/ee/compat/ps2sdk
 CXXFLAGS      = $(filter-out -std=gnu11,$(LIBC_CFLAGS)) -std=gnu++17 -fno-exceptions -fno-rtti
 CXX           = $(LLVM)/clang++
 LIBMXC        = $(OUT)/libmxc.a
@@ -172,11 +172,11 @@ LIBMXC        = $(OUT)/libmxc.a
 LIBC_LIBS     = $(OUT)/libc/glue.c.o $(LIBMXC) $(PICOLIBC)/lib/libc.a $(LIB) $(RT_BUILTINS)
 HAVE_LIBC    := $(wildcard $(PICOLIBC)/lib/libc.a)
 
-$(OUT)/libc/%.c.o: $(HERE)/libc/%.c $(HDRS)
+$(OUT)/libc/%.c.o: $(HERE)/ee/libc/%.c $(HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(LIBC_CFLAGS) -c $< -o $@
 
-$(OUT)/libc/%.cc.o: $(HERE)/libc/%.cc
+$(OUT)/libc/%.cc.o: $(HERE)/ee/libc/%.cc
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -214,10 +214,10 @@ endif
 libc: $(LIBMXC) $(RT_BUILTINS) $(LIBC_TESTS)
 
 # Build picolibc from PICOLIBC_SRC (a picolibc 1.8.9 checkout with
-# libc/picolibc-r5900.patch applied) for the R5900, n32, with clang.
+# ee/libc/picolibc-r5900.patch applied) for the R5900, n32, with clang.
 picolibc:
 	@mkdir -p $(PICOLIBC)/../build-meson
-	sed "s|@LLVM@|$(LLVM)|g" $(HERE)/libc/cross-r5900.txt.in > $(PICOLIBC)/../cross.txt
+	sed "s|@LLVM@|$(LLVM)|g" $(HERE)/ee/libc/cross-r5900.txt.in > $(PICOLIBC)/../cross.txt
 	meson setup --wipe $(PICOLIBC)/../build-meson $(PICOLIBC_SRC) --cross-file $(PICOLIBC)/../cross.txt \
 	  --prefix=$(PICOLIBC) -Dmultilib=false -Dpicocrt=false -Dsemihost=false -Dtests=false \
 	  -Dthread-local-storage=false -Dposix-io=false -Dspecsdir=none -Dio-long-long=true \
@@ -248,15 +248,15 @@ batch: $(OUT)/batch/ps2batch.elf
 # ---- host tests -----------------------------------------------------------
 
 # Pure parts of the library are tested on the host too.
-HOST_SRCS := $(wildcard $(HERE)/tests/host/*.c) $(HERE)/src/pkt/pkt.c $(HERE)/src/pkt/chain.c \
-             $(HERE)/src/gs/shader.c $(HERE)/src/gs/rt.c $(HERE)/src/gs/display.c \
-             $(HERE)/src/gs/video.c $(HERE)/src/gs/tex.c $(HERE)/src/gs/vram.c \
-             $(HERE)/src/gs/vcache.c $(HERE)/libc/malloc.c
+HOST_SRCS := $(wildcard $(HERE)/tests/host/*.c) $(HERE)/ee/src/pkt/pkt.c $(HERE)/ee/src/pkt/chain.c \
+             $(HERE)/ee/src/gs/shader.c $(HERE)/ee/src/gs/rt.c $(HERE)/ee/src/gs/display.c \
+             $(HERE)/ee/src/gs/video.c $(HERE)/ee/src/gs/tex.c $(HERE)/ee/src/gs/vram.c \
+             $(HERE)/ee/src/gs/vcache.c $(HERE)/ee/libc/malloc.c
 HOST_BIN   = $(OUT)/host/test_host
 
 $(HOST_BIN): $(HOST_SRCS) $(wildcard $(HERE)/tests/host/*.h) $(HDRS)
 	@mkdir -p $(dir $@)
-	$(HOSTCC) -std=gnu11 -O1 -Wall -Wextra -DMX_HOST -DMXC_MALLOC_TEST -I$(HERE)/include -I$(HERE)/tests/host \
+	$(HOSTCC) -std=gnu11 -O1 -Wall -Wextra -DMX_HOST -DMXC_MALLOC_TEST -I$(HERE)/ee/include -I$(HERE)/tests/host \
 	  $(HOST_SRCS) -o $@
 
 test-host: $(HOST_BIN)
@@ -276,15 +276,15 @@ check-deps: all
 # hand-made physical address (an address masked to 28/29 bits, an mx_paddr
 # built from a number) anywhere else. exception.c masks kernel segments to
 # read memory, not for the DMAC.
-PHYS_SRCS = $(filter-out $(HERE)/include/mx/cpu.h $(HERE)/src/base/exception.c,\
-              $(wildcard $(HERE)/src/*/*.[chS] $(HERE)/include/mx/*.h $(HERE)/tests/ps2/*.c \
+PHYS_SRCS = $(filter-out $(HERE)/ee/include/mx/cpu.h $(HERE)/ee/src/base/exception.c,\
+              $(wildcard $(HERE)/ee/src/*/*.[chS] $(HERE)/ee/include/mx/*.h $(HERE)/tests/ps2/*.c \
                          $(HERE)/probe/*.c $(HERE)/examples/*/*.c $(HERE)/tutorials/*/*.c))
 check-phys:
 	@! grep -nE "0x0[fF]{7}u?\b|0x1[fF]{7}u?\b|\bmx_phys\(|\(mx_paddr\)\{[^0}]" $(PHYS_SRCS)
 	@echo "check-phys: DMA addresses only from mx_paddr_of / mx_paddr_range"
 
 gen:
-	python3 -I -B $(HERE)/gen/gen.py
+	python3 -I -B $(HERE)/ee/gen/gen.py
 
 clean:
 	rm -rf $(OUT)

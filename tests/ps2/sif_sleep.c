@@ -1,4 +1,4 @@
-/* SIF waits that sleep (src/base/sif.c, sleep_wait): while a thread waits
+/* SIF waits that sleep (ee/src/base/sif.c, sleep_wait): while a thread waits
    for the IOP, threads of lower priority run. The main thread does 100
    reads of host:sif_sleep.bin (32 KiB each) and 100 writes; a busy thread
    of lower priority counts meanwhile. With waits that spin it would not

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turn the backtrace of a maxsdk exception report into functions and lines."""
 
-# The exception handler (src/base/exception.c) ends its report with
+# The exception handler (ee/src/base/exception.c) ends its report with
 #   trace: <EPC> <ra> <return addresses found on the stack...>
 # This prints those addresses as functions and source lines, using
 # llvm-symbolizer on the program's ELF (build with EXTRA_CFLAGS=-g for file

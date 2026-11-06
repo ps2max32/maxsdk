@@ -11,7 +11,7 @@
    frame << 4 | 1 sought, 2 done). Heartbeat in slots 30 and 31.
    Slots 28 and 29 (if not blank): the VM, or a wait for the IOP, found
    interrupts off where they must be on (where << 24 | Status; see
-   mx__vm_irq_lost in src/vm/vm.c).
+   mx__vm_irq_lost in ee/src/vm/vm.c).
      1 mx_vm_init with host:vm7swap.bin
      2 a word in each of 64 pages, then read back (half of them from the
        file)

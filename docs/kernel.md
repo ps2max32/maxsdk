@@ -13,7 +13,7 @@ its implementation when it links (`MX_MEMORY`, `MX_KERNEL`, `mk/maxsdk.mk`):
 | Pad, sound | its own SIF client | its own, over the kernel's SIF |
 
 A program's source is the same for both; only the room differs. What only makes sense
-with virtual memory exists in `libmx` too (`src/vm/novm.c`), doing nothing, so programs and
+with virtual memory exists in `libmx` too (`ee/src/vm/novm.c`), doing nothing, so programs and
 libgl need no `#ifdef`. Graphics (GS, VIF, DMA) are not a service: they are direct code in
 both.
 

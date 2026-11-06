@@ -70,7 +70,7 @@ one kick). "side s" = right triangles of s×s/2 pixels in rows; ADC = vertices s
 | `mx_gs_init` writing DISPFB1/DISPLAY1 = 0 (circuit 1 off) and, after SetGsCrt, all display registers = 0 before the real display | **the PS2 hung or dropped ps2link before the first printf** (twice; PCSX2 fine; once a run passed). Fixed by never writing an off circuit's registers and writing PMODE, DISPFB2, DISPLAY2, BGCOLOR before the GS interrupts are on, as the old init did; which of the two mattered is not isolated | NTSC 640×224 | `tests/ps2/gs.c`, batch | 2026-10-27 |
 | After `mx_video_set` (GS reset) PRMODECONT, COLCLAMP, TEST, TEXA must be written again before drawing | | | `tests/ps2/rt.c`, `examples/display` | 2026-10-27 |
 
-## Textures and MIPMAP (`src/gs/tex.c`, `<mx/tex.h>`)
+## Textures and MIPMAP (`ee/src/gs/tex.c`, `<mx/tex.h>`)
 
 A texture of `levels` levels (`struct mx_tex`): level 0 in TEX0, levels 1-3 in MIPTBP1, 4-6 in
 MIPTBP2, each with its own base and width; TEX1.MXL the last level. `mx_tex_init` places them
@@ -105,7 +105,7 @@ of the level above, UV + 1 texel (pixel x samples u = 2x + 1, between texels 2x 
 | LCM 0, K 0, STQ sprites with Q = 1, 1/4, 1/8 | levels 0, 2, 3 | | `tests/ps2/mip.c` | PCSX2 2026-10-28 (PS2 not yet) |
 | `mx_tex_e_mipgen` on a 16 × 16 CT32 texture of single-texel checks of two colours | every texel of level 1 the mean of the two (±1) | context 2 | `tests/ps2/mip.c` | PCSX2 2026-10-28 (PS2 not yet) |
 
-## Video modes (`src/gs/video.c`)
+## Video modes (`ee/src/gs/video.c`)
 
 DISPLAY units: DX/DW in VCK, DY/DH in raster lines (frame lines when interlaced). A buffer line
 takes 2 DISPLAY lines in interlaced FRAME mode, else 1; `mx_display_regs` fits the largest

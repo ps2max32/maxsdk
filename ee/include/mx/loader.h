@@ -1,7 +1,7 @@
 #ifndef MX_LOADER_H
 #define MX_LOADER_H
 
-/* What a loader passes in a0 to a program's __start (crt/crt0.S): ps2link
+/* What a loader passes in a0 to a program's __start (ee/crt/crt0.S): ps2link
    ({ pid; argc; argv[16]; payload }, the pid being the address of its
    thread id), or mxlink, which puts MX_LOADER_MAGIC in place of the pid for
    a program linked into VM. */

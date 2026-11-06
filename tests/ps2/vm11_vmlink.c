@@ -1,4 +1,4 @@
-/* VM step 11: a program linked into VM (ld/maxsdk-vm.ld): its own code and
+/* VM step 11: a program linked into VM (ee/ld/maxsdk-vm.ld): its own code and
    data at MX_VM_BASE, maxsdk in core, started by mxload. Run as
      run.sh mxload.elf 30 host:vm11_vmlink.elf
    (PCSX2, with the EE interpreter: host:mxload.txt holding

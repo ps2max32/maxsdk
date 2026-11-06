@@ -42,7 +42,7 @@ of these EE costs, so it is lower now; the remaining waits are the next target.
 
 The EE User's Manual's "macro parallel connection" (9.1.3) and SCEE's "A Tale of Two Dinosaurs"
 (2000: EE + VU0 9.75, VU1 12.75, both 22.5 Mvert/s): VU1 draws over PATH1 from the VIF1 stream
-while the EE with VU0 builds GS packets for PATH3. maxsdk: `mx_frame3_*` (`src/gs/frame3.c`,
+while the EE with VU0 builds GS packets for PATH3. maxsdk: `mx_frame3_*` (`ee/src/gs/frame3.c`,
 chain mode).
 
 - The PATH3 packets are built in their own scratchpad halves, copied into slots (fromSPR) and
@@ -56,7 +56,7 @@ chain mode).
   then sees exactly the frame's PATH3 data. A FLUSHA without the join can pass in the gap
   between two queued segments, and frame n + 1's slots (held until their open mark) cannot
   slip in before it.
-- `mx_vu0r_scei` (`src/vu/vu0r.c`, `vu0scei.vsm`): mscei's math on VU0, two register sets, the
+- `mx_vu0r_scei` (`ee/src/vu/vu0r.c`, `vu0scei.vsm`): mscei's math on VU0, two register sets, the
   results stored by SQC2 straight into PACKED GS packets (ST, RGBAQ, XYZ2) of the PATH3 stream.
   In the compiled mscei's order of operations (the MVP's w column first, the lights y x z, the
   colour as integers in the low bits of x + 1.5 · 2^23): the model demo's first copy is the
@@ -81,9 +81,9 @@ table after this one.
 | Pattern | Where | To measure on the PS2 |
 |---|---|---|
 | Fences: DMA end interrupt vs polled VIF MARK (one chain, a MARK per batch) vs GS LABEL | `probe/p5_fast.c` | latency and per-batch cost of each; the default fence (D13) follows from it. `mx_vuq_wait` already polls the MARK (no interrupt on the wait path) |
-| Render pipeline: stream built in two SPR halves, pushed into an MFIFO ring, VIF1 drains it all the time; VU1 render kernel double-buffered (BASE/OFFSET + xtop), XGKICK; FINISH per frame, vblank swap | `include/mx/frame.h`, `examples/scene/scene.c` | frames per vsync, missed / starved vblanks, EE wait for the back buffer and for ring space, busy shares; double-buffered vs FLUSHE after every batch (no vsync, 256 cubes) |
+| Render pipeline: stream built in two SPR halves, pushed into an MFIFO ring, VIF1 drains it all the time; VU1 render kernel double-buffered (BASE/OFFSET + xtop), XGKICK; FINISH per frame, vblank swap | `ee/include/mx/frame.h`, `examples/scene/scene.c` | frames per vsync, missed / starved vblanks, EE wait for the back buffer and for ring space, busy shares; double-buffered vs FLUSHE after every batch (no vsync, 256 cubes) |
 | Textures over PATH3 next to the stream; the stream waits with FLUSHA before the geometry that uses them | `examples/scene/scene.c`, `examples/allunits/allunits.c` | PATH3 vs PATH1 interleave in the busy shares |
-| mx_sched: VU workers take batches from a pool when idle, the EE takes small chunks; every wait polls the workers | `include/mx/sched.h`, `apps/llvm_bench/vudemo` (MODE_SCHED) | cycles/qw vs the static schedule (31.00) and how the pool spreads over VU0, VU1 and the FPU |
+| mx_sched: VU workers take batches from a pool when idle, the EE takes small chunks; every wait polls the workers | `ee/include/mx/sched.h`, `apps/llvm_bench/vudemo` (MODE_SCHED) | cycles/qw vs the static schedule (31.00) and how the pool spreads over VU0, VU1 and the FPU |
 | All units: VU1 render + GS, PATH3 texture, VU0 particle step on VIF0, EE/FPU matrices and sprites, step f-1 drawn in frame f | `examples/allunits/allunits.c` | busy share of every unit; every idle gap above 1 % of a frame needs a cause here |
 | VU1 compute between render passes (D16 b): FLUSH, MPG, run, stop at a VIF i-bit, EE reads by toSPR, resume | `mx_frame_vu1_compute`, `tests/ps2/frame.c` | the GS idle time it costs per pass |
 

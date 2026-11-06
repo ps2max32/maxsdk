@@ -729,7 +729,7 @@ int mx_iop_load_module(const char *path) {
 
 /* ---- tty ---------------------------------------------------------------- */
 
-#ifndef MX_KERNEL /* the kernel has the file server's client: src/base/kstubs.c */
+#ifndef MX_KERNEL /* the kernel has the file server's client: ee/src/base/kstubs.c */
 struct fio_write_arg {
   s32 fd;
   u32 ptr;

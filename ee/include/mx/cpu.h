@@ -101,13 +101,13 @@ MX_INLINE mx_paddr mx_paddr_add(mx_paddr a, u32 bytes) { return (mx_paddr){a.v +
    (SIF receive buffers, RPC results), or that is written uncached while
    other code may have its line in the cache: cache lines of its own. Each
    variable of the section is aligned to a line and the section ends on
-   one (ld/maxsdk.ld), so no other variable shares its lines, and a write
+   one (ee/ld/maxsdk.ld), so no other variable shares its lines, and a write
    back of another variable's dirty line never overwrites what was
    received. MX_ALIGNED(64) alone does not do that: the next variable may
    start in the last line. */
 #define MX_DMA_LINES __attribute__((section(".bss.mx.lines"), aligned(64)))
 
-/* In a program linked into VM (ld/maxsdk-vm.ld): a function or a variable of
+/* In a program linked into VM (ee/ld/maxsdk-vm.ld): a function or a variable of
    the program's own that stays in core memory, for what runs or is read
    with interrupts off (interrupt handlers and their data), thread stacks,
    and what the DMAC follows. MX_CORE_DATA puts the variable in .data (also

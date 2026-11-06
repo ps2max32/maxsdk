@@ -1,7 +1,7 @@
 /* Probe: what one READ and one WRITE call of the file server cost on host:
-   by size, 4 KiB to 256 KiB (the swap file's transfers, src/vm/vm.c; today
+   by size, 4 KiB to 256 KiB (the swap file's transfers, ee/src/vm/vm.c; today
    READs go in 16 KiB pieces, FIO_READ_CHUNK, and WRITEs in 64 KiB,
-   FIO_CHUNK, src/base/sif.c). Each size in one call (mx__fio_read_chunk,
+   FIO_CHUNK, ee/src/base/sif.c). Each size in one call (mx__fio_read_chunk,
    mx__fio_write_chunk), over 1 MiB of a 4 MiB file:
    - sequential: one seek, then the calls one after another (the cached
      file position: no seek between them);

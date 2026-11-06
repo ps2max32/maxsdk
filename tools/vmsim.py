@@ -13,8 +13,8 @@ file, and their time by the cost of the IOP's calls (docs/vm.md "Costs").
   --mem BYTES    memory for pages (default: the run's frames)
   --pages 8,16,32  page sizes in KiB
   --policies clock,lru,aging,opt
-                 clock: second chance (src/vm/vm.c until 2026-11-01); lru
-                 (src/vm/vm.c now: by its refills); aging: at each tick a page's age
+                 clock: second chance (ee/src/vm/vm.c until 2026-11-01); lru
+                 (ee/src/vm/vm.c now: by its refills); aging: at each tick a page's age
                  is shifted right with its use in the interval on top (8
                  bits), the lowest goes; opt: Belady's
                  (evicts the page used again last: no policy faults less)

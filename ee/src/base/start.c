@@ -171,7 +171,7 @@ void mx__main(void) {
   mx_ei();
   /* VM before the constructors, so their malloc is in it already */
   if (mx__vm_image()) {
-    /* linked into VM (ld/maxsdk-vm.ld): VM on, then the program's VM part
+    /* linked into VM (ee/ld/maxsdk-vm.ld): VM on, then the program's VM part
        from its ELF */
     static const struct mx_vm_config none;
     if (!by_mxload) {

@@ -15,7 +15,7 @@
    slots 30 and 31.
    Slots 28 and 29 (if not blank): the VM, or a wait for the IOP, found
    interrupts off where they must be on (where << 24 | Status; see
-   mx__vm_irq_lost in src/vm/vm.c).
+   mx__vm_irq_lost in ee/src/vm/vm.c).
      1 mx_vm_init with host:vm9swap.bin, 64 pages written
      2 200 rounds of pin, check, send, unpin, touch
 
