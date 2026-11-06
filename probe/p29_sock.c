@@ -4,7 +4,8 @@
      p29_sock host:mxsock.irx <a.b.c.d of the host> [stage]
 
    stage: 1 only loads the module, 2 opens and closes a socket, 3 adds UDP, 4 TCP,
-   5 (the default) all. */
+   5 (the default) all, 6 leaves a socket open, to see the next run find it closed.
+   A first argument "-" takes the service the IOP has. */
 
 #include <mx/iop.h>
 #include <mx/mx.h>
@@ -131,17 +132,19 @@ int main(int argc, char **argv) {
   int bad = 1, stage = argc > 3 ? argv[3][0] - '0' : 5;
   if (argc < 3 || mx_sif_init() < 0)
     goto end;
-  int fd = mx_fio_open(argv[1], MX_FIO_RDONLY);
-  int size = fd < 0 ? -1 : mx_fio_read(fd, irx, sizeof irx);
-  if (fd >= 0)
-    mx_fio_close(fd);
-  int res = 0;
-  STEP("read %d bytes of the module\n", size);
-  int id = size > 0 ? mx_iop_load_module_buffer(irx, (u32)size, 0, 0, &res) : -1;
-  STEP("module %d, result %d\n", id, res);
-  bad = id < 0;
-  if (bad || stage == 1)
-    goto end;
+  if (argv[1][0] != '-') {
+    int fd = mx_fio_open(argv[1], MX_FIO_RDONLY);
+    int size = fd < 0 ? -1 : mx_fio_read(fd, irx, sizeof irx);
+    if (fd >= 0)
+      mx_fio_close(fd);
+    int res = 0;
+    STEP("read %d bytes of the module\n", size);
+    int id = size > 0 ? mx_iop_load_module_buffer(irx, (u32)size, 0, 0, &res) : -1;
+    STEP("module %d, result %d\n", id, res);
+    bad = id < 0;
+    if (bad || stage == 1)
+      goto end;
+  }
   bad = 1;
   int init = mx_net_init();
   STEP("init %d\n", init);
@@ -156,6 +159,12 @@ int main(int argc, char **argv) {
   bad = 0;
   if (stage == 2)
     goto end;
+  if (stage == 6) {
+    int l = mx_net_socket(MX_NET_TCP);
+    bad = l < 0 || mx_net_bind(l, LISTEN_PORT) < 0 || mx_net_listen(l, 2) < 0;
+    STEP("left listening on socket %d\n", l);
+    goto end;
+  }
   u32 host = 0, part = 0, shift = 0;
   for (const char *p = argv[2];; p++) {
     if (*p == '.' || !*p) {
