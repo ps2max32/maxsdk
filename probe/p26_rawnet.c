@@ -19,19 +19,19 @@
 #include <mx/sif.h>
 #include <mx/timer.h>
 
-#define MAX 8
+#define MAX 16
 #define SLOTS 16
 #define SLOT 2048u
 #define HDR 42u
 #define DATA 1472u
 
-static u8 mem[512 * 1024] MX_ALIGNED(64);
+static u8 mem[1024 * 1024] MX_ALIGNED(64);
 static struct {
   u8 *at;
   u32 size;
   char arg[64];
   u32 arg_len;
-} mod[MAX];
+} mod[MAX + 1]; /* the last: ip= for a list of modules */
 
 static u8 ring[SLOTS * SLOT] MX_ALIGNED(64);
 
@@ -69,11 +69,49 @@ int main(int argc, char **argv) {
           break;
       }
       mod[n].arg_len = l;
+      for (u32 k = 0; k < l; k++)
+        mod[MAX].arg[k] = mod[n].arg[k];
+      mod[MAX].arg_len = l;
       continue;
     }
     if (argv[i][0] == 'w' && argv[i][1] == 'a' && argv[i][2] == 'i' && argv[i][3] == 't') {
       for (const char *p = argv[i] + 5; *p; p++)
         wait_s = wait_s * 10 + (u32)(*p - '0');
+      continue;
+    }
+    if (argv[i][0] == 'm' && argv[i][1] == '=') {
+      /* the modules, host:<name>.irx, in order */
+      for (const char *p = argv[i] + 2; *p && n < MAX;) {
+        char path[40];
+        u32 l = 0;
+        for (const char *s = "host:"; *s; s++)
+          path[l++] = *s;
+        while (*p && *p != ',' && l < 30)
+          path[l++] = *p++;
+        if (*p)
+          p++;
+        for (const char *s = ".irx"; *s; s++)
+          path[l++] = *s;
+        path[l] = 0;
+        int fd = mx_fio_open(path, MX_FIO_RDONLY);
+        int size = fd < 0 ? -1 : mx_fio_lseek(fd, 0, MX_FIO_SEEK_END);
+        if (size <= 0 || to + size > mem + sizeof mem ||
+            mx_fio_lseek(fd, 0, MX_FIO_SEEK_SET) != 0 || mx_fio_read(fd, to, (u32)size) != size) {
+          mx_printf("p26: cannot read %s\n", path);
+          MX_TEST_END(1);
+          return 1;
+        }
+        mx_fio_close(fd);
+        mod[n].at = to, mod[n].size = (u32)size;
+        if (path[5] == 't' || path[5] == 'p' && path[6] == 's' && path[7] == '2' && path[8] == 'i') {
+          /* the stack: the ip= before this list */
+          for (u32 k = 0; k < mod[MAX].arg_len; k++)
+            mod[n].arg[k] = mod[MAX].arg[k];
+          mod[n].arg_len = mod[MAX].arg_len;
+        }
+        to += ((u32)size + 63) & ~63u;
+        n++;
+      }
       continue;
     }
     int fd = mx_fio_open(argv[i], MX_FIO_RDONLY);

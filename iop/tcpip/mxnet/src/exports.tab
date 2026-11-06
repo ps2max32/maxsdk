@@ -69,4 +69,19 @@ DECLARE_EXPORT_TABLE(ps2ip, 2, 6)
 	DECLARE_EXPORT(pbuf_coalesce)
 END_EXPORT_TABLE
 
+DECLARE_EXPORT_TABLE(mxfast, 1, 0)
+	DECLARE_EXPORT(_start)
+	DECLARE_EXPORT(_retonly)
+	DECLARE_EXPORT(_retonly)
+	DECLARE_EXPORT(_retonly)
+
+	DECLARE_EXPORT(mxfast_open)
+	DECLARE_EXPORT(mxfast_close)
+	DECLARE_EXPORT(mxfast_read)
+	DECLARE_EXPORT(mxfast_write)
+	DECLARE_EXPORT(mxfast_size)
+	DECLARE_EXPORT(mxfast_log)
+	DECLARE_EXPORT(mxfast_stats)
+END_EXPORT_TABLE
+
 void _retonly(void) {}

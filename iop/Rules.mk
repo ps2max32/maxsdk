@@ -20,7 +20,7 @@ PS2MAX_IOP_SDK ?= $(PS2MAX_PS2DEV)/ps2sdk
 OBJ    = $(OUT)/obj/$(MODULE)
 CC     = $(PS2MAX_IOP_BIN)/mipsel-none-elf-gcc
 STRIP  = $(PS2MAX_IOP_BIN)/mipsel-none-elf-strip
-CFLAGS = -D_IOP -fno-builtin -G0 -Os -Wall -msoft-float -mno-explicit-relocs $(CFLAGS_MODULE) \
+CFLAGS = -D_IOP -fno-builtin -G0 -Os -Wall -msoft-float -mno-explicit-relocs $(CFLAGS_MODULE) $(EXTRA_CFLAGS) \
          -Iinclude -Isrc -I$(MAXSDK)/common/include \
          -I$(PS2MAX_IOP_SDK)/iop/include -I$(PS2MAX_IOP_SDK)/common/include
 HDRS   = $(wildcard include/*.h include/*/*.h src/*.h) $(wildcard $(MAXSDK)/common/include/*.h)

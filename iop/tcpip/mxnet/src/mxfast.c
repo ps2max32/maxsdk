@@ -3,12 +3,8 @@
 #include "lwip/sockets.h"
 #include "irx_imports.h"
 #include <mxfast.h>
-#include <sifrpc.h>
 
 #define PENDING 16
-/* The EE's arguments, and for a write its frames (mxfast.h) */
-static u32 rpc_in[(MXFAST_DATA_AT + MXFAST_WRITE_FRAMES * MXFAST_FRAME) / 4]
-    __attribute__((aligned(16)));
 #define MAX_CHUNKS ((MXFAST_MAX + MXFAST_CHUNK - 1) / MXFAST_CHUNK)
 #define STALL_MS 30
 #define TRIES 40
@@ -28,9 +24,10 @@ static struct {
 } pending[PENDING];
 static u32 head, frames, doubles, drops, again;
 
-/* The frames being sent: slots of the RPC buffer. Only the last one the driver
+/* The frames being sent: slots of tx_base. Only the last one the driver
    took is dequeued, and the driver's thread is above the RPC thread. */
 static volatile u32 tx_n;
+static u8 *tx_base;
 static u32 tx_i, tx_list[MXFAST_WRITE_FRAMES], tx_size[MXFAST_WRITE_FRAMES];
 static int tx_taken; /* the driver's last frame was ours */
 
@@ -119,7 +116,7 @@ int mxfast_tx_next(void **payload) {
   tx_taken = tx_i < tx_n;
   if (!tx_taken)
     return 0;
-  *payload = (u8 *)rpc_in + MXFAST_DATA_AT + tx_list[tx_i] * MXFAST_FRAME;
+  *payload = tx_base + tx_list[tx_i] * MXFAST_FRAME;
   return (int)tx_size[tx_i];
 }
 
@@ -218,36 +215,26 @@ static int send_frames(u32 n) {
   return 0;
 }
 
-/* Where a write's time goes, in the system clock's ticks */
-static u32 t_send, t_commit, t_writes;
-static u32 ticks(void) {
-  iop_sys_clock_t c;
-  GetSystemTime(&c);
-  return c.lo;
-}
-
-static int do_write(u32 handle, u32 pos, u32 size) {
+int mxfast_write(int handle, u32 pos, u32 size, void *frames) {
   u32 n = (size + MXFAST_CHUNK - 1) / MXFAST_CHUNK;
   if (!size || n > MXFAST_WRITE_FRAMES || !have_peer || sock < 0)
     return -22;
+  tx_base = frames;
   u32 id = ++next_id, all = n == 32 ? ~0u : (1u << n) - 1;
   for (u32 i = 0; i < n; i++) {
     u32 at = i * MXFAST_CHUNK, len = size - at > MXFAST_CHUNK ? MXFAST_CHUNK : size - at;
-    frame_headers((u8 *)rpc_in + MXFAST_DATA_AT + i * MXFAST_FRAME, id, handle, pos + at, at, len);
+    frame_headers(tx_base + i * MXFAST_FRAME, id, (u32)handle, pos + at, at, len);
     tx_list[i] = i;
     tx_size[i] = MXFAST_DATA_AT + ((len + 15) & ~15u);
   }
   u32 count = n;
   for (u32 t = 0; t < TRIES; t++) {
-    u32 t0 = ticks();
     if (send_frames(count) < 0)
       return -5;
-    u32 t1 = ticks();
     u8 b[MXFAST_HDR];
-    header(b, MXFAST_COMMIT, id, handle, 0, 0);
+    header(b, MXFAST_COMMIT, id, (u32)handle, 0, 0);
     if (ask(b, sizeof b, id) < 0)
       return -110;
-    t_send += t1 - t0, t_commit += ticks() - t1, t_writes++;
     u32 missing = all & ~answer_b;
     if (!missing)
       return (int)size;
@@ -263,7 +250,7 @@ static int do_write(u32 handle, u32 pos, u32 size) {
   return -5;
 }
 
-static int do_read(u32 handle, u32 pos, u32 size, u32 ee) {
+int mxfast_read(int handle, u32 pos, u32 size, u32 ee) {
   if (size > MXFAST_MAX || ee & 15 || sock < 0)
     return -22;
   memset(x.have, 0, sizeof x.have);
@@ -330,86 +317,66 @@ static int ask(u8 *b, u32 n, u32 id) {
   return -110;
 }
 
-static void set_host(u32 ip) {
-  if (!ip && have_peer)
-    memcpy(&ip, eth_ip + 30, 4);
+/* The socket, and where the host is: the one that said HELLO */
+static int ready(void) {
+  if (!have_peer)
+    return 0;
+  if (sock < 0) {
+    struct sockaddr_in a;
+    memset(&a, 0, sizeof a);
+    a.sin_family = AF_INET;
+    a.sin_port = htons(MXFAST_PORT);
+    sock = lwip_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock >= 0 && lwip_bind(sock, (struct sockaddr *)&a, sizeof a) < 0) {
+      lwip_close(sock);
+      sock = -1;
+    }
+  }
   memset(&host, 0, sizeof host);
   host.sin_family = AF_INET;
   host.sin_port = htons(MXFAST_PORT);
-  host.sin_addr.s_addr = ip;
+  memcpy(&host.sin_addr.s_addr, eth_ip + 30, 4);
+  return sock >= 0;
 }
 
-static s32 rpc_out[4] __attribute__((aligned(16)));
+static u8 msg[MXFAST_HDR + 256];
 
-static void *rpc(int fno, void *data, int size) {
-  u32 *a = data;
-  static u8 b[MXFAST_HDR + 256];
-  (void)size;
-  switch (fno) {
-  case MXFAST_RPC_OPEN:
-  case MXFAST_RPC_OPEN_WRITE:
-  case MXFAST_RPC_LOG: {
-    u32 n = strlen((char *)(a + 1)) + 1, id = ++next_id;
-    if (n > 256)
-      n = 256;
-    set_host(a[0]);
-    if (!host.sin_addr.s_addr) {
-      rpc_out[0] = -6; /* no server yet */
-      break;
-    }
-    header(b, fno == MXFAST_RPC_LOG ? MXFAST_LOG : MXFAST_OPEN, id,
-           fno == MXFAST_RPC_OPEN_WRITE, 0, 0);
-    memcpy(b + MXFAST_HDR, a + 1, n);
-    b[MXFAST_HDR + n - 1] = 0;
-    if (fno != MXFAST_RPC_LOG)
-      rpc_out[0] = ask(b, MXFAST_HDR + n, id);
-    else
-      rpc_out[0] = send_host(b, MXFAST_HDR + n);
-    break;
-  }
-  case MXFAST_RPC_READ:
-    rpc_out[0] = do_read(a[0], a[1], a[2], a[3]);
-    break;
-  case MXFAST_RPC_WRITE:
-    rpc_out[0] = do_write(a[0], a[1], a[2]);
-    break;
-  case MXFAST_RPC_CLOSE:
-    header(b, MXFAST_CLOSE, ++next_id, a[0], 0, 0);
-    rpc_out[0] = ask(b, MXFAST_HDR, next_id);
-    break;
-  case MXFAST_RPC_TIMES:
-    rpc_out[0] = t_send, rpc_out[1] = t_commit, rpc_out[2] = t_writes;
-    break;
-  case MXFAST_RPC_STATS:
-    rpc_out[0] = frames, rpc_out[1] = doubles, rpc_out[2] = drops, rpc_out[3] = again;
-    break;
-  default:
-    rpc_out[0] = -22;
-  }
-  return rpc_out;
+static u32 text(const char *s) {
+  u32 n = strlen(s) + 1;
+  if (n > 256)
+    n = 256;
+  memcpy(msg + MXFAST_HDR, s, n);
+  msg[MXFAST_HDR + n - 1] = 0;
+  return MXFAST_HDR + n;
 }
 
-static void thread(void *arg) {
-  static SifRpcDataQueue_t queue;
-  static SifRpcServerData_t server;
-  (void)arg;
-  sock = lwip_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-  struct sockaddr_in a;
-  memset(&a, 0, sizeof a);
-  a.sin_family = AF_INET;
-  a.sin_port = htons(MXFAST_PORT);
-  if (sock >= 0 && lwip_bind(sock, (struct sockaddr *)&a, sizeof a) < 0) {
-    lwip_close(sock);
-    sock = -1;
-  }
-  sceSifSetRpcQueue(&queue, GetThreadId());
-  sceSifRegisterRpc(&server, MXFAST_SID, rpc, rpc_in, 0, 0, &queue);
-  sceSifRpcLoop(&queue);
+int mxfast_open(const char *path, int mode) {
+  if (!ready())
+    return -6;
+  u32 id = ++next_id;
+  header(msg, MXFAST_OPEN, id, (u32)mode, 0, 0);
+  return ask(msg, text(path), id);
 }
 
-int mxfast_init(void) {
-  iop_thread_t t = {TH_C, 0, thread, 0x1000, 0x50}; /* below the driver */
-  sceSifInitRpc(0);
-  int id = CreateThread(&t);
-  return id > 0 ? StartThread(id, 0) : id;
+int mxfast_close(int handle) {
+  u32 id = ++next_id;
+  header(msg, MXFAST_CLOSE, id, (u32)handle, 0, 0);
+  return ask(msg, MXFAST_HDR, id);
+}
+
+int mxfast_size(int handle) {
+  u32 id = ++next_id;
+  header(msg, MXFAST_SIZE, id, (u32)handle, 0, 0);
+  return ask(msg, MXFAST_HDR, id);
+}
+
+int mxfast_log(const char *s) {
+  if (!ready())
+    return -6;
+  header(msg, MXFAST_LOG, ++next_id, 0, 0, 0);
+  return send_host(msg, text(s));
+}
+
+void mxfast_stats(int *out) {
+  out[0] = (int)frames, out[1] = (int)doubles, out[2] = (int)drops, out[3] = (int)again;
 }

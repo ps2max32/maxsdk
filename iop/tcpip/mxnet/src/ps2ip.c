@@ -54,6 +54,7 @@ static struct pbuf *TxHead, *TxTail;
 IRX_ID(MODNAME, 2, 3);
 
 extern struct irx_export_table	_exp_ps2ip;
+extern struct irx_export_table	_exp_mxfast;
 
 #if NOSYS
 static int		iTimerARP=0;
@@ -392,6 +393,7 @@ static inline int InitializeLWIP(void){
 
 	dbgprintf("PS2IP: Module Loaded.\n");
 
+	RegisterLibraryEntries(&_exp_mxfast);
 	if ((result = RegisterLibraryEntries(&_exp_ps2ip))!=0)
 	{
 		printf("PS2IP: RegisterLibraryEntries returned: %d\n", result);
@@ -438,7 +440,6 @@ static inline int InitLWIPStack(IPAddr *IP, IPAddr *NM, IPAddr *GW){
 
 	NetManRegisterNetworkStack(&stack);
 	netif_set_up(&NIF);
-	mxfast_init();
 
 	return 0;
 }

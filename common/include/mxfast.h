@@ -38,6 +38,7 @@ enum {
   MXFAST_WRITE = 6,  /* data: handle, offset in the file, offset in the transfer */
   MXFAST_COMMIT = 7, /* answer: a 0, b one bit for each frame of this id received */
   MXFAST_HELLO = 8,  /* from the host, every second: here is the file server */
+  MXFAST_SIZE = 9,   /* handle; answer: the file's size */
   MXFAST_ANSWER = 0x80 /* or'ed to the request's op */
 };
 
@@ -49,29 +50,17 @@ enum {
    READ:   a handle, b offset in the file, c size, then 4 bytes: offset in the
            transfer
    CLOSE:  a handle
-   OPEN:   a 1 to write (created if missing), 0 to read
+   OPEN:   a 0 to read, 1 to write (created if missing), 3 to write from empty
    WRITE:  a handle, len bytes of data, b offset in the file, c offset in the
            transfer. The host writes each frame when it comes, so a frame
            sent twice does no harm, and the frames of an id count in its COMMIT.
    ANSWER: a result, b as above
 
-   Writes leave the IOP without a copy and without lwIP: the EE puts the data
-   into the RPC buffer as frames, MXFAST_DATA_AT bytes apart from their start. */
+   Writes leave the IOP without a copy and without lwIP: the data comes as frames,
+   each with MXFAST_DATA_AT bytes free in front of it.
 
-/* RPC of the IOP for the EE: 16-byte aligned arguments, one s32 back. */
-#define MXFAST_SID 0x4D584601
-enum {
-  MXFAST_RPC_OPEN,  /* u32 host IP (network order; 0: the one that said HELLO), path */
-  MXFAST_RPC_READ,  /* u32 handle, offset in the file, size, EE address: bytes read */
-  MXFAST_RPC_CLOSE, /* u32 handle */
-  MXFAST_RPC_LOG,   /* u32 host IP, text */
-  MXFAST_RPC_STATS, /* u32 out[4]: frames, doubles, drops, requests sent again */
-  /* u32 handle, offset in the file, size; at MXFAST_DATA_AT + i * MXFAST_FRAME + 64
-     chunk i of the data: bytes written */
-  MXFAST_RPC_WRITE,
-  MXFAST_RPC_OPEN_WRITE, /* as OPEN */
-  MXFAST_RPC_TIMES       /* u32 out[3]: system clock ticks sending, in COMMIT; writes */
-};
+   Library "mxfast", for mxio, called from one thread below the driver's. The
+   functions after the first four of its table: */
 
 #ifdef _IOP
 struct pbuf;
@@ -80,7 +69,17 @@ int mxfast_rx(struct pbuf *p);
 /* For the driver, before lwIP's frames: the next frame to send, and its end */
 int mxfast_tx_next(void **payload);
 int mxfast_tx_deq(void);
-int mxfast_init(void);
 #endif
+
+/* -6 when no host has said HELLO */
+typedef int mxfast_open_fn(const char *path, int mode);
+typedef int mxfast_close_fn(int handle);
+/* the bytes read to ee, 16-byte aligned; at most MXFAST_MAX */
+typedef int mxfast_read_fn(int handle, unsigned int pos, unsigned int size, unsigned int ee);
+/* frames: MXFAST_WRITE_FRAMES of MXFAST_FRAME bytes, data at MXFAST_DATA_AT in each */
+typedef int mxfast_write_fn(int handle, unsigned int pos, unsigned int size, void *frames);
+typedef int mxfast_size_fn(int handle);
+typedef int mxfast_log_fn(const char *text);
+typedef void mxfast_stats_fn(int *out);
 
 #endif

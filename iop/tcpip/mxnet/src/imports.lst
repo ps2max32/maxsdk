@@ -75,13 +75,6 @@ stdio_IMPORTS_start
 I_printf
 stdio_IMPORTS_end
 
-sifcmd_IMPORTS_start
-I_sceSifInitRpc
-I_sceSifSetRpcQueue
-I_sceSifRegisterRpc
-I_sceSifRpcLoop
-sifcmd_IMPORTS_end
-
 sifman_IMPORTS_start
 I_sceSifSetDma
 I_sceSifDmaStat

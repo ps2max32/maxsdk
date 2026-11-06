@@ -19,7 +19,6 @@
 #include <intrman.h>
 #include <loadcore.h>
 #include <netman.h>
-#include <sifcmd.h>
 #include <sifman.h>
 #include <stdio.h>
 #include <sysclib.h>
