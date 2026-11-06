@@ -10,11 +10,14 @@
    all slots hold the host's pattern, 10 + the bad ones if not, 9 if none came.
 
    An argument ip=<ip>,<mask>,<gateway> goes to the next module, for a TCP/IP
-   stack (net.c): for its probes this program only stands in for mxlink. */
+   stack (net.c): for its probes this program only stands in for mxlink.
+   An argument wait=<seconds> keeps the program until then after the modules are
+   loaded, for modules that return from their start. */
 
 #include <mx/iop.h>
 #include <mx/mx.h>
 #include <mx/sif.h>
+#include <mx/timer.h>
 
 #define MAX 8
 #define SLOTS 16
@@ -52,6 +55,7 @@ static int check(int *filled) {
 int main(int argc, char **argv) {
   u8 *to = mem;
   int n = 0;
+  u32 wait_s = 0;
   if (mx_sif_init() < 0) {
     MX_TEST_END(1);
     return 1;
@@ -65,6 +69,11 @@ int main(int argc, char **argv) {
           break;
       }
       mod[n].arg_len = l;
+      continue;
+    }
+    if (argv[i][0] == 'w' && argv[i][1] == 'a' && argv[i][2] == 'i' && argv[i][3] == 't') {
+      for (const char *p = argv[i] + 5; *p; p++)
+        wait_s = wait_s * 10 + (u32)(*p - '0');
       continue;
     }
     int fd = mx_fio_open(argv[i], MX_FIO_RDONLY);
@@ -102,6 +111,8 @@ int main(int argc, char **argv) {
                                   mod[i].arg_len, &res) < 0)
       return 3;
   }
+  for (u32 s = 0; s < wait_s; s++)
+    mx_delay_us(1000000);
   int filled, bad = check(&filled);
   return !filled ? 9 : bad ? 10 + bad : 0;
 }
