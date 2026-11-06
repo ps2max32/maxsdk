@@ -1,5 +1,6 @@
 /* mxlink's fast path (tools/mxlink/iop/mxnet/mxfast.h) on a fresh IOP: reads a
-   file from ps2client serve into EE memory, past lwIP, and checks every word.
+   file from ps2client serve into EE memory, past lwIP, and checks every word,
+   then writes the same words to fastw.bin, to compare with it on the host.
 
      p27_fast host:poweroff.irx host:ps2dev9.irx host:netman.irx host:smap.irx
               ip=<ip>,<mask>,<gateway> host:ps2ip-nm.irx host=<a.b.c.d> file=<name>
@@ -15,7 +16,10 @@
 #define MAX 8
 #define SID 0x4D584601
 #define MIB 8u
-enum { RPC_OPEN, RPC_READ, RPC_CLOSE, RPC_LOG, RPC_STATS };
+enum { RPC_OPEN, RPC_READ, RPC_CLOSE, RPC_LOG, RPC_STATS, RPC_WRITE, RPC_OPEN_WRITE, RPC_TIMES };
+#define DATA_AT 64u
+#define CHUNK 1408u
+#define FRAME (DATA_AT + CHUNK)
 
 static u8 mem[512 * 1024] MX_ALIGNED(64);
 static struct {
@@ -27,6 +31,7 @@ static struct {
 static u32 data[256 * 1024 / 4 + 16] MX_ALIGNED(64);
 static u32 req[80] MX_ALIGNED(64);
 static s32 ans[4] MX_ALIGNED(64);
+static u8 frames[DATA_AT + 24 * FRAME] MX_ALIGNED(64);
 static struct mx_sif_client c;
 static u32 host;
 
@@ -81,6 +86,47 @@ static u32 pass(int fd, u32 chunk) {
               MIB * 1024u * 1000u / ms, bad);
   log_text(line);
   return bad;
+}
+
+/* The same words to a file on the host (compared there), in writes of 32 KiB */
+static int write_pass(int fd) {
+  u32 cycles = 0, chunk = 32 * 1024, stage = 0;
+  u32 *w = data;
+  for (u32 at = 0; at < MIB * 1024 * 1024; at += chunk) {
+    for (u32 i = 0; i < chunk / 4; i++)
+      w[i] = (at / 4 + i) * 2654435761u ^ 0x5Au;
+    u32 t0 = mx_count();
+    u32 *args = (u32 *)frames;
+    args[0] = (u32)fd, args[1] = at, args[2] = chunk;
+    u32 n = (chunk + CHUNK - 1) / CHUNK;
+    for (u32 i = 0; i < n; i++) {
+      u32 off = i * CHUNK, len = chunk - off > CHUNK ? CHUNK : chunk - off;
+      __builtin_memcpy(frames + DATA_AT + i * FRAME + DATA_AT, (u8 *)w + off, len);
+    }
+    u32 bytes = DATA_AT + n * FRAME;
+    mx_dcache_writeback(frames, bytes);
+    stage += mx_count() - t0;
+    volatile s32 *r = MX_UNCACHED(ans);
+    r[0] = -1000;
+    int got = mx_sif_call(&c, RPC_WRITE, frames, bytes, (void *)r, 16) < 0 ? -1001 : r[0];
+    cycles += mx_count() - t0;
+    if (got != (int)chunk) {
+      char line[80];
+      mx_snprintf(line, sizeof line, "write failed at %u: %d\n", at, got);
+      log_text(line);
+      return 1;
+    }
+  }
+  char line[96];
+  u32 ms = cycles / (MX_EE_HZ / 1000u);
+  mx_snprintf(line, sizeof line, "p27: writes of %u: %u ms, %u KiB/s, on the EE %u ms\n", chunk, ms,
+              MIB * 1024u * 1000u / ms, stage / (MX_EE_HZ / 1000u));
+  log_text(line);
+  int ticks = call(RPC_TIMES, 16);
+  const volatile s32 *r = MX_UNCACHED(ans);
+  mx_snprintf(line, sizeof line, "p27: IOP sending %d, commit %d ticks, %d writes\n", ticks, r[1], r[2]);
+  log_text(line);
+  return 0;
 }
 
 static int starts(const char *s, const char *with) {
@@ -163,6 +209,17 @@ int main(int argc, char **argv) {
   u32 bad = pass(fd, 256 * 1024);
   if (!bad)
     bad = pass(fd, 32 * 1024);
+  req[0] = host;
+  cat((char *)(req + 1), "fastw.bin");
+  int wfd = call(RPC_OPEN_WRITE, 32);
+  if (wfd < 0) {
+    log_text("p27: cannot open fastw.bin\n");
+    bad = 1;
+  } else {
+    bad += (u32)write_pass(wfd);
+    req[0] = (u32)wfd;
+    call(RPC_CLOSE, 16);
+  }
   int st = call(RPC_STATS, 16);
   const volatile s32 *r = MX_UNCACHED(ans);
   char line[96];
