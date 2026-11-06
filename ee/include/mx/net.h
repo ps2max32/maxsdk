@@ -37,7 +37,5 @@ int mx_net_recvfrom(int s, void *data, u32 size, u32 *ip, u32 *port);
 int mx_net_close(int s);
 /* which of want (MX_NET_READ, MX_NET_WRITE) can go on now */
 int mx_net_poll(int s, int want);
-/* mxlink, after a program: what it left open */
-void mx_net_close_all(void);
 
 #endif

@@ -847,7 +847,7 @@ static struct {
 } mxio_file[MXIO_FILES];
 static u32 mxio_arg[80] MX_DMA_LINES;
 static s32 mxio_out[MXIO_ANSWER] MX_DMA_LINES;
-static u8 mxio_bounce[16 * 1024] MX_DMA_LINES;
+static u8 mxio_bounce[4 * 1024] MX_DMA_LINES;
 static u8 mxio_frames[MXIO_BUFFER] MX_DMA_LINES;
 
 static int is_mxio(int fd) { return fd >= MXIO_FD && fd < MXIO_FD + MXIO_FILES; }

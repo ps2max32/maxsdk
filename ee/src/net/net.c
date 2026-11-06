@@ -39,12 +39,6 @@ int mx_net_connect(int s, u32 ip, u32 port) { return call(MXSOCK_CONNECT, (u32)s
 int mx_net_close(int s) { return call(MXSOCK_CLOSE, (u32)s, 0, 0, 0, 0, 0); }
 int mx_net_poll(int s, int want) { return call(MXSOCK_POLL, (u32)s, (u32)want, 0, 0, 0, 0); }
 
-void mx_net_close_all(void) {
-  /* a service that is not there has nothing open */
-  if (mx_sif_bound(&srv) || (mx_sif_init() == 0 && mx_sif_bind_tries(&srv, MXSOCK_SID, 1) == 0 && srv.server))
-    call(MXSOCK_CLOSE_ALL, 0, 0, 0, 0, 0, 0);
-}
-
 static void who(u32 *ip, u32 *port) {
   const volatile s32 *r = MX_UNCACHED(out);
   if (ip)
