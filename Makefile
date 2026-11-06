@@ -83,7 +83,8 @@ $(OUT)/objk/%.c.o: $(HERE)/%.c $(HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -DMX_KERNEL=1 -c $< -o $@
 
-LIBK_OBJS = $(filter-out $(OUT)/obj/src/base/start.c.o,$(LIB_OBJS)) $(OUT)/objk/src/base/start.c.o
+LIBK_SRCS = src/base/start.c src/base/sif.c
+LIBK_OBJS = $(filter-out $(LIBK_SRCS:%=$(OUT)/obj/%.o),$(LIB_OBJS)) $(LIBK_SRCS:%=$(OUT)/objk/%.o)
 
 $(LIBK): $(LIBK_OBJS)
 	rm -f $@

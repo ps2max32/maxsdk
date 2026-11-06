@@ -25,10 +25,11 @@ sees how a call reaches the kernel, so that can change without changing programs
 | Group | Headers | State |
 |---|---|---|
 | Program | `<mx/loader.h>`, `mx_exit` | the kernel's (version 1) |
-| Files | `<mx/sif.h>` (`mx_fio_*`) | program's own client |
+| SIF | `<mx/sif.h>` | the kernel's (version 2) |
+| Files | `<mx/sif.h>` (`mx_fio_*`) | program's own client, on the kernel's SIF; moves with virtual memory, which it knows |
 | Memory | `<mx/vm.h>`, `<mx/mem.h>` | program's own |
-| IOP | `<mx/iop.h>`, `<mx/sif.h>` | program's own client |
-| Pad, sound | `<mx/pad.h>`, `<mx/snd.h>` | program's own client |
+| IOP | `<mx/iop.h>`, `<mx/sif.h>` | over the kernel's SIF |
+| Pad, sound | `<mx/pad.h>`, `<mx/snd.h>` | program's own, over the kernel's SIF |
 | Network | to be defined | |
 | Threads, exceptions | `<mx/thread.h>`, `<mx/sched.h>` | program's own |
 

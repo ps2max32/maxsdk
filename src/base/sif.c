@@ -15,6 +15,25 @@
 #include <mx/vm.h>
 
 /* System command IDs */
+/* libmxk (MX_KERNEL) under mx-kernel: the kernel has the one client of the
+   IOP's SIF, and the functions it offers go there (docs/kernel.md). What
+   is above them here (the file server's client) stays, for it knows VM. */
+#ifdef MX_KERNEL
+#include <mx/kernel.h>
+#define KERNEL(call) \
+  if (mx__kernel)    \
+  return mx__kernel->call
+/* The kernel knows core addresses only: VM by its frame, written back here. */
+static const void *core_of(const void *p, u32 n) {
+  if (!mx_is_vm(p))
+    return p;
+  mx_dcache_writeback(p, n);
+  return (const void *)(uintptr_t)mx_paddr_range(p, n).v;
+}
+#else
+#define KERNEL(call)
+#endif
+
 #define CMD_CHANGE_SADDR 0x80000000u
 #define CMD_SET_SREG 0x80000001u
 #define CMD_INIT_CMD 0x80000002u
@@ -311,6 +330,7 @@ int mx_sif_serve(u32 sid, mx_sif_server_fn fn, void *arg) {
   if (mx__need_core((const void *)fn, "mx_sif_serve: the server") ||
       mx__need_core(arg, "mx_sif_serve: the server's argument"))
     return -1;
+  KERNEL(sif_serve(sid, fn, arg));
   for (int i = 0; i < NSERVER; i++) {
     if (!servers[i].fn || servers[i].sid == sid) {
       servers[i].arg = arg;
@@ -322,10 +342,20 @@ int mx_sif_serve(u32 sid, mx_sif_server_fn fn, void *arg) {
   return -1;
 }
 
-int mx_sif_ready(void) { return sif_state == 1; }
+int mx_sif_ready(void) {
+#ifdef MX_KERNEL
+  if (mx__kernel)
+    return 1;
+#endif
+  return sif_state == 1;
+}
 
 
 void mx_sif_exit(void) {
+#ifdef MX_KERNEL
+  if (mx__kernel)
+    return;
+#endif
   if (sif0_handler_id > 0)
     mx_bios_remove_dmac_handler(MX_DMAC_SIF0, sif0_handler_id);
   sif0_handler_id = 0;
@@ -333,6 +363,10 @@ void mx_sif_exit(void) {
 }
 
 int mx_sif_init(void) {
+#ifdef MX_KERNEL
+  if (mx__kernel)
+    return 0;
+#endif
   if (sif_state)
     return sif_state > 0 ? 0 : -1;
   sif_state = -1;
@@ -446,12 +480,20 @@ static int sleep_wait(struct mx_sif_client *c, u32 limit, u32 t0, int *r) {
 static u32 wait_us, waits, fio_us, fio_waits;
 /* the counts so far: waits, their µs, the file server's waits, their µs */
 void mx__sif_waits(u32 out[4]) {
+#ifdef MX_KERNEL
+  if (mx__kernel) {
+    mx__kernel->sif_waits(out);
+    return;
+  }
+#endif
   out[0] = waits, out[1] = wait_us, out[2] = fio_waits, out[3] = fio_us;
 }
 
 void mx__sif_report(void) {
-  mx_printf("maxsdk: IOP waits %u in %u ms, of them the file server's %u in %u ms\n", waits,
-            wait_us / 1000, fio_waits, fio_us / 1000);
+  u32 w[4];
+  mx__sif_waits(w);
+  mx_printf("maxsdk: IOP waits %u in %u ms, of them the file server's %u in %u ms\n", w[0],
+            w[1] / 1000, w[2], w[3] / 1000);
 }
 
 static int wait_answer1(struct mx_sif_client *c, int may_give_up);
@@ -491,6 +533,7 @@ static int wait_done(struct mx_sif_client *c) { return wait_answer(c, 0); }
 int mx_sif_bind(struct mx_sif_client *c, u32 sid) { return mx_sif_bind_tries(c, sid, 1000); }
 
 int mx_sif_bind_tries(struct mx_sif_client *c, u32 sid, int n) {
+  KERNEL(sif_bind_tries(c, sid, n));
   for (int tries = 0; tries < n; tries++) {
     u8 *p = rpc_alloc();
     volatile u32 *w = uw(p);
@@ -510,14 +553,27 @@ int mx_sif_bind_tries(struct mx_sif_client *c, u32 sid, int n) {
   return -1;
 }
 
-int mx_sif_bound(const struct mx_sif_client *c) { return c->server && c->epoch == sif_epoch; }
+int mx_sif_bound(const struct mx_sif_client *c) {
+  KERNEL(sif_bound(c));
+  return c->server && c->epoch == sif_epoch;
+}
 
 /* An RPC call; wait (cycles): 0 forever, otherwise give up after about
    that long and return -2. A call given up leaves its client to its late
    answer, if one comes (it frees the call's packet then): the caller must
    use another client struct for its next call (fio_call). */
+int mx__sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,
+                 u32 rsize, u32 wait);
+
 static int sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,
-                    u32 rsize, u32 wait);
+                    u32 rsize, u32 wait) {
+#ifdef MX_KERNEL
+  if (mx__kernel)
+    return mx__kernel->sif_call(c, fno, core_of(send, ssize), ssize,
+                                rsize ? (void *)core_of(recv, rsize) : recv, rsize, wait);
+#endif
+  return mx__sif_call(c, fno, send, ssize, recv, rsize, wait);
+}
 
 int mx_sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,
                 u32 rsize) {
@@ -529,13 +585,23 @@ static void sif_send_call(struct mx_sif_client *c, int fno, const void *send, u3
 
 void mx_sif_call_async(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,
                        u32 rsize) {
+#ifdef MX_KERNEL
+  if (mx__kernel) {
+    mx__kernel->sif_call_async(c, fno, core_of(send, ssize), ssize,
+                               rsize ? (void *)core_of(recv, rsize) : recv, rsize);
+    return;
+  }
+#endif
   sif_send_call(c, fno, send, ssize, recv, rsize);
 }
 
-int mx_sif_wait(struct mx_sif_client *c) { return wait_done(c); }
+int mx_sif_wait(struct mx_sif_client *c) {
+  KERNEL(sif_wait(c));
+  return wait_done(c);
+}
 
-static int sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,
-                    u32 rsize, u32 wait) {
+int mx__sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,
+                 u32 rsize, u32 wait) {
   sif_send_call(c, fno, send, ssize, recv, rsize);
   if (!wait)
     return wait_done(c);
@@ -569,6 +635,7 @@ static struct mx_sif_client rdc;
 static u8 rd_buf[512] MX_DMA_LINES;
 
 int mx_iop_read(u32 iop, void *dst, u32 size) {
+  KERNEL(iop_read(iop, dst, size));
   if (!mx_sif_ready() && mx_sif_init() < 0)
     return -1;
   u8 *d = dst;
@@ -690,10 +757,12 @@ volatile u32 mx__fio_calls;
 
 static int fio_call(int fno, const void *send, u32 ssize, void *recv, u32 rsize) {
   mx__fio_calls++;
-  u32 us0 = wait_us;
+  u32 w0[4], w1[4];
+  mx__sif_waits(w0);
   /* 12 s: the cycle counter wraps at 14.5 */
   int r = sif_call(fio_c, fno, send, ssize, recv, rsize, 12u * 294912000u);
-  fio_us += wait_us - us0;
+  mx__sif_waits(w1);
+  fio_us += w1[1] - w0[1];
   fio_waits++;
   if (r == -2) {
     /* the debug screen (<mx/debug.h>), slot 27: timeouts so far << 24 |
@@ -1196,6 +1265,15 @@ int mx_iop_reset(const char *arg) {
     s32 arglen, mode;
     char arg[80];
   } pkt MX_DMA_LINES;
+#ifdef MX_KERNEL
+  if (mx__kernel) {
+    int r = mx__kernel->iop_reset(arg);
+    sif_epoch++;
+    for (int i = 0; i < NPOS; i++)
+      fpos[i] = -1;
+    return r;
+  }
+#endif
   if (!mx_sif_ready() && mx_sif_init() < 0)
     return -1;
   u32 n = 0;

@@ -114,10 +114,20 @@ void mx_exit(int status) {
 int mx_loader_launch(int argc, const char *args, u32 args_len, const char *swap) {
   if (!loader_launch)
     return -1;
+  /* they may be in VM, which ends here */
+  static char args_copy[256], swap_copy[64];
+  if (args_len > sizeof args_copy)
+    args_len = sizeof args_copy;
+  for (u32 i = 0; i < args_len; i++)
+    args_copy[i] = args[i];
+  u32 n = 0;
+  for (; swap && swap[n] && n < sizeof swap_copy - 1; n++)
+    swap_copy[n] = swap[n];
+  swap_copy[n] = 0;
   mx_debug_flush();
   mx__vm_shutdown();
   mx__vm_swap_close();
-  loader_launch(argc, args, args_len, swap);
+  loader_launch(argc, args_copy, args_len, swap ? swap_copy : 0);
 }
 
 void mx__fio_base(const char *argv0);
