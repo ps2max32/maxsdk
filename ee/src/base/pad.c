@@ -4,6 +4,7 @@
    frame number is the newest. */
 
 #include <mx/cpu.h>
+#include <mx/kernel.h>
 #include <mx/mx.h>
 #include <mx/pad.h>
 #include <mx/sif.h>
@@ -33,7 +34,7 @@ static int ready;
 static u32 prev[2];
 static u32 analog_polls[2];
 
-int mx_pad_init(void) {
+int mx__pad_init(void) {
   if (ready)
     return 0;
   if (!mx_sif_ready() && mx_sif_init() < 0)
@@ -72,23 +73,9 @@ static volatile struct pad_record *newest(int port) {
   return r[0].frame < r[1].frame ? &r[1] : &r[0];
 }
 
-int mx_pad_connected(int port) {
-  if (!ready || (unsigned)port > 1)
-    return 0;
-  volatile struct pad_record *n = newest(port);
+static int connected(volatile struct pad_record *n) {
   return (n->state == PAD_STATE_STABLE || n->state == PAD_STATE_FINDCTP1) && n->length >= 4 &&
          n->data[0] == 0;
-}
-
-u32 mx_pad_buttons(int port) {
-  if (!mx_pad_connected(port))
-    return 0;
-  volatile struct pad_record *n = newest(port);
-  u32 b = ~(u32)(n->data[2] | n->data[3] << 8) & 0xFFFF;
-  /* the way out of any program: back to the loader */
-  if ((b & MX_PAD_QUIT) == MX_PAD_QUIT)
-    mx_exit(0);
-  return b;
 }
 
 /* A DualShock starts digital: once it is stable, ask for analog mode,
@@ -105,20 +92,59 @@ static void want_analog(int port, volatile struct pad_record *n) {
   mx_sif_call(&pad, 1, cmd, sizeof cmd, (void *)MX_UNCACHED(res), sizeof res);
 }
 
-int mx_pad_sticks(int port, u8 st[4]) {
+int mx__pad_read(int port, struct mx_pad_state *s, int sticks) {
+  s->buttons = 0;
+  s->analog = 0;
   for (int i = 0; i < 4; i++)
-    st[i] = 128;
-  if (!mx_pad_connected(port))
+    s->sticks[i] = 128;
+  if (!ready || (unsigned)port > 1)
     return 0;
   volatile struct pad_record *n = newest(port);
+  if (!connected(n))
+    return 0;
+  s->buttons = ~(u32)(n->data[2] | n->data[3] << 8) & 0xFFFF;
+  if (!sticks)
+    return 1;
   want_analog(port, n);
   /* data[1]: the type in the high nibble (7: analog) and the halfwords of
      data after it in the low one; the sticks are data[4..7] */
   if ((n->data[1] >> 4) != 7 || (n->data[1] & 15) < 3 || n->length < 8)
-    return 0;
+    return 1;
+  s->analog = 1;
   for (int i = 0; i < 4; i++)
-    st[i] = n->data[4 + i];
+    s->sticks[i] = n->data[4 + i];
   return 1;
+}
+
+/* the kernel's pad (table version 6), or this file's */
+static int kpad(void) { return mx__kernel && mx__kernel->version >= 6; }
+
+static int pad_get(int port, struct mx_pad_state *s, int sticks) {
+  return kpad() ? mx__kernel->pad_read(port, s, sticks) : mx__pad_read(port, s, sticks);
+}
+
+int mx_pad_init(void) { return kpad() ? mx__kernel->pad_init() : mx__pad_init(); }
+
+int mx_pad_connected(int port) {
+  struct mx_pad_state s;
+  return pad_get(port, &s, 0);
+}
+
+u32 mx_pad_buttons(int port) {
+  struct mx_pad_state s;
+  pad_get(port, &s, 0);
+  /* the way out of any program: back to the loader */
+  if ((s.buttons & MX_PAD_QUIT) == MX_PAD_QUIT)
+    mx_exit(0);
+  return s.buttons;
+}
+
+int mx_pad_sticks(int port, u8 st[4]) {
+  struct mx_pad_state s;
+  pad_get(port, &s, 1);
+  for (int i = 0; i < 4; i++)
+    st[i] = s.sticks[i];
+  return s.analog;
 }
 
 u32 mx_pad_pressed(int port) {

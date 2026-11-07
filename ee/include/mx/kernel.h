@@ -16,7 +16,10 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 5
+#define MX_KERNEL_VERSION 6
+/* The oldest table libmxk runs on: what came later it uses only when the
+   table's version has it (the pad from version 6), else its own code. */
+#define MX_KERNEL_MIN 5
 
 /* The kernel's side of what libmxk has no code for: virtual memory, heaps and
    the file server's client, with the same arguments (version 4). libmxk's
@@ -74,6 +77,19 @@ void mx__vm_swap_close(void);
 void mx__vm_report(void);
 int mx__vm_load_image(const char *path);
 
+/* A pad's state (the kernel's pad, version 6): the buttons held (MX_PAD_*),
+   the sticks as mx_pad_sticks gives them, analog 1 when they are real. */
+struct mx_pad_state {
+  u32 buttons;
+  u8 sticks[4];
+  u32 analog;
+};
+/* ee/src/base/pad.c's own reading of the pad driver, without the quit
+   combination: libmx's, and the kernel's. read: 1 with a pad connected;
+   sticks: read them (and ask for analog mode) too. */
+int mx__pad_init(void);
+int mx__pad_read(int port, struct mx_pad_state *s, int sticks);
+
 struct mxk_services {
   u32 magic;   /* MX_KERNEL_MAGIC */
   u32 version; /* MX_KERNEL_VERSION of the kernel */
@@ -122,7 +138,14 @@ struct mxk_services {
 
   /* version 5: the end of a program's threads, none of them in a file call */
   void (*fio_ending)(void (*stop)(void));
+
+  /* version 6: the pad is the kernel's (mx_pad_init, mx__pad_read with the
+     kernel's pad settings applied) */
+  int (*pad_init)(void);
+  int (*pad_read)(int port, struct mx_pad_state *s, int sticks);
 };
+/* the size of a table of version MX_KERNEL_MIN */
+#define MXK_MIN_SIZE __builtin_offsetof(struct mxk_services, pad_init)
 
 /* The kernel's side of sif_call (ee/src/base/sif.c). */
 int mx__sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,

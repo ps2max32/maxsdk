@@ -2,7 +2,7 @@
 
 mxlink (`tools/mxlink`) is growing into a small resident OS for the PS2. A program uses what it
 offers and keeps the graphics. Library split and service state: [kernel.md](kernel.md). Virtual
-memory: [vm.md](vm.md).
+memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-os-plan.md).
 
 ## Model
 
@@ -27,7 +27,7 @@ memory: [vm.md](vm.md).
 
 | Who | Owns |
 |---|---|
-| Kernel (mxlink) | IOP, SIF, program start and end, TLB and VM, heaps, files, exceptions; later pad, sound |
+| Kernel (mxlink) | IOP, SIF, program start and end, TLB and VM, heaps, files, exceptions, the pad (`libmxk`); later sound |
 | Program | GS, VIF, VU, DMAC, its frame loop |
 
 ## Memory (EE)

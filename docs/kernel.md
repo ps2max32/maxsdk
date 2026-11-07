@@ -24,8 +24,9 @@ The kernel is `tools/mxlink`, resident at 0x88000-0xFF800. `libmxk` calls it thr
 `struct mxk_services` (`<mx/kernel.h>`), a table the loader passes. Only `libmxk` sees how
 a call reaches the kernel, so that can change without changing programs. Kernel code runs
 in the caller's thread; the VM's writer and pager are threads of the kernel. Functions are
-only added at the end of the table, so older programs keep working; `libmxk` needs a table
-of at least its own version.
+only added at the end of the table, so older programs keep working. `libmxk` needs a table
+of at least `MX_KERNEL_MIN` (5); what came later it uses only when the kernel's table has it,
+else its own code (the pad: version 6), so a new program still runs on an older kernel.
 
 ## Service groups
 
@@ -37,7 +38,8 @@ of at least its own version.
 | Files | `<mx/sif.h>` (`mx_fio_*`) | the kernel's (version 4), through mxio if the IOP has it, else FILEIO |
 | Memory | `<mx/vm.h>`, `<mx/mem.h>` | the kernel's (version 4) |
 | IOP | `<mx/iop.h>`, `<mx/sif.h>` | over the kernel's SIF; `mx_iop_reboot_image` (an IOPRP image in EE memory) is libmx's only: -1 under the kernel, which resets the IOP by a path |
-| Pad, sound | `<mx/pad.h>`, `<mx/snd.h>` | program's own, over the kernel's SIF |
+| Pad | `<mx/pad.h>` | the kernel's (version 6, `ee/src/base/pad.c`'s reading in the kernel's memory): it opens the ports when a program asks, applies the pad's settings (ports swapped, Cross and Circle swapped: `tools/mxlink/ee/pad.c`) and closes them when the program ends; on a kernel of version 5 the program's own, over the kernel's SIF |
+| Sound | `<mx/snd.h>` | program's own, over the kernel's SIF |
 | Threads | `<mx/thread.h>`, `<mx/sched.h>` | program's own; `mx_sleep_us` takes EE timer 0, which `mx_exit` stops |
 | Network | `<mx/net.h>` | a service on the IOP, `iop/tcpip/mxsock`, loaded by mxlink when it is on the card, on lwIP over maxsdk's drivers (mxdev9, mxeth, mxnet) or, without them, ps2sdk's; closed when a program ends. `mx_net_wait` sleeps at one of its four wait services (at most 100 ms a call); with an older mxsock it asks every millisecond |
 
