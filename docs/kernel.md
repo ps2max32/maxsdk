@@ -36,7 +36,7 @@ of at least its own version.
 | Exceptions | `<mx/debug.h>` (`mx_exception_init`, `mx_crash_last`) | the kernel's (version 3) |
 | Files | `<mx/sif.h>` (`mx_fio_*`) | the kernel's (version 4), through mxio if the IOP has it, else FILEIO |
 | Memory | `<mx/vm.h>`, `<mx/mem.h>` | the kernel's (version 4) |
-| IOP | `<mx/iop.h>`, `<mx/sif.h>` | over the kernel's SIF |
+| IOP | `<mx/iop.h>`, `<mx/sif.h>` | over the kernel's SIF; `mx_iop_reboot_image` (an IOPRP image in EE memory) is libmx's only: -1 under the kernel, which resets the IOP by a path |
 | Pad, sound | `<mx/pad.h>`, `<mx/snd.h>` | program's own, over the kernel's SIF |
 | Threads | `<mx/thread.h>`, `<mx/sched.h>` | program's own; `mx_sleep_us` takes EE timer 0, which `mx_exit` stops |
 | Network | `<mx/net.h>` | a service on the IOP, `iop/tcpip/mxsock`, loaded by mxlink when it is on the card, on lwIP over maxsdk's drivers (mxdev9, mxeth, mxnet) or, without them, ps2sdk's; closed when a program ends. `mx_net_wait` sleeps at one of its four wait services (at most 100 ms a call); with an older mxsock it asks every millisecond |

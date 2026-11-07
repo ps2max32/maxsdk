@@ -1456,6 +1456,8 @@ int mx_fio_rmdir(const char *path) { return fio_path_call(FILEIO_RMDIR, path); }
 
 /* ---- IOP reset ---------------------------------------------------------- */
 
+static int reset_wait(void);
+
 /* As ps2sdk's SifIopReset, SifIopSync and SifInitRpc: a RESET command to
    the IOP's SIF command handler, then the SIF registers as a new IOP boot
    expects them; the IOP sets BOOTEND in SMFLAG when it is up again. */
@@ -1497,7 +1499,42 @@ int mx_iop_reset(const char *arg) {
   mx_bios_sif_set_reg(REG_SMFLAG, SMFLAG_CMDINIT);
   mx_bios_sif_set_reg(SYSREG_RPCINIT, 0);
   mx_bios_sif_set_reg(SYSREG_SUBADDR, 0);
+  return reset_wait();
+}
 
+/* For mx_iop_reboot_image (iop.c): LOADFILE loads path (UDNL) with args
+   (args_len bytes, strings one after the other), which reboots the IOP: no
+   answer comes. Then the SIF registers and the wait as for mx_iop_reset. */
+int mx__iop_reboot_udnl(const char *path, const char *args, u32 args_len) {
+#ifdef MX_KERNEL
+  if (mx__kernel)
+    return -1; /* the kernel resets the IOP by a path (iop_reset) only */
+#endif
+  if ((!mx_sif_ready() && mx_sif_init() < 0) ||
+      (!mx_sif_bound(&lf) && mx_sif_bind(&lf, LOADFILE_SID) < 0))
+    return -1;
+  u32 i = 0;
+  for (; path[i] && i < sizeof lf_arg.path - 1; i++)
+    lf_arg.path[i] = path[i];
+  lf_arg.path[i] = 0;
+  if (args_len > sizeof lf_arg.args)
+    args_len = sizeof lf_arg.args;
+  for (i = 0; i < args_len; i++)
+    lf_arg.args[i] = args[i];
+  lf_arg.result = (s32)args_len;
+  lf_arg.modres = 0;
+  mx_sif_call_async(&lf, 0, &lf_arg, sizeof lf_arg, (void *)MX_UNCACHED(lf_result), 8);
+  /* as ps2sdk's SifIopRebootBuffer after its LoadModule without waiting */
+  mx_bios_sif_set_reg(REG_SMFLAG, SMFLAG_SIFINIT);
+  mx_bios_sif_set_reg(REG_SMFLAG, SMFLAG_CMDINIT);
+  mx_bios_sif_set_reg(REG_SMFLAG, SMFLAG_BOOTEND);
+  mx_bios_sif_set_reg(SYSREG_RPCINIT, 0);
+  mx_bios_sif_set_reg(SYSREG_SUBADDR, 0);
+  return reset_wait();
+}
+
+/* After the IOP got its reboot: wait for it to come back up. */
+static int reset_wait(void) {
   /* everything of the IOP before is gone: our bindings, its packets, the
      file positions; mx_sif_init starts again once the IOP is up */
   mx_sif_exit();

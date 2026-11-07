@@ -15,6 +15,10 @@ memory: [vm.md](vm.md).
   (ps2dev9, netman, smap, ps2ip-nm). The fast path for `host:` files is its own module beside
   mxnet on maxsdk's drivers (mxfast), and part of ps2ip-nm on ps2sdk's. Between programs mxlink closes files, pad ports and sound, and
   keeps the IOP and the network.
+- Boot: the memory card's system update is mxboot (`tools/mxboot`): its phase 1 starts
+  `mc0:/MXOS/MXBOOT.ELF`, which starts the ELF that `MXOS/BOOTONCE.CFG` names (once: the file is
+  removed first) or `MXOS/BOOT.CFG` (`mc?:/MXOS/MXLINK.ELF`). A new mxlink or program is tried as
+  the one-shot: if it hangs, a reset boots the default again.
 - Start: mxlink loads the ELF (from `host:`, `usb0:`, `mx4sio0:`, ...) and runs it in a thread
   at priority 64. End: back to mxlink, then the shell (`mc0:/MXOS/MXSHELL.ELF`) if it started
   the program.

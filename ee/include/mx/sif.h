@@ -78,6 +78,7 @@ int mx_tty_write(const char *s, u32 n);
 #define MX_FIO_SEEK_CUR 1
 #define MX_FIO_SEEK_END 2
 int mx_fio_open(const char *path, int flags);
+/* Write n bytes: 0 when all were written, -1 otherwise. */
 int mx_fio_write(int fd, const void *data, u32 n);
 /* Read up to n bytes into data (any alignment, room for n bytes); returns the
    bytes read (fewer at the end of the file, and then the bytes of data after

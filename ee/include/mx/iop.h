@@ -17,6 +17,13 @@
    when the IOP does not come back within 10 s. */
 int mx_iop_reset(const char *arg);
 
+/* Reboot the IOP with the IOPRP image of size bytes at img (EE memory), as
+   ps2sdk's SifIopRebootBuffer: its modules take the place of the ROM's of
+   the same name (e.g. a SECRMAN), the ROM's IOPBTCONF stays (an image with
+   an IOPBTCONF of its own is not supported). A plain reset first, then as
+   mx_iop_reset. Not under mx-kernel (libmxk): returns -1 there. */
+int mx_iop_reboot_image(const void *img, u32 size);
+
 /* Copy size bytes of IOP RAM at iop (any alignment) to dst. */
 int mx_iop_read(u32 iop, void *dst, u32 size);
 /* Copy size bytes from src to IOP RAM at iop: both 16-byte aligned, size a

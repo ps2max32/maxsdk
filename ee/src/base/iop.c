@@ -367,6 +367,46 @@ int mx_iop_load_module_buffer(const void *buf, u32 size, const char *args, u32 a
   return r;
 }
 
+/* ---- reboot with an IOPRP image in EE memory --------------------------------- */
+
+/* As ps2sdk's SifIopRebootBuffer: after a plain reset the image goes into the
+   IOP heap behind a small ROM directory of its own (RESET, ROMDIR, "0" the
+   image, "1" empty: no IOPBTCONF of its own), ROMDRV is told that this is
+   rom1: (sbv_patch_romdrv_set_rom1_info), and UDNL reboots the IOP from
+   rom1:0. */
+int mx__iop_reboot_udnl(const char *path, const char *args, u32 args_len);
+
+int mx_iop_reboot_image(const void *img, u32 size) {
+  if (mx_iop_reset("") < 0)
+    return -1;
+  u32 isize = (size + 15) & ~15u;
+  static const char names[5][10] = {"RESET", "ROMDIR", "0", "1", ""};
+  const u32 sizes[5] = {0, 0x50, isize, 0, 0};
+  u32 dir[20];
+  u8 *d = (u8 *)dir;
+  for (int e = 0; e < 5; e++) {
+    for (int i = 0; i < 10; i++)
+      d[e * 16 + i] = (u8)names[e][i];
+    d[e * 16 + 10] = d[e * 16 + 11] = 0; /* no EXTINFO */
+    dir[e * 4 + 3] = sizes[e];
+  }
+  u32 p = mx_iop_alloc(0x50 + isize);
+  if (!p || iop_copy(p, dir, 0x50) < 0 || iop_copy(p + 0x50, img, size) < 0)
+    return -1;
+  /* ROMDRV's mount table, in its BSS: rom0: first (image, ROMDIR start and
+     end), then rom1: */
+  struct mx_iop_module m;
+  if (!mx_iop_find_module("ROM_file_driver", &m))
+    return -1;
+  u32 mt = m.text_start + m.text_size + m.data_size + 0x40, cur[3];
+  if (mx_iop_read(mt, cur, 12) < 0 || cur[0] != 0xBFC00000u || cur[1] <= cur[0] || cur[2] <= cur[1])
+    return -1;
+  const u32 rom1[3] = {p, p, p + 0x50};
+  if (iop_write_words(mt + 12, rom1, 3) < 0)
+    return -1;
+  return mx__iop_reboot_udnl("rom:UDNL", "rom1:0\0rom1:1", 13);
+}
+
 /* ---- MODLOAD: the device check -------------------------------------------- */
 
 int mx_iop_patch_prefix_check(void) {
