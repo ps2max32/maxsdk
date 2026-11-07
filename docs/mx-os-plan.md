@@ -78,9 +78,13 @@ on `libmxk` (the kernel's pad); the others keep the combination as quit.
 - The shell (the GUI) and mxlink's host link screen run as processes beside a program. A
   program left in the background stays in memory, or goes to the swap file (16 MiB: about
   3.5 s to `host:`, 20 s to USB).
-- To measure first: does the BIOS keep VU0's registers (COP2) at a thread switch; ASIDs with
-  the BIOS's vectors and the VM's fast refill (`tlbr` replaces EntryHi's ASID). PS2 only: PCSX2
-  gets `tlbwr` and `tlbp` wrong.
+- Measured (`probe/p33_asid.c`, PS2, 2026-11-07; `bios.md`): ASIDs work (G = 0 entries match
+  only their ASID, G = 1 all); the ASID survives syscalls and interrupts but is the CPU's, not
+  a thread's: the kernel sets it at each process switch. The BIOS keeps no VU0 register (VF,
+  VI) at a thread switch, the FPU's it does: the kernel saves VU0's at a process switch.
+- Still to do: the VM's refill writes EntryHi with ASID 0 (`tlbwi` after setting EntryHi), so
+  its entries become per process only when it writes the process's ASID; the BIOS's TLB
+  entries for core memory are global and stay so for the kernel's memory below 1 MiB.
 
 ### Step 3: windows
 

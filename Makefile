@@ -133,6 +133,8 @@ $(OUT)/probe/p15_vu0skin.elf: PROBE_CFLAGS = -mvu0 -fapprox-func
 $(OUT)/probe/p16_vu0reg.elf: PROBE_CFLAGS = -mvu0 -fapprox-func
 # all VF registers reserved: the VU0 programs it calls write most of them
 $(OUT)/probe/p17_vu0c.elf: PROBE_CFLAGS = -mvu0 $(foreach r,$(shell seq 1 31),-ffixed-vf$(r))
+# p33: VU0 registers by asm, none for the compiler
+$(OUT)/probe/p33_asid.elf: PROBE_CFLAGS = -mvu0 $(foreach r,$(shell seq 1 31),-ffixed-vf$(r))
 
 # An example's C file finds the headers of its directory.
 $(OUT)/examples/%.elf: %.c $(LIB) $(CRT0) $(VU_OBJS) $(HLSL_OBJS) $(HLSL_HDRS) $(HDRS) $(MX_LD)
