@@ -110,14 +110,11 @@ void mxdev9_intr_off(u32 mask) {
 
 /* ---- DMA */
 
-/* channel 8's interrupt on or off (DICR2's enable bits; its flags, written 1,
-   would clear, so they are written 0) */
-#define DICR2 (*(volatile u32 *)0xbf801574)
-#define DICR2_DEV9 (1u << 18)
-static void dma_irq_on(int on) {
-  u32 v = DICR2 & 0x00ffffff;
-  DICR2 = on ? v | DICR2_DEV9 : v & ~DICR2_DEV9;
-}
+/* Channel 8's interrupt: off until the first queued request (mxdev9_dma), then
+   on for good; a short transfer's end (mxdev9_dma_begin) is then ignored. Only
+   through intrman: writing DICR2 here, once a frame, spoilt other channels'
+   transfers (a memory card write's last bytes, sent over SIF). */
+static int dma_irq_enabled;
 
 /* interrupts off */
 static void dma_go(struct mxdev9_dma *d) {
@@ -133,8 +130,8 @@ static void dma_go(struct mxdev9_dma *d) {
 static int dma_irq(void *unused) {
   (void)unused;
   struct mxdev9_dma *d = head;
-  if (!d)
-    return 1;
+  if (busy != 1 || !d)
+    return 1; /* a short transfer's end, which mxdev9_dma_end waits for */
   head = d->next;
   if (!head)
     tail = 0;
@@ -160,9 +157,12 @@ void mxdev9_dma(struct mxdev9_dma *d) {
   n_dma++;
   if (++depth > max_depth)
     max_depth = depth;
+  if (!dma_irq_enabled) {
+    EnableIntr(IOP_IRQ_DMA_DEV9);
+    dma_irq_enabled = 1;
+  }
   if (!busy) {
     busy = 1;
-    dma_irq_on(1);
     dma_go(d);
   } else
     n_queued++;
@@ -178,7 +178,6 @@ int mxdev9_dma_begin(struct mxdev9_dma *d) {
   }
   busy = 2;
   n_dma++;
-  dma_irq_on(0);
   dma_go(d);
   CpuResumeIntr(st);
   return 0;
@@ -192,7 +191,6 @@ void mxdev9_dma_end(struct mxdev9_dma *d) {
   CpuSuspendIntr(&st);
   if (head) {
     busy = 1;
-    dma_irq_on(1);
     dma_go(head);
   } else
     busy = 0;
@@ -363,7 +361,6 @@ int _start(int argc, char **argv) {
   RegisterIntrHandler(IOP_IRQ_DEV9, 1, dev9_irq, 0);
   RegisterIntrHandler(IOP_IRQ_DMA_DEV9, 1, dma_irq, 0);
   EnableIntr(IOP_IRQ_DEV9);
-  EnableIntr(IOP_IRQ_DMA_DEV9);
   CpuResumeIntr(st);
   DEV9_REG(DEV9_R_1466) = 0;
   printf("mxdev9: SPEED rev %x caps %x%s\n", spd_rev, caps, mac_ok ? "" : ", no MAC");

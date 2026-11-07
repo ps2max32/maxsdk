@@ -42,7 +42,7 @@ void mxdev9_intr_off(u32 mask);
 /* queue a request, from any context: it starts when the channel is free, and
    its end is the channel's interrupt. For long transfers (ATA). */
 void mxdev9_dma(struct mxdev9_dma *d);
-/* A short transfer (a frame) from a thread, without the interrupt: begin starts
+/* A short transfer (a frame) from a thread, without waiting for an interrupt: begin starts
    it if the channel is free (0; -1 if not), the caller works on meanwhile, and
    end waits for the rest of it. done is not called; start is. On the IOP an
    interrupt and a thread switch cost more than the 40 us a frame's DMA takes

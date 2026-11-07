@@ -48,8 +48,10 @@ modules stay on the card, and mxlink loads them if `mxdev9` or `mxeth` is missin
   their own sources.
 - **DMA**, two ways:
   - `mxdev9_dma_begin` / `mxdev9_dma_end`, for frames: a thread starts the transfer (if the
-    channel is free), works on meanwhile, and `end` waits for what is left of it, with the
-    channel's interrupt off. A frame's DMA takes about 40 us; on the IOP an interrupt and a thread
+    channel is free), works on meanwhile, and `end` waits for what is left of it (the
+    channel's interrupt, if it is on for queued requests, is ignored then). DICR2 is written only
+    by intrman: mxdev9 turning channel 8's interrupt off and on in it for each frame spoilt other
+    channels' transfers (the last 4 bytes of a memory card write, which come over SIF). A frame's DMA takes about 40 us; on the IOP an interrupt and a thread
     switch cost more than that (measured below), so waiting for the rest is the cheaper wait here.
   - `mxdev9_dma` queues a request (`struct mxdev9_dma`: device, buffer, blocks, direction,
     `start` and `done`), from a thread or an interrupt handler. It starts when the channel is free
@@ -141,9 +143,9 @@ lowest priority gets of the IOP.
 | | ps2sdk: ps2dev9, netman, smap | mxdev9, mxeth |
 |---|---|---|
 | first answer to the host after the IOP reset | 1.0 s after mxeth's | at once (the PHY's link is taken as it is) |
-| receive 12 MB/s, frames counted | 11.77 MB/s, 54% free | 11.75 MB/s, 49% free |
-| receive to the EE, 2 / 6 / 10 MB/s | 73 / 52 / 30% free | 76 / 59 / 41% free |
-| receive to the EE, 12 MB/s | 11.77 MB/s, 19% free | 11.75 MB/s, 33% free |
+| receive 12 MB/s, frames counted | 11.77 MB/s, 54% free | 11.75 MB/s, 61% free |
+| receive to the EE, 2 / 6 / 10 MB/s | 73 / 52 / 30% free | 75 / 56 / 36% free |
+| receive to the EE, 12 MB/s | 11.77 MB/s, 19% free | 11.75 MB/s, 26% free |
 | send 4000 frames of 1514 bytes | 7.92 MB/s, 39% free | 10.91 MB/s, 0% free |
 
 TCP through lwIP (`probe/iop/net.c`, `net_host.py`: 8 MiB each way), where lwIP is the limit as
@@ -155,7 +157,8 @@ Through mxlink (mxdev9, mxeth and mxnet from the card), 2026-11-07: p29 (UDP ech
 pass; `p21_iolat` on `host:` (the fast path, still inside mxnet): a 32 KiB READ 4.1 ms, a
 32 KiB WRITE 7.5 ms, as with ps2sdk's drivers.
 
-No frame lost in any run. Two designs measured first, both left 4% free at 12 MB/s:
+No frame lost in any run. (Numbers since the DICR2 fix; before it, writing DICR2 each frame,
+receiving to the EE left 33% at 12 MB/s.) Two designs measured first, both left 4% free at 12 MB/s:
 
 - **Everything in interrupt context**, chained by the DMA queue (each frame: the SMAP's
   interrupt starts its DMA, the DMA's interrupt finishes it, the thread wakes for the clients):
