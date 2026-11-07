@@ -1571,3 +1571,45 @@ static int reset_wait(void) {
   }
   return 0;
 }
+
+#ifndef MX_KERNEL /* the kernel's side only */
+/* ---- the end of a program without a restart (mx-kernel) -------------------- */
+
+/* A client's semaphore that is gone (the kernel deletes the semaphores made
+   while a program ran, its clients' too): a new one at the next wait. */
+void mx__sif_client_check(struct mx_sif_client *c) {
+  u32 st[6];
+  if (c->sema && mx_bios_refer_sema_status(c->sema - 1, st) < 0)
+    c->sema = 0;
+}
+
+/* What the program left here, once its threads and semaphores are gone:
+   sleepers and servers in its memory (from 1 MiB up: the kernel is below),
+   the positions of its descriptors, the fio lock (made for its VM), and the
+   semaphores of the kernel's own clients that it made. docs/mx-os-plan.md
+   step 2a. */
+static int program_memory(const volatile void *p) {
+  return ((u32)(uintptr_t)p & 0x1FFFFFFFu) >= 0x00100000u;
+}
+void mx__sif_program_end(void) {
+  int was = mx_di();
+  for (int i = 0; i < NSLEEP; i++)
+    if (sleepers[i] && program_memory(sleepers[i]))
+      sleepers[i] = 0;
+  for (int i = 0; i < NSERVER; i++)
+    if (servers[i].fn && program_memory((const void *)servers[i].fn))
+      servers[i] = (struct server){0};
+  mx_irq_restore(was);
+  for (int i = 3; i < NPOS; i++)
+    fpos[i] = -1;
+  if (fio_sema >= 0)
+    mx_bios_delete_sema(fio_sema);
+  fio_sema = -1;
+  fio_nolock = 0;
+  for (u32 i = 0; i < sizeof fio_pool / sizeof fio_pool[0]; i++)
+    mx__sif_client_check(&fio_pool[i]);
+  mx__sif_client_check(&mxio);
+  mx__sif_client_check(&rdc);
+  mx__sif_client_check(&lf);
+}
+#endif

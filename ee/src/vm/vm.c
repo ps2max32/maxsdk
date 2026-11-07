@@ -309,6 +309,7 @@ static void tr_tick(void) {
 }
 
 int mx__irq_vbon_hook(void (*fn)(void)); /* ee/src/irq/irq.c */
+void mx__irq_vbon_unhook(void (*fn)(void));
 
 /* At each vblank: the VM's entries out of the TLB, so a page in use
    refills (and gets a new stamp, for evict) at least once a vblank: 24
@@ -1937,3 +1938,7 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
     writer_start(cfg->clean_frames);
   return 0;
 }
+
+/* The kernel at a program's end: the VM's vblank function off (its state is
+   set back as linked then, docs/mx-os-plan.md step 2a). */
+void mx__vm_unhook(void) { mx__irq_vbon_unhook(vblank); }

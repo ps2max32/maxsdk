@@ -23,6 +23,7 @@ void mx__kstart(void *heap_lo, void *heap_hi) {
   mx__kernel->program(heap_lo, heap_hi, __mx_vm_start, __mx_vm_end);
   mx__kernel->heaps(h);
   heap_pinned = h[0], heap_stream = h[1], heap_paged = h[2];
+  mx__irq_tell_kernel();
 }
 
 /* debug output comes before the kernel is known, and without one */

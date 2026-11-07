@@ -17,7 +17,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 7
+#define MX_KERNEL_VERSION 8
 /* The oldest table libmxk runs on: what came later it uses only when the
    table's version has it (the pad from version 6), else its own code. */
 #define MX_KERNEL_MIN 5
@@ -91,6 +91,13 @@ struct mx_pad_state {
 int mx__pad_init(void);
 int mx__pad_read(int port, struct mx_pad_state *s, int sticks);
 
+/* A program's interrupt slots (ee/src/irq/irq.c), for the kernel at its end:
+   each slot's BIOS handler id (0: none) at id_offset (version 8). */
+struct mxk_irq_tables {
+  const void *intc, *dmac;
+  u32 nintc, ndmac, slot_size, id_offset;
+};
+
 struct mxk_services {
   u32 magic;   /* MX_KERNEL_MAGIC */
   u32 version; /* MX_KERNEL_VERSION of the kernel */
@@ -158,6 +165,10 @@ struct mxk_services {
   void (*gs_mode)(const struct mx_video_mode *m);
   u32 (*home_wanted)(void);
   int (*home_run)(u32 page, u32 pages);
+
+  /* version 8: a program ends without a restart (docs/mx-os-plan.md, 2a):
+     the kernel is told where its interrupt slots are */
+  void (*irq_tables)(const struct mxk_irq_tables *t);
 };
 /* the size of a table of version MX_KERNEL_MIN */
 #define MXK_MIN_SIZE __builtin_offsetof(struct mxk_services, pad_init)
@@ -165,6 +176,16 @@ struct mxk_services {
 /* The home menu at the frame boundary (ee/src/gs/home.c): called by
    mx_frame_begin_n. */
 void mx__home_poll(void);
+
+/* libmxk's start: the program's interrupt slots to the kernel (irq.c). */
+void mx__irq_tell_kernel(void);
+/* The kernel at a program's end (2a): what the program left in the SIF
+   layer, a client whose semaphore is gone, and the VM's vblank function. */
+void mx__sif_program_end(void);
+struct mx_sif_client;
+void mx__sif_client_check(struct mx_sif_client *c);
+void mx__irq_vbon_unhook(void (*fn)(void));
+void mx__vm_unhook(void);
 
 /* The kernel's side of sif_call (ee/src/base/sif.c). */
 int mx__sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,

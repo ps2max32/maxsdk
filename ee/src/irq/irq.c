@@ -3,6 +3,7 @@
 #include <mx/debug.h>
 #include <mx/hw/formats.h>
 #include <mx/irq.h>
+#include <mx/kernel.h>
 #include <mx/trace.h>
 
 struct slot {
@@ -73,6 +74,33 @@ int mx__irq_vbon_hook(void (*fn)(void)) {
   return 0;
 }
 
+static int vbon_hook_any(void) {
+  for (int i = 0; i < VBON_HOOKS; i++)
+    if (vbon_hook[i])
+      return 1;
+  return 0;
+}
+
+/* fn no longer at each vblank start (the kernel, for what ran for a program). */
+void mx__irq_vbon_unhook(void (*fn)(void)) {
+  int was = mx_di();
+  for (int i = 0; i < VBON_HOOKS; i++)
+    if (vbon_hook[i] == fn)
+      vbon_hook[i] = 0;
+  mx_irq_restore(was);
+}
+
+/* libmxk: the kernel is told where this program's slots are, so it can take
+   their BIOS handlers away when the program ends (mx-kernel 8). */
+void mx__irq_tell_kernel(void) {
+  if (!mx__kernel || mx__kernel->version < 8)
+    return;
+  static const struct mxk_irq_tables t = {
+      .intc = intc, .dmac = dmac, .nintc = 15, .ndmac = 10, .slot_size = sizeof(struct slot),
+      .id_offset = __builtin_offsetof(struct slot, bios_id)};
+  mx__kernel->irq_tables(&t);
+}
+
 void mx_irq_dmac(int ch, mx_irq_fn fn, void *arg) {
   if (mx__need_core((const void *)fn, "mx_irq_dmac: the handler") ||
       mx__need_core(arg, "mx_irq_dmac: the handler's argument"))
@@ -122,6 +150,14 @@ void mx_irq_exit(void) {
       mx_bios_remove_intc_handler(i, intc[i].bios_id);
       intc[i] = (struct slot){0};
     }
+}
+
+/* Has this library a handler for DMAC channel (dmac 1) or INTC cause n? For
+   the kernel, which disables what a program left only if it is not its own. */
+int mx__irq_slot_used(int is_dmac, int n) {
+  if (is_dmac)
+    return n >= 0 && n < 10 && dmac[n].fn;
+  return n >= 0 && n < 15 && (intc[n].fn || (n == MX_INTC_VBON && vbon_hook_any()));
 }
 
 u32 mx_irq_dmac_count(int ch) { return dmac[ch].count; }

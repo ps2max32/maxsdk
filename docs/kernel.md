@@ -48,11 +48,30 @@ The program's first call gives the kernel its core memory after `_end` and its V
 the heaps and the program break work in those. The kernel's VM state is cleared by the
 restart after each program.
 
-## The restart
+## The end of a program
 
-Each program ends in `ExecPS2`, which starts the kernel again but does not load it: `.bss`
+A `libmxk` program (one that called the kernel's `program` service) ends **without a restart**
+(version 8, `tools/mxlink/ee/end.c`): its way back (`mx_exit`, a crash, BIOS `Exit`) wakes the
+command thread and sleeps; the command thread then does what ExecPS2 did:
+- the BIOS's threads and semaphores that were not there just before the program started are
+  terminated and deleted (the program's, the VM's pager and writer, its clients' semaphores);
+- the program's interrupt handlers are removed: its `libmxk` told the kernel where its slots
+  are (`irq_tables`), the kernel reads their BIOS ids and runs none of the program's code; a
+  cause or channel without a handler of the kernel's own is disabled;
+- what the program left in the kernel's SIF layer goes (`mx__sif_program_end`: sleepers and
+  servers in its memory, descriptor positions, the fio lock); the VM's and the home menu's
+  vblank functions are taken off;
+- the units: DMA channels but SIF's stopped, VIF0/VIF1, GIF, IPU, VU0/VU1 reset, timers 0 and 1
+  stopped; the TLB written back;
+- the IOP's cleanup as before (below); then the kernel's state of the program (the `.data` and
+  `.bss` of the VM, heaps, exceptions, threads, the pad and the home menu, apart in
+  `ee/resident.ld`) is set back as linked, and the screen comes back with its log.
+A program that changed the IOP (loaded modules), an IOP that does not answer, a program not on
+`libmxk` (ps2sdk's, `libmx`), `mx_loader_launch` and the host's reset still take the restart:
+
+Each such program ends in `ExecPS2`, which starts the kernel again but does not load it: `.bss`
 is cleared by the start-up, and `.data` is restored from a copy by `mxlink_start`
-(`ee/hook.S`), so all start values are as linked. What must survive goes in the section
+(`ee/hook.S`), so all start values are as linked. What must survive is in the section
 `.kept`. Without this a semaphore id in `.data` points at a semaphore of the next program.
 
 `mx_exit` ends the program's other threads first (those of `mx_thread_start`): it goes on to give

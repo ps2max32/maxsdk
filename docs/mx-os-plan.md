@@ -84,6 +84,14 @@ restart, they run alone). What ExecPS2 does now, the kernel does itself:
 - Test: the same program 50 times in a row (VM, threads, sound, network), and the BIOS's
   thread and semaphore counts the same after each.
 
+  Done 2026-11-08 (kernel table version 8): on the PS2 `vm23_pad` 40 times, `vm24_home` 11,
+  the VM tests (`vm11`, `vm12`, `vm13`, `vm16`) and `vm21_crash` (status 255) between them,
+  Quake 600 frames twice, all without a restart; `tests/ps2/vm25_ids.c` (`probe/p34_ids.c` in
+  VM) finds the same threads and as many semaphores after them as before. Interrupt handlers
+  are removed from the program's own slots (`irq_tables`) rather than routed through the
+  kernel: that comes with step 2's interrupts as events. Not yet tried without the restart: a
+  program started from the shell, and the shell after it.
+
 - The kernel no longer restarts (ExecPS2) after each program: it cleans up per process
   (threads, files, sockets, pad, sound, GS memory, interrupt handlers, VM frames).
 - Each `libmxk` program gets an ASID; its core memory (now at the BIOS's fixed mappings from

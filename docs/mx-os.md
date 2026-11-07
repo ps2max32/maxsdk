@@ -22,7 +22,8 @@ memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-
   the one-shot: if it hangs, a reset boots the default again.
 - Start: mxlink loads the ELF (from `host:`, `usb0:`, `mx4sio0:`, ...) and runs it in a thread
   at priority 64. End: back to mxlink, then the shell (`mc0:/MXOS/MXSHELL.ELF`) if it started
-  the program.
+  the program. A `libmxk` program ends without a restart: the kernel removes its threads,
+  semaphores and interrupt handlers and resets the units (`kernel.md`, The end of a program).
 
 | Who | Owns |
 |---|---|
@@ -54,7 +55,8 @@ Retail PS2s have 32 MiB; never count on more.
 4. **No loader calls.** No `ExecPS2`, `LoadExecPS2` or BIOS `Exit`. End with `mx_exit`, `exit()` or
    a return from `main`; to start another program, `mx_loader_launch`. `mx_exit` ends the threads
    of `mx_thread_start`, without a chance to clean up.
-5. **Leave the TLB and the exception handlers alone.**
+5. **Leave the TLB and the exception handlers alone.** Interrupt handlers only through `mx_irq_*`
+   (`<mx/irq.h>`): the kernel removes those when the program ends, not ones added to the BIOS directly.
 6. **Swap.** Set `mx_vm_config.swap` to a relative name; the shell's shared
    `<device>/PS2MAX/swap.bin` replaces it. Never truncate or assume its size.
 7. **DMA.** Tags, chains, DMA buffers, thread stacks and interrupt handler data must be core or
