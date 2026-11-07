@@ -7,8 +7,11 @@
    invalidate, of the line of way vAddr[0] in set vAddr[11:6]. */
 
 /* Only cached addresses: the operations are undefined on uncached, UCAB and
-   scratchpad addresses. */
-static int cached(const void *p) { return (uintptr_t)p < 0x20000000u; }
+   scratchpad addresses. MX_PHYS_WIN, where pinned memory is, is cached too. */
+static int cached(const void *p) {
+  uintptr_t a = (uintptr_t)p;
+  return a < 0x20000000u || (a >= MX_PHYS_WIN && a < MX_PHYS_WIN_LIMIT);
+}
 
 void mx_dcache_writeback(const void *p, u32 size) {
   if (!cached(p))

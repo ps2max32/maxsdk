@@ -44,7 +44,8 @@ Retail PS2s have 32 MiB; never count on more.
 3. **No IOP work.** No IOP reset, no module loading, no `rom0:` drivers: `mx_pad_init` and
    `mx_snd_init` bind to what runs. Loading a module forces a full IOP reset at return.
 4. **No loader calls.** No `ExecPS2`, `LoadExecPS2` or BIOS `Exit`. End with `mx_exit`, `exit()` or
-   a return from `main`; to start another program, `mx_loader_launch`.
+   a return from `main`; to start another program, `mx_loader_launch`. `mx_exit` ends the threads
+   of `mx_thread_start`, without a chance to clean up.
 5. **Leave the TLB and the exception handlers alone.**
 6. **Swap.** Set `mx_vm_config.swap` to a relative name; the shell's shared
    `<device>/PS2MAX/swap.bin` replaces it. Never truncate or assume its size.
@@ -86,7 +87,8 @@ too. `tools/mxlink/package-games.sh` writes this layout.
 - Without the PC: start it from the shell. A test with `ps2client` connected can hide `host:` use:
   look for `open name host:` in the run's log, it must be absent.
 - A run ends when the program comes back to mxlink, however it ended: mxlink prints the end marker
-  (`@@PS2TEST_END@@ status=N`) with its exit status. A game needs no marker of its own.
+  (`@@PS2TEST_END@@ status=N`) with its exit status. A game prints no marker of its own: the host
+  would go away while the game still ends. `MX_TEST_END` is silent under mxlink.
 - Quit must return to the shell with status 0. A crash ends with status 255, and the shell
   shows the kernel's report (`kernel.md`, Crashes).
 - Run on the real PS2 at 32 MiB (`/ps2-hw-test`). PCSX2 needs `PCSX2_EE=interp` for VM.

@@ -52,10 +52,18 @@ is cleared by the start-up, and `.data` is restored from a copy by `mxlink_start
 (`ee/hook.S`), so all start values are as linked. What must survive goes in the section
 `.kept`. Without this a semaphore id in `.data` points at a semaphore of the next program.
 
+`mx_exit` ends the program's other threads first (those of `mx_thread_start`): it goes on to give
+the BIOS its TLB back and to block in file calls, and a thread that ran then would touch VM with
+its entries gone. It waits a moment for the file lock first (version 5), so that none of them ends
+in a file call with the lock taken, which the rest of `mx_exit` would wait for. The VM's pager and
+writer are not ended.
+
 When a program comes back, whichever way it ended, mxlink prints the test end marker with its exit
 status, before it says it is ready. A run on the host then ends, also when the player left the
 program with the pad. It stays silent when the program started another with `mx_loader_launch`: the
-run ends with the last one. A program may print the marker itself; the host takes the first.
+run ends with the last one. `MX_TEST_END` prints nothing under mxlink, only the statistics: a host
+that stopped at it would go away while the program still ends, with its files on `host:`. A program
+started without mxlink (PCSX2 with `-elf`, ps2link) prints it there.
 
 ## PCSX2
 
