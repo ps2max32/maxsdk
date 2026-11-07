@@ -108,10 +108,13 @@ card (`common/include/mxio.h`). `mx_fio_open` uses it if it is there: its descri
 each call names its position, so a seek costs no call. Directories, remove, mkdir and appending
 stay with FILEIO.
 
-`host:` takes the fast path when a `ps2client` has said HELLO: data goes past lwIP (`iop/tcpip/mxnet`,
-`common/include/mxfast.h`), straight between SMAP and EE memory. Any other path, and `host:`
+`host:` takes the fast path when a `ps2client` has said HELLO: its frames go past lwIP
+(`common/include/mxfast.h`), data straight between SMAP and EE memory. On maxsdk's drivers it is a
+module of its own, `iop/tcpip/mxfast`, a client of mxeth that builds its own frames, lwIP not used at
+all; on ps2sdk's it is part of `ps2ip-nm` (`iop/tcpip/mxnet`), with its requests on a lwIP socket. Any other path, and `host:`
 without HELLO, takes the driver through ioman. In 32 KiB, measured on a PS2: 7.6 MiB/s reading and
-4.6 MiB/s writing on `host:`, against 2.1 and 1.6 through FILEIO. On USB the PS2's host controller carries 937 KiB/s
+4.6 MiB/s writing on `host:`, against 2.1 and 1.6 through FILEIO (mxfast on mxeth: a 32 KiB read 4.0 ms,
+a write 6.4 ms). On USB the PS2's host controller carries 937 KiB/s
 (15 packets of 64 bytes a frame, the same on two different sticks); `iop/usb/usbmass_bd` queues a whole command at once and reads
 64 KiB at 922 KiB/s on the IOP, against 719 for ps2sdk's driver. A program reading 64 KiB a call gets
 903 KiB/s through mxio, 843 at 16 KiB. Writes reach 706 KiB/s at 16 KiB and 761 at 32 KiB (mxio's

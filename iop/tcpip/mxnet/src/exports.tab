@@ -69,6 +69,7 @@ DECLARE_EXPORT_TABLE(ps2ip, 2, 6)
 	DECLARE_EXPORT(pbuf_coalesce)
 END_EXPORT_TABLE
 
+#ifndef MXNET_MXETH
 DECLARE_EXPORT_TABLE(mxfast, 1, 0)
 	DECLARE_EXPORT(_start)
 	DECLARE_EXPORT(_retonly)
@@ -83,5 +84,6 @@ DECLARE_EXPORT_TABLE(mxfast, 1, 0)
 	DECLARE_EXPORT(mxfast_log)
 	DECLARE_EXPORT(mxfast_stats)
 END_EXPORT_TABLE
+#endif
 
 void _retonly(void) {}

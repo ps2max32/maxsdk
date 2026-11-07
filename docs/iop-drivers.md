@@ -16,7 +16,7 @@ ps2sdk's network path works, but costs the IOP more than it needs to (measured w
 - **Sending waits for an empty FIFO.** smap refills its 4 KiB TX FIFO (two full frames) only when
   both are out (TXDNV): 7.9 MB/s out against 11.8 in.
 - **Three modules and one stack.** netman only passes frames between smap and one protocol stack.
-  mxfast (the fast path for file data) has to sit inside lwIP's receive function, and the console
+  mxfast (the fast path for file data) had to sit inside lwIP's receive function, and the console
   (udptty) goes through lwIP's sockets.
 - **Slow link-up after every IOP reset.** smap resets the PHY at each start and then waits at least
   3 s for auto-negotiation, although the PHY keeps its link when only the IOP is reset (mxlink does
@@ -29,6 +29,7 @@ ps2sdk's network path works, but costs the IOP more than it needs to (measured w
 | `mxdev9.irx` | ps2dev9 | DEV9 power, SPEED interrupts, channel-8 DMA, MAC from the EEPROM, LED |
 | `mxeth.irx` | smap + netman | SMAP and PHY, RX buffers, frame sorting to its clients, TX queue |
 | `mxnet.irx` | ps2ip-nm | lwIP (as now), as a client of mxeth |
+| `mxfast.irx` | the fast path in ps2ip-nm | `host:` files past lwIP, as a client of mxeth |
 | mxeth client | udptty | the console, on the fast path's protocol (step 3) |
 | `mxata.irx` (later) | atad, ata_bd | ATA on mxdev9's DMA queue, as a block device for mxio |
 
@@ -80,8 +81,8 @@ modules stay on the card, and mxlink loads them if `mxdev9` or `mxeth` is missin
   the thread again.
 - Each frame goes to the clients in order, `rx(frame)`: a client returns 1 if it takes the frame
   (it calls `mxeth_free` later, from any context), 0 to pass it on. A frame nobody takes is freed.
-- Clients, in order: fast path (UDP to its port: the data goes by SIF DMA straight from the
-  receive buffer to the EE), console, lwIP. lwIP gets the buffer itself (a `pbuf_custom` whose free
+- Clients, in order: fast path (`mxfast.irx`, every frame to its UDP port: the data goes by SIF
+  DMA straight from the receive buffer to the EE), console, lwIP. lwIP gets the buffer itself (a `pbuf_custom` whose free
   returns it to mxeth); when fewer than 8 buffers are free it copies into its own pbuf instead, so a
   socket nobody reads cannot starve the driver.
 
@@ -105,6 +106,22 @@ modules stay on the card, and mxlink loads them if `mxdev9` or `mxeth` is missin
   to the clients.
 - PHY register access (MDIO) waits for the EMAC3's done bit with short sleeps (`DelayThread`): an
   access takes about 30 us, and happens at start and once a second.
+
+## mxfast
+
+The fast path (`common/include/mxfast.h`) without lwIP: a client of mxeth at priority 10, before
+lwIP's 30. It takes every frame to UDP port 18197 (lwIP has no socket there):
+
+- DATA goes by SIF DMA straight from the receive buffer; the buffer goes back to mxeth when its
+  DMA is over (seen at the next frame, or at the read's end).
+- Answers and HELLO give it the host's MAC and IP, so it builds its requests (OPEN, READ, SIZE,
+  CLOSE, COMMIT, LOG) and the frames of a write as whole frames itself, for `mxeth_send`. The host
+  must know the PS2's MAC: lwIP answers its ARP.
+- Its caller (mxio's thread) sleeps on one semaphore, which `rx` gives at an answer or when a read
+  is complete, a sent frame's `done`, or an alarm: a read without progress for 30 ms asks for what
+  is missing, a request without answer for 200 ms is sent again.
+
+`ps2ip-nm.irx` keeps the fast path inside it (requests on a lwIP socket) for ps2sdk's drivers.
 
 ## Console (step 3)
 
@@ -155,7 +172,8 @@ before: to the PS2 3.12 s with ps2sdk's modules and `ps2ip-nm`, 3.27 s with mxde
 Through mxlink (mxdev9, mxeth and mxnet from the card), 2026-11-07: p29 (UDP echo 1132 us,
 2 MiB TCP out and back in 2380 ms), the BSD sockets test, `vm22_net`, `fio_big` and `fio_stress`
 pass; `p21_iolat` on `host:` (the fast path, still inside mxnet): a 32 KiB READ 4.1 ms, a
-32 KiB WRITE 7.5 ms, as with ps2sdk's drivers.
+32 KiB WRITE 7.5 ms, as with ps2sdk's drivers. With `mxfast.irx`: READ 4.0 ms, WRITE 6.4 ms
+(the read is bound by the wire and the host: 32 KiB take 2.8 ms at 100 Mbit/s).
 
 No frame lost in any run. (Numbers since the DICR2 fix; before it, writing DICR2 each frame,
 receiving to the EE left 33% at 12 MB/s.) Two designs measured first, both left 4% free at 12 MB/s:
@@ -179,7 +197,7 @@ Sending is bound by the IOP: one TXEND and one wake-up a frame (the FIFO holds t
 2. mxnet on mxeth (lwIP's netif on `mxeth_send` and an mxeth client: `mxnet.irx`, built beside
    `ps2ip-nm.irx` from `iop/tcpip/mxnet`; done, measured above); mxlink loads mxdev9, mxeth,
    mxnet when they are on the card, with the ps2sdk set as fallback (done); the fast path as an
-   mxeth client (next).
+   mxeth client, `mxfast.irx` (done).
 3. Console over the fast-path protocol; udptty gone.
 4. netman, smap and ps2dev9 off the card.
 5. mxata.

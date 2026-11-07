@@ -1,4 +1,5 @@
-/* The fast path (mxfast.h): the IOP's side. */
+/* The fast path (mxfast.h) inside ps2ip-nm, on ps2sdk's netman. On maxsdk's
+   mxeth it is a module of its own: iop/tcpip/mxfast. */
 #include "lwip/pbuf.h"
 #include "lwip/sockets.h"
 #include "irx_imports.h"
@@ -191,37 +192,6 @@ static u32 answer_b;
 /* A request with an answer: result, or < 0 */
 static int ask(u8 *b, u32 n, u32 id);
 
-#ifdef MXNET_MXETH
-/* The frames in tx_list to mxeth, and wait (asleep) until it has taken them */
-static struct mxeth_tx frame_tx[MXFAST_WRITE_FRAMES];
-static int frames_sent = -1;
-static u32 frames_done;
-
-static void frame_done(struct mxeth_tx *t) {
-  (void)t;
-  if (++frames_done == tx_n)
-    SignalSema(frames_sent);
-}
-
-static int send_frames(u32 n) {
-  if (frames_sent < 0) {
-    iop_sema_t sema = {0, 0, 0, 1};
-    if ((frames_sent = CreateSema(&sema)) < 0)
-      return -5;
-  }
-  frames_done = 0;
-  tx_n = n;
-  for (u32 i = 0; i < n; i++) {
-    frame_tx[i].data = tx_base + tx_list[i] * MXFAST_FRAME;
-    frame_tx[i].len = (u16)tx_size[i];
-    frame_tx[i].done = frame_done;
-    mxeth_send(&frame_tx[i]);
-  }
-  WaitSema(frames_sent);
-  tx_n = 0;
-  return 0;
-}
-#else
 /* The frames in tx_list to the driver, and wait for them: 0, < 0 if it stalls */
 static int send_frames(u32 n) {
   tx_i = 0;
@@ -246,7 +216,6 @@ static int send_frames(u32 n) {
   return 0;
 }
 
-#endif
 
 int mxfast_write(int handle, u32 pos, u32 size, void *frames) {
   u32 n = (size + MXFAST_CHUNK - 1) / MXFAST_CHUNK;

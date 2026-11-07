@@ -55,13 +55,17 @@ typedef struct ip4_addr	IPAddr;
 static struct pbuf *TxHead, *TxTail;
 #endif
 
+#ifndef MXNET_MXETH
 #include <mxfast.h>
+#endif
 
 #define MODNAME	"TCP/IP Stack"
 IRX_ID(MODNAME, 2, 3);
 
 extern struct irx_export_table	_exp_ps2ip;
+#ifndef MXNET_MXETH
 extern struct irx_export_table	_exp_mxfast;
+#endif
 
 #if NOSYS
 static int		iTimerARP=0;
@@ -279,8 +283,7 @@ static int EthRx(struct mxeth_frame *f, void *arg)
 		c->custom_free_function = RxFree;
 		p = pbuf_alloced_custom(PBUF_RAW, f->len, PBUF_REF, c, f->data, MXETH_FRAME_SIZE);
 	}
-	if(!mxfast_rx(p))
-		ps2ip_input(p, &NIF);
+	ps2ip_input(p, &NIF);
 	return 1;
 }
 
@@ -510,7 +513,9 @@ static inline int InitializeLWIP(void){
 
 	dbgprintf("PS2IP: Module Loaded.\n");
 
+#ifndef MXNET_MXETH
 	RegisterLibraryEntries(&_exp_mxfast);
+#endif
 	if ((result = RegisterLibraryEntries(&_exp_ps2ip))!=0)
 	{
 		printf("PS2IP: RegisterLibraryEntries returned: %d\n", result);
