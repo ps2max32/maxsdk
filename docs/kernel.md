@@ -52,6 +52,11 @@ is cleared by the start-up, and `.data` is restored from a copy by `mxlink_start
 (`ee/hook.S`), so all start values are as linked. What must survive goes in the section
 `.kept`. Without this a semaphore id in `.data` points at a semaphore of the next program.
 
+When a program comes back, whichever way it ended, mxlink prints the test end marker with its exit
+status, before it says it is ready. A run on the host then ends, also when the player left the
+program with the pad. It stays silent when the program started another with `mx_loader_launch`: the
+run ends with the last one. A program may print the marker itself; the host takes the first.
+
 ## PCSX2
 
 `make -C tools/mxlink emu` builds the kernel for PCSX2 (`build/tools/mxlink-emu/mxlink.elf`,

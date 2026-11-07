@@ -85,6 +85,8 @@ too. `tools/mxlink/package-games.sh` writes this layout.
 
 - Without the PC: start it from the shell. A test with `ps2client` connected can hide `host:` use:
   look for `open name host:` in the run's log, it must be absent.
+- A run ends when the program comes back to mxlink, however it ended: mxlink prints the end marker
+  (`@@PS2TEST_END@@ status=N`) with its exit status. A game needs no marker of its own.
 - Quit must return to the shell with status 0. A crash ends with status 255, and the shell
   shows the kernel's report (`kernel.md`, Crashes).
 - Run on the real PS2 at 32 MiB (`/ps2-hw-test`). PCSX2 needs `PCSX2_EE=interp` for VM.
