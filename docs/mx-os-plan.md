@@ -56,8 +56,9 @@ on `libmxk` (the kernel's pad); the others keep the combination as quit.
 
   1b-1d written 2026-11-07 (kernel table version 7; `tools/mxlink/ee/home.c`,
   `ee/src/gs/home.c`). `tests/ps2/vm24_home.c auto` passes on the PS2 (240 frames, their flips
-  through the kernel). Not yet seen on a TV: the menu itself (`vm24_home` without `auto`, then
-  the combination), its flicker in interlaced FIELD mode, Quake.
+  through the kernel). The menu works on the PS2 and a TV (`vm24_home` without `auto`, PAL
+  640 x 512 interlaced: opened over the picture, the pad's settings, quit ending the program
+  with status 0; 2026-11-07, seen by the user). Not yet tried: Quake.
 
 ### Step 2: processes
 
