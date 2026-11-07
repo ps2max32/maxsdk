@@ -421,7 +421,7 @@ int mx_sif_init(void) {
    USB). */
 volatile u32 mx__sif_irq_lost;
 
-void mx__irq_vbon_hook(void (*fn)(void));
+int mx__irq_vbon_hook(void (*fn)(void));
 
 /* Wait for c's answer asleep (other threads run meanwhile), in thread code
    with interrupts on (the BIOS's semaphores; IE, EIE, not EXL). Returns 1

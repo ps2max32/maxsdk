@@ -58,7 +58,11 @@ on `libmxk` (the kernel's pad); the others keep the combination as quit.
   `ee/src/gs/home.c`). `tests/ps2/vm24_home.c auto` passes on the PS2 (240 frames, their flips
   through the kernel). The menu works on the PS2 and a TV (`vm24_home` without `auto`, PAL
   640 x 512 interlaced: opened over the picture, the pad's settings, quit ending the program
-  with status 0; 2026-11-07, seen by the user). Not yet tried: Quake.
+  with status 0; 2026-11-07, seen by the user), and over Quake (menu, Cross and Circle
+  swapped, resume, quit). Found with Quake: maxsdk had room for two functions at each vblank,
+  both taken by the SIF waits and the VM, so the menu's was silently not added and it waited
+  for good (now four, and a full table is refused aloud); audsrv played its ring over and over
+  while the program waited (the stream is stopped for the menu now).
 
 ### Step 2: processes
 

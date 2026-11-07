@@ -1,5 +1,6 @@
 #include <mx/bios.h>
 #include <mx/cpu.h>
+#include <mx/debug.h>
 #include <mx/hw/formats.h>
 #include <mx/irq.h>
 #include <mx/trace.h>
@@ -31,7 +32,8 @@ volatile u32 mx__irq_epc;
 /* the SDK's own work at each vblank start, next to the slot's handler
    (the SIF waits' timeouts, ee/src/base/sif.c; the VM trace's sweeps,
    ee/src/vm/vm.c) */
-static void (*vbon_hook[2])(void);
+#define VBON_HOOKS 4
+static void (*vbon_hook[VBON_HOOKS])(void);
 
 static int intc_entry(int cause, void *a, void *addr) {
   (void)a;
@@ -42,25 +44,33 @@ static int intc_entry(int cause, void *a, void *addr) {
   if (s->fn)
     s->fn(s->arg);
   if (cause == MX_INTC_VBON)
-    for (int i = 0; i < 2; i++)
+    for (int i = 0; i < VBON_HOOKS; i++)
       if (vbon_hook[i])
         vbon_hook[i]();
   return 0;
 }
 
-/* One more function at each vblank start (two at most). */
-void mx__irq_vbon_hook(void (*fn)(void)) {
+/* One more function at each vblank start (VBON_HOOKS at most: the SIF
+   waits, the VM, the kernel's home menu; one more is refused aloud, not
+   left to fail in silence). Returns 0, -1 when the table is full. */
+int mx__irq_vbon_hook(void (*fn)(void)) {
   struct slot *s = &intc[MX_INTC_VBON];
-  int was = mx_di();
-  for (int i = 0; i < 2; i++)
+  int was = mx_di(), added = 0;
+  for (int i = 0; i < VBON_HOOKS && !added; i++)
     if (!vbon_hook[i] || vbon_hook[i] == fn) {
       vbon_hook[i] = fn;
-      break;
+      added = 1;
     }
   mx_irq_restore(was);
+  if (!added) {
+    mx_printf("mx__irq_vbon_hook: more than %d functions, %p not added\n", VBON_HOOKS,
+              (void *)fn);
+    return -1;
+  }
   if (!s->bios_id)
     s->bios_id = mx_bios_add_intc_handler(MX_INTC_VBON, intc_entry, 0, 0);
   mx_bios_enable_intc(MX_INTC_VBON);
+  return 0;
 }
 
 void mx_irq_dmac(int ch, mx_irq_fn fn, void *arg) {
@@ -98,7 +108,8 @@ void mx_irq_intc(int cause, mx_irq_fn fn, void *arg) {
 }
 
 void mx_irq_exit(void) {
-  vbon_hook[0] = vbon_hook[1] = 0;
+  for (int i = 0; i < VBON_HOOKS; i++)
+    vbon_hook[i] = 0;
   for (int i = 0; i < 10; i++)
     if (dmac[i].bios_id) {
       mx_bios_disable_dmac(i);

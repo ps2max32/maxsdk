@@ -308,7 +308,7 @@ static void tr_tick(void) {
   tr_push((u32)MX_VM_TR_TICK << 30 | (ms & 0x3FFFFFFFu));
 }
 
-void mx__irq_vbon_hook(void (*fn)(void)); /* ee/src/irq/irq.c */
+int mx__irq_vbon_hook(void (*fn)(void)); /* ee/src/irq/irq.c */
 
 /* At each vblank: the VM's entries out of the TLB, so a page in use
    refills (and gets a new stamp, for evict) at least once a vblank: 24

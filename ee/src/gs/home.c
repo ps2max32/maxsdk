@@ -12,8 +12,9 @@
 #include <mx/mx.h>
 #include <mx/vcache.h>
 
-/* the cache only if the program has it */
+/* the cache and the sound only if the program has them */
 extern void mx_vcache_reset(void) __attribute__((weak));
+extern void mx__snd_quiet(void) __attribute__((weak));
 
 static u32 lend(u32 pages) {
   u32 p = mx_vram_find(pages);
@@ -33,6 +34,8 @@ void mx__home_poll(void) {
   if (!pages)
     return;
   u32 page = mx_frame_sync() < 0 ? ~0u : lend(pages);
+  if (page != ~0u && mx__snd_quiet)
+    mx__snd_quiet();
   int end = mx__kernel->home_run(page, pages);
   if (page != ~0u)
     mx_vram_give(page, pages);

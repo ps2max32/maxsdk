@@ -204,6 +204,13 @@ u32 mx_snd_stream_queue(const void *data, u32 bytes) {
 
 void mx_snd_stream_stop(void) { call(AUDSRV_STOP_AUDIO, 0, 0, 0); }
 
+/* the home menu (ee/src/gs/home.c): the stream silenced while the program
+   waits (audsrv would play its ring over and over); the next queue starts it */
+void mx__snd_quiet(void) {
+  if (ready)
+    mx_snd_stream_stop();
+}
+
 void mx_snd_stream_volume(int volume) { call(AUDSRV_SET_VOLUME, (u32)volume, 0, 0); }
 
 /* ---- ADPCM ------------------------------------------------------------------ */
