@@ -133,6 +133,7 @@ int mx__sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, 
 void mx__heap_range(void *lo, void *hi);
 void mx__vm_image_range(void *lo, void *hi);
 void mx__fio_crash(void);
+extern u32 mx__sif_wait_limit, mx__sif_timeouts;
 void mx__fio_ending(void (*stop)(void));
 
 /* The table, 0 without a kernel. */

@@ -6,6 +6,7 @@
 /* The tty reaches ps2client on the PS2 and the IOP console on PCSX2. The
    serial port is the fallback when the IOP does not answer. */
 static int sinks = MX_SINK_TTY;
+extern const int mx__debug_start_sinks __attribute__((weak));
 static int hold;
 static char hold_buf[16384];
 static u32 hold_len;
@@ -36,6 +37,9 @@ static void send(const char *s, u32 n) {
    in the middle of a program's DMA and interrupt set-up, lost output on the
    PS2 (the first line, and later ones). */
 void mx_debug_init(void) {
+  /* mxlink: the IOP a program left may not answer, and its screen comes first */
+  if (&mx__debug_start_sinks)
+    sinks = mx__debug_start_sinks;
   if (sinks & MX_SINK_TTY)
     mx_tty_write("", 0);
 }

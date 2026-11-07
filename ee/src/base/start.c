@@ -88,11 +88,14 @@ static void report(void) {
   }
 }
 
+/* defined by the kernel (mxlink): its own fatal ends print no marker either */
+extern const int mx__kernel_self __attribute__((weak));
+
 void mx__test_end(int status) {
   report();
   /* mxlink prints it when the program is back. Here a host would stop at it
      and go away while the program still ends, with its files on host: */
-  if (!loader_ret)
+  if (!loader_ret && !&mx__kernel_self)
     mx_printf("@@PS2TEST_END@@ status=%d\n", status);
 }
 

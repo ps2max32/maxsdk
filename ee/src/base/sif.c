@@ -601,12 +601,23 @@ int mx_sif_wait(struct mx_sif_client *c) {
   return wait_done(c);
 }
 
+/* The kernel's (mxlink's) limit for calls that would wait for ever, while it
+   cleans up after a program: a server that does not answer then means an IOP
+   to reset. Cycles, 0: none. Each call that gave up counts. */
+u32 mx__sif_wait_limit, mx__sif_timeouts;
+
 int mx__sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,
                  u32 rsize, u32 wait) {
   sif_send_call(c, fno, send, ssize, recv, rsize);
   if (!wait)
+    wait = mx__sif_wait_limit;
+  if (!wait)
     return wait_done(c);
-  return wait_answer(c, (int)wait) < 0 ? -2 : 0;
+  if (wait_answer(c, (int)wait) < 0) {
+    mx__sif_timeouts++;
+    return -2;
+  }
+  return 0;
 }
 
 static void sif_send_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize,
