@@ -13,10 +13,11 @@
 #include <mx/mem.h>
 #include <mx/sif.h>
 #include <mx/types.h>
+#include <mx/video.h>
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 6
+#define MX_KERNEL_VERSION 7
 /* The oldest table libmxk runs on: what came later it uses only when the
    table's version has it (the pad from version 6), else its own code. */
 #define MX_KERNEL_MIN 5
@@ -143,9 +144,27 @@ struct mxk_services {
      kernel's pad settings applied) */
   int (*pad_init)(void);
   int (*pad_read)(int port, struct mx_pad_state *s, int sticks);
+
+  /* version 7: the display and the home menu (docs/mx-os-plan.md, step 1).
+     gs_display: the display registers (PMODE, DISPFB1, DISPLAY1, DISPFB2,
+     DISPLAY2, BGCOLOR: MX_DISP_*) whose bit is set in mask, which the kernel
+     writes and keeps (also from interrupt handlers); gs_mode: the video mode
+     after SetGsCrt. home_wanted: the GS memory pages the home menu wants
+     (0: none asked for), at a frame boundary; home_run: the menu, in the
+     caller's thread, with the GS idle and pages page .. page + pages - 1 of
+     GS memory lent to it (page ~0u: none, the menu is not shown). Returns
+     1 when the program is to end, 0 to go on. */
+  void (*gs_display)(const u64 *regs, u32 mask);
+  void (*gs_mode)(const struct mx_video_mode *m);
+  u32 (*home_wanted)(void);
+  int (*home_run)(u32 page, u32 pages);
 };
 /* the size of a table of version MX_KERNEL_MIN */
 #define MXK_MIN_SIZE __builtin_offsetof(struct mxk_services, pad_init)
+
+/* The home menu at the frame boundary (ee/src/gs/home.c): called by
+   mx_frame_begin_n. */
+void mx__home_poll(void);
 
 /* The kernel's side of sif_call (ee/src/base/sif.c). */
 int mx__sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,

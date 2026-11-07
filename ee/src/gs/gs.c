@@ -3,6 +3,7 @@
 #include <mx/emit.h>
 #include <mx/gs.h>
 #include <mx/irq.h>
+#include <mx/kernel.h>
 #include <mx/sif.h>
 #include <mx/tex.h>
 #include <mx/timer.h>
@@ -23,14 +24,23 @@ static void apply(const struct mx_display *d) {
                                          MX_GS_DISPFB2, MX_GS_DISPLAY2, MX_GS_BGCOLOR};
   u64 r[MX_DISP_NREGS];
   mx_display_regs(&mx_video, d, r);
+  u32 mask = 0;
   for (int i = 0; i < MX_DISP_NREGS; i++) {
     if ((i == MX_DISP_DISPFB1 || i == MX_DISP_DISPLAY1) && !d->c[0].on)
       continue;
     if ((i == MX_DISP_DISPFB2 || i == MX_DISP_DISPLAY2) && !d->c[1].on)
       continue;
-    MX_R64(reg[i]) = r[i];
+    mask |= 1u << i;
     mx_gs.dregs[i] = r[i];
   }
+  /* under mx-kernel 7 the kernel writes them: it keeps circuit 1 while its
+     home menu is shown */
+  if (mx__kernel && mx__kernel->version >= 7)
+    mx__kernel->gs_display(r, mask);
+  else
+    for (int i = 0; i < MX_DISP_NREGS; i++)
+      if (mask >> i & 1)
+        MX_R64(reg[i]) = r[i];
   mx_gs.shown_fbp = d->c[1].on ? d->c[1].fbp : d->c[0].fbp;
 }
 
@@ -213,6 +223,8 @@ static void crt(const struct mx_video_mode *m) {
   mx_bios_set_gs_crt(m->interlace, m->code, m->ffmd);
   if (m->interlace)
     MX_R64(MX_GS_SMODE2) = MX_SET(GS_SMODE2_INT, 1) | MX_SET(GS_SMODE2_FFMD, m->ffmd);
+  if (mx__kernel && mx__kernel->version >= 7)
+    mx__kernel->gs_mode(m);
 }
 
 static void irq_on(void) {

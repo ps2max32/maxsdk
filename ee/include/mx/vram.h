@@ -12,7 +12,8 @@
 #define MX_VRAM_BLOCKS (MX_VRAM_PAGES * 32)
 
 /* owners of a page */
-enum { MX_VRAM_FREE = 0, MX_VRAM_FIXED = 1, MX_VRAM_CACHE = 2, MX_VRAM_APP = 3 };
+/* MX_VRAM_KERNEL: lent to the kernel (its home menu: ee/src/gs/home.c) */
+enum { MX_VRAM_FREE = 0, MX_VRAM_FIXED = 1, MX_VRAM_CACHE = 2, MX_VRAM_APP = 3, MX_VRAM_KERNEL = 4 };
 
 /* Every page free (mx_vram_reset does this and more). */
 void mx_vram_clear(void);

@@ -51,7 +51,13 @@ on `libmxk` (the kernel's pad); the others keep the combination as quit.
 - **1d. The menu.** Drawn by the CPU, a band of lines at a time, and copied into the lent GS
   memory by IMAGE transfers through the GIF FIFO: only BITBLTBUF, TRXPOS, TRXREG and TRXDIR
   change, which every upload sets anew. It is shown on circuit 1 over the program's last
-  picture on circuit 2. To probe first: circuit 1's alpha outside its rectangle.
+  picture on circuit 2. Circuit 1 covers the whole screen (320 x 224 CT32, 35 pages), so its
+  alpha outside its rectangle does not matter.
+
+  1b-1d written 2026-11-07 (kernel table version 7; `tools/mxlink/ee/home.c`,
+  `ee/src/gs/home.c`). `tests/ps2/vm24_home.c auto` passes on the PS2 (240 frames, their flips
+  through the kernel). Not yet seen on a TV: the menu itself (`vm24_home` without `auto`, then
+  the combination), its flicker in interlaced FIELD mode, Quake.
 
 ### Step 2: processes
 

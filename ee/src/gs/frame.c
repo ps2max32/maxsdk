@@ -2,6 +2,7 @@
 #include <mx/dma.h>
 #include <mx/frame.h>
 #include <mx/irq.h>
+#include <mx/kernel.h>
 #include <mx/mx.h>
 #include <mx/tex.h>
 #include <mx/timer.h>
@@ -400,6 +401,7 @@ void mx_frame_unlock(const void *p, u32 bytes) {
 }
 
 u32 mx_frame_begin_n(void) {
+  mx__home_poll();
   unlock_done();
   if (!mx_frame_ready()) {
     /* the buffer of frame n - 2 is shown until frame n - 1 replaces it;

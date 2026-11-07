@@ -60,7 +60,9 @@ Retail PS2s have 32 MiB; never count on more.
    `<device>/PS2MAX/swap.bin` replaces it. Never truncate or assume its size.
 7. **DMA.** Tags, chains, DMA buffers, thread stacks and interrupt handler data must be core or
    pinned (`mx_vm_lock`, `mx_vm_pin`, `MX_CORE_FN`, `MX_CORE_DATA`), never plain VM.
-8. **Graphics are yours**: full control of GS, VIF, VU and DMA. Prefer beam racing for memory
+8. **Graphics are yours**: full control of GS, VIF, VU and DMA, but the display registers (PMODE,
+   DISPFB, DISPLAY, BGCOLOR) only through maxsdk (`<mx/display.h>`, `mx_gs_*`): under `libmxk` the
+   kernel writes them (`kernel.md`). Prefer beam racing for memory
    (`<mx/hires.h>`).
 9. **A pad is all there is.** Every prompt must work without a keyboard: Cross confirms where an
    engine asks for `Y`. Quit must be reachable from the menu.
@@ -79,7 +81,8 @@ Waiting: sleep, do not spin. `mx_sleep_us` (`<mx/thread.h>`) lets the other thre
 timer 0 once a thread has slept; `mx_delay_us` keeps the CPU. Leave timer 0 to it; timer 1 is the
 profiler's.
 
-Provided for every program: Select + Start + L1 + R1 ends it (`mx_pad`); L3 + R3 toggles libgl's
+Provided for every program: Select + Start + L1 + R1 open the kernel's home menu (resume, the pad's
+settings, quit) for a `libmxk` program on maxsdk's frame pipeline, else they end it (`mx_pad`); L3 + R3 toggles libgl's
 counters, off by default. Do not bind these combinations.
 
 ## Packaging
