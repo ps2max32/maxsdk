@@ -10,7 +10,9 @@ memory: [vm.md](vm.md).
   uses physical addresses, so a program can always write anywhere. Protection is against
   accidents only: the kernel's code is read-only for user mode.
 - The IOP boots once. Its modules live in `mc0:/MXOS/`; storage drivers are loaded for the
-  device in use by the shell. Between programs mxlink closes files, pad ports and sound, and
+  device in use by the shell. The network runs on maxsdk's drivers (mxdev9, mxeth, mxnet:
+  `docs/iop-drivers.md`) when they are on the card, else, or when one does not load, on ps2sdk's
+  (ps2dev9, netman, smap, ps2ip-nm). Between programs mxlink closes files, pad ports and sound, and
   keeps the IOP and the network.
 - Start: mxlink loads the ELF (from `host:`, `usb0:`, `mx4sio0:`, ...) and runs it in a thread
   at priority 64. End: back to mxlink, then the shell (`mc0:/MXOS/MXSHELL.ELF`) if it started

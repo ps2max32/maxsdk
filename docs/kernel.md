@@ -39,7 +39,7 @@ of at least its own version.
 | IOP | `<mx/iop.h>`, `<mx/sif.h>` | over the kernel's SIF |
 | Pad, sound | `<mx/pad.h>`, `<mx/snd.h>` | program's own, over the kernel's SIF |
 | Threads | `<mx/thread.h>`, `<mx/sched.h>` | program's own; `mx_sleep_us` takes EE timer 0, which `mx_exit` stops |
-| Network | `<mx/net.h>` | a service on the IOP, `iop/tcpip/mxsock`, loaded by mxlink when it is on the card; closed when a program ends. `mx_net_wait` sleeps at one of its four wait services (at most 100 ms a call); with an older mxsock it asks every millisecond |
+| Network | `<mx/net.h>` | a service on the IOP, `iop/tcpip/mxsock`, loaded by mxlink when it is on the card, on lwIP over maxsdk's drivers (mxdev9, mxeth, mxnet) or, without them, ps2sdk's; closed when a program ends. `mx_net_wait` sleeps at one of its four wait services (at most 100 ms a call); with an older mxsock it asks every millisecond |
 
 The program's first call gives the kernel its core memory after `_end` and its VM part;
 the heaps and the program break work in those. The kernel's VM state is cleared by the
