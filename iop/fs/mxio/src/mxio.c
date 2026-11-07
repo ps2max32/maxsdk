@@ -21,7 +21,7 @@ static s32 rpc_out[MXIO_ANSWER] __attribute__((aligned(16)));
 static u8 piece[2][PIECE] __attribute__((aligned(16)));
 static int piece_dma[2];
 
-/* The fast path, if mxfast (or ps2ip-nm) is loaded: it is found when asked for, so that mxio
+/* The fast path, if mxfast is loaded: it is found when asked for, so that mxio
    also works without a network */
 static void **fast(void) {
   static iop_library_t lib;

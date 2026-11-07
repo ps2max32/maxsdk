@@ -42,7 +42,7 @@ else its own code (the pad: version 6), so a new program still runs on an older 
 | Display, home menu | `<mx/display.h>`, `<mx/gs.h>` | the kernel's (version 7): maxsdk's one writer of the display registers (`apply`, `ee/src/gs/gs.c`) hands them to the kernel, which writes and keeps them, and the video mode after SetGsCrt. Select + Start + L1 + R1 ask for the home menu (`tools/mxlink/ee/home.c`): the program stops at its next `mx_frame_begin_n` with the GS idle (`mx_frame_sync`), lends 35 pages of GS memory (free, else the texture cache's, dropped: `ee/src/gs/home.c`) and waits in `home_run`. The menu is drawn by the CPU and copied by IMAGE transfers through the GIF FIFO (no drawing register changes), shown on circuit 1 over the program's last picture. Not in hires mode, nor for a program that does not come within 2 s: the combination then ends it |
 | Sound | `<mx/snd.h>` | program's own, over the kernel's SIF |
 | Threads | `<mx/thread.h>`, `<mx/sched.h>` | program's own; `mx_sleep_us` takes EE timer 0, which `mx_exit` stops |
-| Network | `<mx/net.h>` | a service on the IOP, `iop/tcpip/mxsock`, loaded by mxlink when it is on the card, on lwIP over maxsdk's drivers (mxdev9, mxeth, mxnet) or, without them, ps2sdk's; closed when a program ends. `mx_net_wait` sleeps at one of its four wait services (at most 100 ms a call); with an older mxsock it asks every millisecond |
+| Network | `<mx/net.h>` | a service on the IOP, `iop/tcpip/mxsock`, loaded by mxlink when it is on the card, on lwIP over maxsdk's drivers (mxdev9, mxeth, mxnet); closed when a program ends. `mx_net_wait` sleeps at one of its four wait services (at most 100 ms a call); with an older mxsock it asks every millisecond |
 
 The program's first call gives the kernel its core memory after `_end` and its VM part;
 the heaps and the program break work in those. The kernel's VM state is cleared by the
@@ -65,7 +65,7 @@ When a program comes back, whichever way it ended, mxlink prints the test end ma
 status, before it says it is ready. A run on the host then ends, also when the player left the
 program with the pad. The console (the tty) reaches the ps2client that serves the fast path
 without loss, the marker included, and a later ps2client gets none of an earlier run's rest
-(`iop/tcpip/mxfast`, `docs/iop-drivers.md`); other clients get it by broadcast, as from udptty.
+(`iop/tcpip/mxfast`, `docs/iop-drivers.md`); other clients get it by broadcast, as udptty sent it.
 It stays silent when the program started another with `mx_loader_launch`: the
 run ends with the last one. `MX_TEST_END` prints nothing under mxlink, nor in the kernel itself (a
 fatal error of the VM), only the statistics: a host
@@ -115,9 +115,8 @@ each call names its position, so a seek costs no call. Directories, remove, mkdi
 stay with FILEIO.
 
 `host:` takes the fast path when a `ps2client` has said HELLO: its frames go past lwIP
-(`common/include/mxfast.h`), data straight between SMAP and EE memory. On maxsdk's drivers it is a
-module of its own, `iop/tcpip/mxfast`, a client of mxeth that builds its own frames, lwIP not used at
-all; on ps2sdk's it is part of `ps2ip-nm` (`iop/tcpip/mxnet`), with its requests on a lwIP socket. Any other path, and `host:`
+(`common/include/mxfast.h`), data straight between SMAP and EE memory: `iop/tcpip/mxfast`, a client
+of mxeth that builds its own frames, lwIP not used at all. Any other path, and `host:`
 without HELLO, takes the driver through ioman. In 32 KiB, measured on a PS2: 7.6 MiB/s reading and
 4.6 MiB/s writing on `host:`, against 2.1 and 1.6 through FILEIO (mxfast on mxeth: a 32 KiB read 4.0 ms,
 a write 6.4 ms). On USB the PS2's host controller carries 937 KiB/s

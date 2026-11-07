@@ -18,11 +18,7 @@
 /* Please keep these in alphabetical order!  */
 #include <intrman.h>
 #include <loadcore.h>
-#ifdef MXNET_MXETH
 #include <mxeth.h>
-#else
-#include <netman.h>
-#endif
 #include <sifman.h>
 #include <stdio.h>
 #include <sysclib.h>

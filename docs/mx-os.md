@@ -11,11 +11,10 @@ memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-
   accidents only: the kernel's code is read-only for user mode.
 - The IOP boots once. Its modules live in `mc0:/MXOS/`; storage drivers are loaded for the
   device in use by the shell. The network runs on maxsdk's drivers (mxdev9, mxeth, mxnet:
-  `docs/iop-drivers.md`) when they are on the card, else, or when one does not load, on ps2sdk's
-  (ps2dev9, netman, smap, ps2ip-nm). The fast path for `host:` files is its own module beside
-  mxnet on maxsdk's drivers (mxfast, which is the console too: to the ps2client that serves the
-  fast path, without loss, else broadcast as udptty), and part of ps2ip-nm on ps2sdk's, with
-  udptty as the console. Between programs mxlink closes files, pad ports and sound, and
+  `docs/iop-drivers.md`), and only on them: none on a PCMCIA PS2 (SCPH-1xxxx). The fast path for
+  `host:` files is its own module beside mxnet (mxfast, which is the console too: to the
+  ps2client that serves the fast path, without loss, else by broadcast as udptty sent it).
+  Between programs mxlink closes files, pad ports and sound, and
   keeps the IOP and the network.
 - Boot: the memory card's system update is mxboot (`tools/mxboot`): its phase 1 starts
   `mc0:/MXOS/MXBOOT.ELF`, which starts the ELF that `MXOS/BOOTONCE.CFG` names (once: the file is

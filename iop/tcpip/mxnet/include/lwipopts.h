@@ -139,8 +139,8 @@
 /**
  * LWIP_TCPIP_CORE_LOCKING_INPUT==1: tcpip_input() takes the core mutex
  * directly instead of allocating a message. Safe here because the netif
- * input callback runs in IntrHandlerThread (smap.c) — a normal thread,
- * not interrupt context — so the lock acquire is allowed.
+ * input callback runs in mxeth's driver thread (its client's rx) — a normal
+ * thread, not interrupt context — so the lock acquire is allowed.
  */
 #define LWIP_TCPIP_CORE_LOCKING_INPUT	1
 

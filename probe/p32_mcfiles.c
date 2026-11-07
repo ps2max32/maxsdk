@@ -10,8 +10,8 @@
 #include <mx/timer.h>
 
 static const char *const names[] = {
-    "chime.irx", "poweroff.irx", "ps2dev9.irx", "netman.irx", "smap.irx", "ps2ip-nm.irx",
-    "udptty.irx", "ioptrap.irx", "ps2link.irx", "sio2man.irx", "mcman.irx", "mcserv.irx",
+    "chime.irx", "poweroff.irx", "mxdev9.irx", "mxeth.irx", "mxnet.irx", "mxfast.irx",
+    "ioptrap.irx", "ps2link.irx", "sio2man.irx", "mcman.irx", "mcserv.irx",
     "padman.irx", "libsd.irx", "audsrv.irx", "mxio.irx", "mxsock.irx", "bdm.irx", "bdmfs_fatfs.irx",
     "usbd.irx", "usbmass_bd.irx", "mx4sio_bd.irx", "MXSHELL.ELF"};
 

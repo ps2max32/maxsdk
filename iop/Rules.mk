@@ -29,22 +29,24 @@ CFLAGS = -std=gnu23 -D_IOP -fno-builtin -ffreestanding -G0 -Os -Wall -Wno-unused
          -I$(PS2MAX_IOP_SDK)/iop/include -I$(PS2MAX_IOP_SDK)/common/include
 TABLE_CFLAGS = -include $(MAXSDK)/iop/irx_clang.h
 HDRS   = $(wildcard include/*.h include/*/*.h src/*.h) $(wildcard $(MAXSDK)/common/include/*.h)
+# a change of the build (flags, the tables' header) builds everything again
+BUILD_DEPS = $(MAXSDK)/iop/Rules.mk $(MAXSDK)/iop/irx_clang.h
 
 EXPORTS = $(if $(wildcard src/exports.tab),$(OBJ)/exports.o)
 OBJS    = $(EXPORTS) $(SRCS:%.c=$(OBJ)/%.o) $(OBJ)/imports.o $(OBJS_MODULE)
 
 all: $(OUT)/$(MODULE).irx
 
-$(OBJ)/%.o: src/%.c $(HDRS)
+$(OBJ)/%.o: src/%.c $(HDRS) $(BUILD_DEPS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(OBJ)/exports.o: src/exports.tab
+$(OBJ)/exports.o: src/exports.tab $(BUILD_DEPS)
 	@mkdir -p $(dir $@)
 	{ echo '#include "irx.h"'; cat $<; } > $(@:.o=.c)
 	$(CC) $(CFLAGS) $(TABLE_CFLAGS) -c $(@:.o=.c) -o $@
 
-$(OBJ)/imports.o: src/imports.lst src/irx_imports.h
+$(OBJ)/imports.o: src/imports.lst src/irx_imports.h $(BUILD_DEPS)
 	@mkdir -p $(dir $@)
 	{ echo '#include "irx_imports.h"'; cat $<; } > $(@:.o=.c)
 	$(CC) $(CFLAGS) $(TABLE_CFLAGS) -c $(@:.o=.c) -o $@

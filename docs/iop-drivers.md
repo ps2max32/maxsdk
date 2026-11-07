@@ -32,14 +32,14 @@ ps2sdk's network path works, but costs the IOP more than it needs to (measured w
 | `mxfast.irx` | the fast path in ps2ip-nm, udptty | `host:` files past lwIP, and the console, as a client of mxeth |
 | `mxata.irx` (later) | atad, ata_bd | ATA on mxdev9's DMA queue, as a block device for mxio |
 
-The interfaces are maxsdk's own (`iop/dev9/*/include`); no ps2sdk program needs them. The ps2sdk
-modules stay on the card, and mxlink loads them if `mxdev9` or `mxeth` is missing or does not load.
+The interfaces are maxsdk's own (`iop/dev9/*/include`); no ps2sdk program needs them. mxlink has
+no other network: ps2sdk's modules are not on the card and not loaded (step 4).
 
 ## mxdev9
 
 - **Hardware.** The CXD9611 (expansion bay: SCPH-3xxxx to 5xxxx with the network adapter, every
-  slim model). The CXD9566 (PCMCIA, SCPH-1xxxx) is not supported: on it mxdev9 does not load and the
-  ps2sdk modules are used.
+  slim model). The CXD9566 (PCMCIA, SCPH-1xxxx) is not supported: on it mxdev9 does not load, and
+  mxlink has no network.
 - **Start.** Powers DEV9 on if it is off (two 0.5 s sleeps, at power-on only), reads the MAC and
   its checksum from the EEPROM, turns all SPEED interrupts off. A later load (after an IOP reset)
   finds DEV9 on and takes a few milliseconds.
@@ -120,8 +120,6 @@ lwIP's 30. It takes every frame to UDP port 18197 (lwIP has no socket there):
   is complete, a sent frame's `done`, or an alarm: a read without progress for 30 ms asks for what
   is missing, a request without answer for 200 ms is sent again.
 
-`ps2ip-nm.irx` keeps the fast path inside it (requests on a lwIP socket) for ps2sdk's drivers.
-
 ## Console
 
 udptty broadcast each `printf` as a UDP packet through lwIP: to every machine on the LAN, and lost
@@ -144,8 +142,8 @@ tty output too) and Kprintf write into a ring of 16 KiB, and a thread sends it o
   needed), for any client. At the start of the module the console waits up to 2 s for a HELLO
   first, so that the IOP's start-up messages reach the host that is there.
 
-mxlink loads mxfast right after mxnet and leaves udptty out then; without mxfast, or on
-ps2sdk's drivers, udptty is the console. Input from the host (stdin) can come the same way later.
+mxlink loads mxfast right after mxnet; udptty is not used. Input from the host (stdin) can come the
+same way later.
 
 ## HDD (step 5)
 
@@ -215,5 +213,7 @@ Sending is bound by the IOP: one TXEND and one wake-up a frame (the FIFO holds t
    mxnet when they are on the card, with the ps2sdk set as fallback (done); the fast path as an
    mxeth client, `mxfast.irx` (done).
 3. Console over the fast-path protocol, in `mxfast.irx`; udptty not loaded with it (done).
-4. netman, smap and ps2dev9 off the card.
+4. ps2sdk's network off the card and out of mxlink: ps2dev9, netman, smap, ps2ip-nm (mxnet's netman
+   build, with its own copy of the fast path) and udptty; no fallback, so no network on a PCMCIA
+   PS2 or when one of maxsdk's modules does not load (done).
 5. mxata.

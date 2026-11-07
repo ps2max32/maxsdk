@@ -2,10 +2,10 @@
 
    Requests and their answers are plain UDP datagrams on port 18197. Data comes
    back in DATA datagrams, which are taken before lwIP and sent on to the EE by
-   SIF DMA, straight from the buffer SMAP wrote them to. On maxsdk's mxeth the
-   fast path is a module of its own (iop/tcpip/mxfast) that builds its requests
-   as frames, without lwIP; in ps2ip-nm (iop/tcpip/mxnet, on ps2sdk's netman)
-   the requests go through a lwIP socket. The layout keeps every DMA aligned, and does not copy:
+   SIF DMA, straight from the buffer SMAP wrote them to. The fast path is a
+   module of its own on maxsdk's mxeth (iop/tcpip/mxfast) that builds its
+   requests as frames, without lwIP. The layout keeps every DMA aligned, and
+   does not copy:
 
      frame + 0   Ethernet, IP and UDP headers: 42 bytes
      frame + 42  struct below: 22 bytes

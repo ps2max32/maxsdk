@@ -16,12 +16,8 @@
 #include <types.h>
 #include <stdio.h>
 #include <intrman.h>
-#ifdef MXNET_MXETH
 #include <mxeth.h>
 #include <stddef.h>
-#else
-#include <netman.h>
-#endif
 #include <loadcore.h>
 #include <thbase.h>
 #include <sysclib.h>
@@ -51,21 +47,12 @@ typedef struct pbuf	PBuf;
 typedef struct netif	NetIF;
 typedef struct ip4_addr	IPAddr;
 
-#ifndef MXNET_MXETH
-static struct pbuf *TxHead, *TxTail;
-#endif
 
-#ifndef MXNET_MXETH
-#include <mxfast.h>
-#endif
 
 #define MODNAME	"TCP/IP Stack"
 IRX_ID(MODNAME, 2, 3);
 
 extern struct irx_export_table	_exp_ps2ip;
-#ifndef MXNET_MXETH
-extern struct irx_export_table	_exp_mxfast;
-#endif
 
 #if NOSYS
 static int		iTimerARP=0;
@@ -250,7 +237,6 @@ int _exit(int argc, char *argv[])
 
 static struct netif NIF;
 
-#ifdef MXNET_MXETH
 /* mxnet.irx: the netif on maxsdk's mxeth (docs/iop-drivers.md). Received
    frames come as mxeth's buffers, wrapped in a pbuf_custom in the frame's own
    header (no copy), unless mxeth runs short of buffers: then they are copied
@@ -344,148 +330,15 @@ SMapLowLevelOutput(struct netif *pNetIF, struct pbuf* pOutput)
 	mxeth_send(t);
 	return ERR_OK;
 }
-#else
-static void LinkStateUp(void){
-	tcpip_callback((void*)&netif_set_link_up, &NIF);
-}
-
-static void LinkStateDown(void){
-	tcpip_callback((void*)&netif_set_link_down, &NIF);
-}
-
-static void *AllocRxPacket(unsigned int size, void **payload)
-{
-	struct pbuf* pbuf;
-
-	if((pbuf = pbuf_alloc(PBUF_RAW, size, PBUF_POOL)) != NULL)
-	{
-		*payload = pbuf->payload;
-	}
-
-	return pbuf;
-}
-
-static void FreeRxPacket(void *packet)
-{
-	pbuf_free(packet);
-}
-
-static void EnQRxPacket(void *packet)
-{
-	if(!mxfast_rx(packet))
-		ps2ip_input(packet, &NIF);
-}
-
-static int NextTxPacket(void **payload)
-{
-	int len;
-
-	if((len = mxfast_tx_next(payload)) > 0)
-		return len;
-
-	if(TxTail != NULL)
-	{
-		*payload = TxTail->payload;
-		len = TxTail->len;
-	} else
-		len = 0;
-
-	return len;
-}
-
-static void DeQTxPacket(void)
-{
-	struct pbuf *toFree;
-	int OldState;
-
-	if(mxfast_tx_deq())
-		return;
-
-	toFree = NULL;
-
-	CpuSuspendIntr(&OldState);
-	if(TxTail != NULL)
-	{
-		toFree = TxTail;
-
-		if(TxTail == TxHead) {
-			//Last in queue.
-			TxTail = NULL;
-			TxHead = NULL;
-		} else {
-			TxTail = TxTail->next;
-		}
-	}
-	CpuResumeIntr(OldState);
-
-	if(toFree != NULL)
-	{
-		toFree->next = NULL;
-		pbuf_free(toFree);
-	}
-}
-
-static void EnQTxPacket(struct pbuf *tx)
-{
-	int OldState;
-
-	CpuSuspendIntr(&OldState);
-
-	if(TxHead != NULL)
-		TxHead->next = tx;
-
-	TxHead = tx;
-	tx->next = NULL;
-
-	if(TxTail == NULL)	//Queue empty
-		TxTail = TxHead;
-
-	CpuResumeIntr(OldState);
-}
-
-static err_t
-SMapLowLevelOutput(struct netif *pNetIF, struct pbuf* pOutput)
-{
-	err_t result;
-
-	(void)pNetIF;
-
-	result = ERR_OK;
-	if(pOutput->tot_len > pOutput->len)
-	{
-		struct pbuf* pbuf;
-
-		pbuf_ref(pOutput);	//Increment reference count because LWIP must free the PBUF, not the driver!
-		if((pbuf = pbuf_coalesce(pOutput, PBUF_RAW)) != pOutput)
-		{	//No need to increase reference count because pbuf_coalesce() does it.
-			EnQTxPacket(pbuf);
-			NetManNetIFXmit();
-		} else
-			result = ERR_MEM;
-	} else {
-		pbuf_ref(pOutput);	//This will be freed later.
-		EnQTxPacket(pOutput);
-		NetManNetIFXmit();
-	}
-
-	return result;
-}
-
-#endif
 
 //Should be called at the beginning of the program to set up the network interface.
 static err_t SMapIFInit(struct netif* pNetIF)
 {
-#ifdef MXNET_MXETH
 	for(int i = 0; i < TX_SLOTS; i++)
 	{
 		TxSlot[i].next = TxFree;
 		TxFree = &TxSlot[i];
 	}
-#else
-	TxHead = NULL;
-	TxTail = NULL;
-#endif
 
 	pNetIF->name[0]='s';
 	pNetIF->name[1]='m';
@@ -496,11 +349,7 @@ static err_t SMapIFInit(struct netif* pNetIF)
 	pNetIF->mtu=1500;
 
 	//Get MAC address.
-#ifdef MXNET_MXETH
 	mxeth_mac(pNetIF->hwaddr);
-#else
-	NetManIoctl(NETMAN_NETIF_IOCTL_ETH_GET_MAC, NULL, 0, pNetIF->hwaddr, sizeof(pNetIF->hwaddr));
-#endif
 //	DEBUG_PRINTF("MAC address : %02x:%02x:%02x:%02x:%02x:%02x\n",pNetIF->hwaddr[0],pNetIF->hwaddr[1],pNetIF->hwaddr[2],
 //				 pNetIF->hwaddr[3],pNetIF->hwaddr[4],pNetIF->hwaddr[5]);
 
@@ -513,9 +362,6 @@ static inline int InitializeLWIP(void){
 
 	dbgprintf("PS2IP: Module Loaded.\n");
 
-#ifndef MXNET_MXETH
-	RegisterLibraryEntries(&_exp_mxfast);
-#endif
 	if ((result = RegisterLibraryEntries(&_exp_ps2ip))!=0)
 	{
 		printf("PS2IP: RegisterLibraryEntries returned: %d\n", result);
@@ -542,19 +388,6 @@ static inline int InitializeLWIP(void){
 
 static inline int InitLWIPStack(IPAddr *IP, IPAddr *NM, IPAddr *GW){
 	int result;
-#ifndef MXNET_MXETH
-	static struct NetManNetProtStack stack={
-		&LinkStateUp,
-		&LinkStateDown,
-		&AllocRxPacket,
-		&FreeRxPacket,
-		&EnQRxPacket,
-		&NextTxPacket,
-		&DeQTxPacket,
-		NULL,
-		NULL
-	};
-#endif
 
 	if((result = InitializeLWIP()) != 0)
 		return result;
@@ -562,13 +395,8 @@ static inline int InitLWIPStack(IPAddr *IP, IPAddr *NM, IPAddr *GW){
 	netif_add(&NIF, IP, NM, GW, NULL, &SMapIFInit, tcpip_input);
 	netif_set_default(&NIF);
 
-#ifdef MXNET_MXETH
 	netif_set_up(&NIF);
 	mxeth_attach(&EthClient);
-#else
-	NetManRegisterNetworkStack(&stack);
-	netif_set_up(&NIF);
-#endif
 
 	return 0;
 }
