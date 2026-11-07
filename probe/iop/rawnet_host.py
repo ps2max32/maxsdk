@@ -3,6 +3,11 @@
 from it, each reported by the module. Gives up after its timeouts."""
 import socket, struct, sys, time
 
+# rawnet_mx.irx adds mxeth's and mxdev9's counters (mxeth.h, mxdev9.h)
+EXTRA = ("rx", "rx_bytes", "rx_err", "starved", "overrun", "untaken", "tx", "tx_err", "tx_drop",
+         "dmaen_spins", "wakes", "smap_irqs", "rx_dmas", "t_irq", "t_clients", "t_dma", "t_thread", "dmas", "dma_waited", "dma_depth", "dev9_irqs",
+         "dev9_rounds", "dma_spins")
+extra = ()
 ip = sys.argv[1] if len(sys.argv) > 1 else "192.168.1.10"
 PORT, DATA, TICKS = 18766, 1472, 36864000
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -23,6 +28,8 @@ def ask(cmd, want, timeout=2.0):
             while True:
                 d = s.recv(2048)
                 if d[:1] == want and len(d) >= 32:
+                    global extra
+                    extra = struct.unpack(f">{(len(d) - 32) // 4}I", d[32:32 + (len(d) - 32) // 4 * 4])
                     return struct.unpack(">7I", d[4:32])
         except OSError:
             pass
@@ -35,6 +42,9 @@ def line(what, sent, frames, nbytes, ticks, idle, rate, waits, drops):
     print(f"{what}: {frames} of {sent} frames in {ms:.0f} ms: "
           f"{nbytes / ms / 1000:.2f} MB/s on the wire, {left:.0f}% of the IOP left, "
           f"{waits} waits, {drops} drops", flush=True)
+    if extra:
+        print("  " + " ".join(f"{k}={v / 36.864e3:.0f}ms" if k[:2] == "t_" else f"{k}={v}"
+                              for k, v in zip(EXTRA, extra) if k != "rx_bytes"), flush=True)
 
 
 t0 = time.time()
@@ -64,6 +74,8 @@ for count in (4000,):
             break
         if d[:1] == b"T":
             r = struct.unpack(">7I", d[4:32])
+            if len(d) > 32:
+                extra = struct.unpack(f">{(len(d) - 32) // 4}I", d[32:32 + (len(d) - 32) // 4 * 4])
         elif d[:1] == b"D":
             got += 1
     if r is None:

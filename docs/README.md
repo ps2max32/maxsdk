@@ -16,6 +16,7 @@ decision in maxsdk and in the compiler.
 | [vm.md](vm.md) | Virtual memory: the TLB, the kernel's exception paths, paging, DMA from VM |
 | [mx-os.md](mx-os.md) | mx OS: the design, rules for porting games and apps |
 | [kernel.md](kernel.md) | mx-kernel and the two libraries, `libmx` and `libmxk` |
+| [iop-drivers.md](iop-drivers.md) | maxsdk's IOP drivers for DEV9: mxdev9, mxeth (design, measurements, steps) |
 | [vif.md](vif.md) | VIF codes: costs and behaviour |
 | [gif-gs.md](gif-gs.md) | GIF paths, GS SIGNAL/FINISH/LABEL, vsync |
 | [vu0.md](vu0.md), [vu1.md](vu1.md) | VU macro/micro mode, transfers, control |

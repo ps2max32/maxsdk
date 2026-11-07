@@ -11,9 +11,20 @@
    The start thread watches a deadline and the module stays resident (netman
    keeps its functions); the program then ends and mxlink resets the IOP.
 
-   All frames are handled in the driver's thread. */
+   All frames are handled in the driver's thread.
 
+   Built with RAWNET_MXETH (rawnet_mx.c) it is a client of maxsdk's mxeth
+   instead (docs/iop-drivers.md), loaded after mxdev9 and mxeth: the same
+   commands, so both drivers are measured alike. */
+
+#ifdef RAWNET_MXETH
+#include "rawnet_mx_imports.h"
+static void kick_tx(void);
+#define XMIT() kick_tx()
+#else
 #include "rawnet_imports.h"
+#define XMIT() NetManNetIFXmit()
+#endif
 
 IRX_ID("rawnet_probe", 1, 0);
 
@@ -29,10 +40,12 @@ static u32 peer_port;
 
 #define SLOTS 16
 #define SLOT 2048u
+#ifndef RAWNET_MXETH
 static u8 rxbuf[SLOTS][SLOT] __attribute__((aligned(16)));
+#endif
 static int dma_id[SLOTS];
 static u32 slot, sif_mode, ee_ring, waits, drops;
-static u8 reply[128] __attribute__((aligned(16)));
+static u8 reply[192] __attribute__((aligned(16)));
 static u8 blast[1536] __attribute__((aligned(16)));
 static u32 rx_len, reply_len, tx_left, tx_sent;
 
@@ -82,7 +95,15 @@ static void headers(u8 *f, u32 size) {
   put16(udp + 6, 0); /* no checksum */
 }
 
+#ifdef RAWNET_MXETH
+static u32 c0[MXETH_STATS + 6];
+#endif
+
 static void start_count(void) {
+#ifdef RAWNET_MXETH
+  mxeth_stats(c0);
+  mxdev9_stats(c0 + MXETH_STATS);
+#endif
   frames = bytes = waits = drops = 0;
   n0 = idle_count;
   t0 = now();
@@ -102,7 +123,17 @@ static void report(u8 what) {
   put32(d + 24, waits);
   put32(d + 28, drops);
   reply_len = HDR + 32;
-  NetManNetIFXmit();
+#ifdef RAWNET_MXETH
+  /* then mxeth's and mxdev9's counters (mxeth.h, mxdev9.h), since the start */
+  u32 c[MXETH_STATS + 6];
+  mxeth_stats(c);
+  mxdev9_stats(c + MXETH_STATS);
+  for (u32 i = 0; i < MXETH_STATS + 6; i++)
+    put32(d + 32 + 4 * i, c[i] - c0[i]);
+  headers(reply, 32 + 4 * (MXETH_STATS + 6));
+  reply_len = HDR + 32 + 4 * (MXETH_STATS + 6);
+#endif
+  XMIT();
 }
 
 static void arp(const u8 *f) {
@@ -116,7 +147,7 @@ static void arp(const u8 *f) {
   memcpy(reply + 28, my_ip, 4);
   memcpy(reply + 32, f + 22, 10);
   reply_len = 42;
-  NetManNetIFXmit();
+  XMIT();
 }
 
 /* The frame in the current slot to the same slot of the EE's ring */
@@ -172,7 +203,7 @@ static void udp(const u8 *f, u32 len) {
     blast[HDR] = 'D';
     tx_sent = 0;
     tx_left = (u32)be16(f + HDR + 1) << 16 | be16(f + HDR + 3);
-    NetManNetIFXmit();
+    XMIT();
     break;
   case 'M':
     sif_mode = f[HDR + 1] && ee_ring;
@@ -185,6 +216,7 @@ static void udp(const u8 *f, u32 len) {
   }
 }
 
+#ifndef RAWNET_MXETH
 static void link_up(void) {}
 static void link_down(void) {}
 
@@ -204,6 +236,7 @@ static void *alloc_rx(unsigned int size, void **payload) {
 }
 
 static void free_rx(void *packet) { (void)packet; }
+#endif
 
 static void enq_rx(void *packet) {
   const u8 *f = packet;
@@ -214,6 +247,7 @@ static void enq_rx(void *packet) {
     udp(f, rx_len);
 }
 
+#ifndef RAWNET_MXETH
 static int next_tx(void **payload) {
   if (reply_len) {
     *payload = reply;
@@ -236,6 +270,80 @@ static void deq_tx(void) {
       report('T');
   }
 }
+#endif
+
+#ifdef RAWNET_MXETH
+/* mxeth's frames: in SIF mode one is held per slot of the EE's ring until its
+   DMA is done */
+static struct mxeth_frame *held[SLOTS];
+
+static int mx_rx(struct mxeth_frame *f, void *arg) {
+  (void)arg;
+  slot = (slot + 1) % SLOTS;
+  for (u32 i = 0; dma_id[slot] && sceSifDmaStat(dma_id[slot]) >= 0; i++) {
+    waits++;
+    if (i == 20000) {
+      drops++;
+      mxeth_free(f);
+      return 1;
+    }
+  }
+  dma_id[slot] = 0;
+  if (held[slot]) {
+    mxeth_free(held[slot]);
+    held[slot] = 0;
+  }
+  rx_len = f->len;
+  enq_rx(f->data);
+  if (dma_id[slot])
+    held[slot] = f;
+  else
+    mxeth_free(f);
+  return 1;
+}
+
+static struct mxeth_client client = {0, 10, mx_rx, 0, 0};
+#define BLASTS 4
+static struct mxeth_tx reply_tx, blast_tx[BLASTS];
+static u32 blast_busy, blast_queued;
+
+static void reply_done(struct mxeth_tx *t) { (void)t; }
+
+static void blast_done(struct mxeth_tx *t) {
+  blast_busy &= ~(1u << (t - blast_tx));
+  blast_queued--;
+  if (tx_left) {
+    frames++;
+    bytes += FRAME;
+    if (!--tx_left)
+      report('T');
+  }
+  kick_tx();
+}
+
+/* what next_tx and deq_tx give netman, pushed to mxeth */
+static void kick_tx(void) {
+  if (reply_len) {
+    reply_tx.data = reply;
+    reply_tx.len = (u16)reply_len;
+    reply_tx.done = reply_done;
+    reply_len = 0;
+    mxeth_send(&reply_tx);
+  }
+  for (u32 i = 0; i < BLASTS && blast_queued < tx_left; i++) {
+    struct mxeth_tx *t = &blast_tx[i];
+    if (blast_busy & 1u << i)
+      continue;
+    blast_busy |= 1u << i;
+    blast_queued++;
+    t->data = blast;
+    t->len = FRAME;
+    t->done = blast_done;
+    t->arg = 0;
+    mxeth_send(t);
+  }
+}
+#endif
 
 static u32 hex(const char *s) {
   u32 v = 0;
@@ -247,8 +355,10 @@ static u32 hex(const char *s) {
 int _start(int argc, char **argv) {
   if (argc > 1)
     ee_ring = hex(argv[1]);
+#ifndef RAWNET_MXETH
   static const struct NetManNetProtStack stack = {
       link_up, link_down, alloc_rx, free_rx, enq_rx, next_tx, deq_tx, 0, 0};
+#endif
   iop_thread_t th = {TH_C, 0, idle, 0x800, 126};
 
   timer = AllocHardTimer(1, 32, 1);
@@ -264,13 +374,20 @@ int _start(int argc, char **argv) {
   DelayThread(1000000);
   idle_rate = (idle_count - b) / ((now() - a) / (TICKS_S / 1000u));
 
+#ifdef RAWNET_MXETH
+  mxeth_mac(my_mac);
+  mxeth_attach(&client);
+#else
   NetManIoctl(NETMAN_NETIF_IOCTL_ETH_GET_MAC, 0, 0, my_mac, sizeof my_mac);
   NetManRegisterNetworkStack(&stack);
+#endif
 
   for (u32 ms = 0; ms < DEADLINE_MS && !quit; ms += 50) {
     DelayThread(50000);
+#ifndef RAWNET_MXETH /* mxeth: blast_done sends on, all in its driver thread */
     if (tx_left)
-      NetManNetIFXmit();
+      XMIT();
+#endif
   }
   idle_stop = 1;
   DelayThread(100000);

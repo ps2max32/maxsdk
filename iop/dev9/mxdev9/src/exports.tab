@@ -1,0 +1,21 @@
+DECLARE_EXPORT_TABLE(mxdev9, 1, 1)
+	DECLARE_EXPORT(_start)
+	DECLARE_EXPORT(_retonly)
+	DECLARE_EXPORT(_retonly)
+	DECLARE_EXPORT(_retonly)
+
+	DECLARE_EXPORT(mxdev9_caps)
+	DECLARE_EXPORT(mxdev9_mac)
+	DECLARE_EXPORT(mxdev9_intr)
+	DECLARE_EXPORT(mxdev9_intr_on)
+	DECLARE_EXPORT(mxdev9_intr_off)
+	DECLARE_EXPORT(mxdev9_dma)
+	DECLARE_EXPORT(mxdev9_led)
+	DECLARE_EXPORT(mxdev9_on_off)
+	DECLARE_EXPORT(mxdev9_off)
+	DECLARE_EXPORT(mxdev9_stats)
+	DECLARE_EXPORT(mxdev9_dma_begin)
+	DECLARE_EXPORT(mxdev9_dma_end)
+END_EXPORT_TABLE
+
+void _retonly(void) {}
