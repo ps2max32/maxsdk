@@ -44,6 +44,7 @@ struct start {
 /* thread id -> its start record (for join) */
 #define MAX_THREADS 256
 static struct start *started[MAX_THREADS];
+static u8 kept[MAX_THREADS]; /* the VM's own: they serve the end of the program too */
 
 static void entry(void *p) {
   struct start *s = p;
@@ -84,6 +85,16 @@ int mx_thread_start(void (*fn)(void *), void *arg, void *stack, u32 bytes, int p
     return -1;
   return id;
 }
+
+/* For mx_exit: every thread started here but the caller, ended. */
+void mx__threads_stop(void) {
+  int self = mx_bios_get_thread_id();
+  for (int id = 0; id < MAX_THREADS; id++)
+    if (started[id] && !kept[id] && id != self)
+      mx_bios_terminate_thread(id);
+}
+
+void mx__thread_keep(int id) { kept[id] = 1; }
 
 int mx_thread_self(void) { return mx_bios_get_thread_id(); }
 

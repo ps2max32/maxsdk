@@ -16,7 +16,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 4
+#define MX_KERNEL_VERSION 5
 
 /* The kernel's side of what libmxk has no code for: virtual memory, heaps and
    the file server's client, with the same arguments (version 4). libmxk's
@@ -119,6 +119,9 @@ struct mxk_services {
 #define MXK_FIELD(ret, name, params, args) ret(*name) params;
   MXK_CALLS(MXK_FIELD)
 #undef MXK_FIELD
+
+  /* version 5: the end of a program's threads, none of them in a file call */
+  void (*fio_ending)(void (*stop)(void));
 };
 
 /* The kernel's side of sif_call (ee/src/base/sif.c). */
@@ -130,6 +133,7 @@ int mx__sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, 
 void mx__heap_range(void *lo, void *hi);
 void mx__vm_image_range(void *lo, void *hi);
 void mx__fio_crash(void);
+void mx__fio_ending(void (*stop)(void));
 
 /* The table, 0 without a kernel. */
 extern const struct mxk_services *mx__kernel;

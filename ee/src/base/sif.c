@@ -825,6 +825,17 @@ void mx__fio_crash(void) {
   fio_nolock = 1;
 }
 
+/* mx_exit: stop ends the program's threads. Not one in a file call: it would
+   leave the lock taken, and the end of the program writes to the tty. So the
+   lock first, for a moment; after them nobody is left to share it with. */
+void mx__fio_ending(void (*stop)(void)) {
+  if (fio_sema >= 0 && !fio_nolock)
+    for (int i = 0; i < 100 && mx_bios_poll_sema(fio_sema) < 0; i++)
+      mx_delay_us(1000);
+  stop();
+  fio_nolock = 1;
+}
+
 /* The most one READ asks for: the file server's transfer buffer. */
 #define FIO_READ_CHUNK 0x4000u
 /* the same, changed by probes (probe/p21_iolat.c; 0: FIO_READ_CHUNK) */

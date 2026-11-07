@@ -90,13 +90,24 @@ static void report(void) {
 
 void mx__test_end(int status) {
   report();
-  mx_printf("@@PS2TEST_END@@ status=%d\n", status);
+  /* mxlink prints it when the program is back. Here a host would stop at it
+     and go away while the program still ends, with its files on host: */
+  if (!loader_ret)
+    mx_printf("@@PS2TEST_END@@ status=%d\n", status);
 }
 
 void mx__vm_shutdown(void);
 void mx__vm_swap_close(void);
 
+/* the program's other threads (thread.c, when it has any) */
+void mx__threads_stop(void) __attribute__((weak));
+void mx__fio_ending(void (*stop)(void));
+
 void mx_exit(int status) {
+  /* Before the VM goes: what follows blocks in file calls, and a thread of the
+     program that ran then would touch VM with its TLB gone, and hang. */
+  if (mx__threads_stop)
+    mx__fio_ending(mx__threads_stop);
   report();
   mx_debug_flush();
   /* the BIOS's TLB back for ps2link (with VM on) */

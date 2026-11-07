@@ -43,6 +43,8 @@
 
 #include "vm_int.h"
 
+void mx__thread_keep(int id); /* thread.c: mx_exit leaves it */
+
 #define PAGE MX_VM_PAGE
 #define PAGE_SHIFT 15
 #define HALF (PAGE / 2)
@@ -924,10 +926,12 @@ static void writer_start(u32 clean) {
   } sp = {0, 1, 0, 0, 0, 0};
   vm.wsema = mx_bios_create_sema(&sp);
   vm.clean_frames = clean < vm.nframes / 2 ? clean : vm.nframes / 2;
-  if (vm.wsema < 0 || mx_thread_start(writer, 0, wstack, sizeof wstack, prio - 1) < 0) {
+  int id = vm.wsema < 0 ? -1 : mx_thread_start(writer, 0, wstack, sizeof wstack, prio - 1);
+  if (id < 0) {
     mx_printf("mx_vm_init: clean_frames: the writer thread did not start\n");
     vm.wsema = -1;
-  }
+  } else
+    mx__thread_keep(id);
 }
 
 /* Take a frame: a free one, or the one of the page used longest ago (LRU
@@ -1522,10 +1526,12 @@ void mx__vm_prefetch(const void *p, u32 bytes) {
     } sp = {0, NPREF, 0, 0, 0, 0};
     int me = mx_thread_self(), prio = mx_thread_prio(me);
     psema = mx_bios_create_sema(&sp);
-    if (psema < 0 || mx_thread_start(pager, 0, pstack, sizeof pstack, prio - 1) < 0) {
+    int id = psema < 0 ? -1 : mx_thread_start(pager, 0, pstack, sizeof pstack, prio - 1);
+    if (id < 0) {
       mx_printf("maxsdk: the VM's pager thread did not start\n");
       psema = -2;
-    }
+    } else
+      mx__thread_keep(id);
   }
   if (psema < 0 || pref_in - pref_out >= NPREF)
     return; /* asked again later */

@@ -37,6 +37,13 @@ void mx__core_fault(const void *p, const char *what) {
     mx__kernel->mx__core_fault(p, what);
 }
 
+void mx__fio_ending(void (*stop)(void)) {
+  if (mx__kernel)
+    mx__kernel->fio_ending(stop);
+  else
+    stop();
+}
+
 void mx__paddr_fault(const void *p, u32 bytes) { mx__kernel->mx__paddr_fault(p, bytes); }
 
 void mx_exception_init(void) { mx__kernel->exception_setup(0); }
