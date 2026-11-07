@@ -66,6 +66,24 @@ on `libmxk` (the kernel's pad); the others keep the combination as quit.
 
 ### Step 2: processes
 
+**2a. A program ends without the restart** (`libmxk` programs; the others keep the ExecPS2
+restart, they run alone). What ExecPS2 does now, the kernel does itself:
+- *Threads, semaphores*: the kernel knows its own (the command thread, the VM's pager and
+  writer, its semaphores); every other BIOS thread and semaphore is the program's
+  (ReferThreadStatus / ReferSemaStatus over all ids), terminated and deleted.
+- *Interrupt handlers*: `mx_irq_intc`, `mx_irq_dmac`, the vblank functions and
+  `mx_timer_*` of `libmxk` go through the kernel (a table version), which keeps them per
+  program and removes them at its end. A program that calls AddIntcHandler itself is not on
+  `libmxk`'s rules (mx-os.md) and is not covered.
+- *The units*: the DMAC's channels stopped and their interrupts cleared, VIF0/VIF1/GIF and
+  VU0/VU1 reset, timers 0 and 1 stopped, the INTC mask as the kernel had it; the GS set up
+  again by the kernel's screen.
+- *Memory*: the VM's state, the heaps and the physical allocator reset by an explicit reset
+  (now the restart clears them as `.bss`); the TLB written back as now.
+- *Files, sockets, pad, sound*: the cleanup there is now, then without a restart.
+- Test: the same program 50 times in a row (VM, threads, sound, network), and the BIOS's
+  thread and semaphore counts the same after each.
+
 - The kernel no longer restarts (ExecPS2) after each program: it cleans up per process
   (threads, files, sockets, pad, sound, GS memory, interrupt handlers, VM frames).
 - Each `libmxk` program gets an ASID; its core memory (now at the BIOS's fixed mappings from
