@@ -5,24 +5,29 @@
 #   CFLAGS_MODULE, OBJS_MODULE   anything more
 #
 # and includes this file. Its exports (src/exports.tab, if there is one) are linked
-# first, and imports come from src/imports.lst. The IOP gcc is ps2dev's: there is
-# no LLVM linker for ps2sdk's link script yet.
+# first, and imports come from src/imports.lst. All of it is LLVM's: the feature
+# clang (-mcpu=r3000a; the import and export tables through irx_clang.h), ld.lld
+# -r with irx.ld, llvm-objcopy; then ps2sdk's iopfixup makes the IRX.
 #
 #   make [OUT=<dir>]    <dir>/<module>.irx
 
 MAXSDK ?= $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 PS2MAX ?= $(abspath $(MAXSDK)/../..)
 OUT    ?= $(PS2MAX)/build/libs/maxsdk/iop
-PS2MAX_PS2DEV  ?= $(abspath $(PS2MAX)/../ps2dev/install)
-PS2MAX_IOP_BIN ?= $(PS2MAX_PS2DEV)/iop/bin
-PS2MAX_IOP_SDK ?= $(PS2MAX_PS2DEV)/ps2sdk
+PS2MAX_PS2DEV   ?= $(abspath $(PS2MAX)/../ps2dev/install)
+PS2MAX_IOP_SDK  ?= $(PS2MAX_PS2DEV)/ps2sdk
+PS2MAX_LLVM_BIN ?= $(PS2MAX)/build/toolchain/llvm/feature/bin
 
 OBJ    = $(OUT)/obj/$(MODULE)
-CC     = $(PS2MAX_IOP_BIN)/mipsel-none-elf-gcc
-STRIP  = $(PS2MAX_IOP_BIN)/mipsel-none-elf-strip
-CFLAGS = -D_IOP -fno-builtin -G0 -Os -Wall -msoft-float -mno-explicit-relocs $(CFLAGS_MODULE) $(EXTRA_CFLAGS) \
+CC     = $(PS2MAX_LLVM_BIN)/clang --target=mipsel-none-elf -mcpu=r3000a
+LD     = $(PS2MAX_LLVM_BIN)/ld.lld -m elf32ltsmip -r -T $(MAXSDK)/iop/irx.ld
+OBJCOPY = $(PS2MAX_LLVM_BIN)/llvm-objcopy
+CFLAGS = -std=gnu23 -D_IOP -fno-builtin -ffreestanding -G0 -Os -Wall -Wno-unused-but-set-global \
+         -msoft-float -mno-abicalls -fno-pic -fno-unwind-tables -fno-asynchronous-unwind-tables \
+         $(CFLAGS_MODULE) $(EXTRA_CFLAGS) \
          -Iinclude -Isrc -I$(MAXSDK)/common/include \
          -I$(PS2MAX_IOP_SDK)/iop/include -I$(PS2MAX_IOP_SDK)/common/include
+TABLE_CFLAGS = -include $(MAXSDK)/iop/irx_clang.h
 HDRS   = $(wildcard include/*.h include/*/*.h src/*.h) $(wildcard $(MAXSDK)/common/include/*.h)
 
 EXPORTS = $(if $(wildcard src/exports.tab),$(OBJ)/exports.o)
@@ -37,19 +42,18 @@ $(OBJ)/%.o: src/%.c $(HDRS)
 $(OBJ)/exports.o: src/exports.tab
 	@mkdir -p $(dir $@)
 	{ echo '#include "irx.h"'; cat $<; } > $(@:.o=.c)
-	$(CC) $(CFLAGS) -fno-toplevel-reorder -c $(@:.o=.c) -o $@
+	$(CC) $(CFLAGS) $(TABLE_CFLAGS) -c $(@:.o=.c) -o $@
 
 $(OBJ)/imports.o: src/imports.lst src/irx_imports.h
 	@mkdir -p $(dir $@)
 	{ echo '#include "irx_imports.h"'; cat $<; } > $(@:.o=.c)
-	$(CC) $(CFLAGS) -fno-toplevel-reorder -c $(@:.o=.c) -o $@
+	$(CC) $(CFLAGS) $(TABLE_CFLAGS) -c $(@:.o=.c) -o $@
 
 $(OBJ)/$(MODULE).elf: $(OBJS)
-	$(CC) -T$(PS2MAX_IOP_SDK)/iop/startup/linkfile -o $@ $^ -nostdlib -dc -r
+	$(LD) -o $@ $^
 
 $(OUT)/$(MODULE).irx: $(OBJ)/$(MODULE).elf
-	$(STRIP) --strip-unneeded --remove-section=.pdr --remove-section=.comment \
-	  --remove-section=.mdebug.abi32 --remove-section=.gnu.attributes -o $(@:.irx=.stripped.elf) $<
+	$(OBJCOPY) --strip-unneeded $< $(@:.irx=.stripped.elf)
 	$(PS2MAX_IOP_SDK)/bin/iopfixup --irx1 -o $@ $(@:.irx=.stripped.elf)
 	@rm -f $(@:.irx=.stripped.elf)
 

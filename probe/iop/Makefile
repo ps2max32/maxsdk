@@ -1,5 +1,5 @@
-# IOP probes: clang for the code, the IOP gcc for what has no replacement yet (the
-# linker with ps2sdk's link script, iopfixup), as tools/mxlink does.
+# IOP probes, with LLVM as maxsdk's iop/Rules.mk: clang, ld.lld -r with
+# ../../iop/irx.ld, llvm-objcopy; then ps2sdk's iopfixup.
 #
 #   make [OUT=<dir>]    <dir>/r3000a.irx, <dir>/net.irx, <dir>/rawnet.irx, <dir>/usbraw.irx, <dir>/fileraw.irx,
 #                       <dir>/rawnet_mx.irx (rawnet.c on mxeth)
@@ -9,12 +9,12 @@
 PS2MAX ?= $(abspath $(CURDIR)/../../../..)
 OUT    ?= $(PS2MAX)/build/libs/maxsdk/probe/iop
 LLVM   ?= $(PS2MAX)/build/toolchain/llvm/feature/bin
-ifndef PS2MAX_IOP_BIN
-$(error source envsetup.sh first: PS2MAX_IOP_BIN is not set)
-endif
+PS2MAX_PS2DEV  ?= $(abspath $(PS2MAX)/../ps2dev/install)
+PS2MAX_IOP_SDK ?= $(PS2MAX_PS2DEV)/ps2sdk
+LD      = $(LLVM)/ld.lld -m elf32ltsmip -r -T ../../iop/irx.ld
 
 CC      = $(LLVM)/clang --target=mipsel-none-elf -mcpu=r3000a
-CFLAGS  = -D_IOP -fno-builtin -ffreestanding -G0 -O2 -Wall -Werror -Wno-unused-but-set-global \
+CFLAGS  = -std=gnu23 -D_IOP -fno-builtin -ffreestanding -G0 -O2 -Wall -Werror -Wno-unused-but-set-global \
           -msoft-float -mno-abicalls -fno-pic -fno-unwind-tables -fno-asynchronous-unwind-tables \
           -I$(PS2MAX_IOP_SDK)/iop/include -I$(PS2MAX_IOP_SDK)/common/include -I. \
           -I../../iop/dev9/mxeth/include -I../../iop/dev9/mxdev9/include
@@ -48,27 +48,25 @@ $(OUT)/%_imports.o: %_imports.lst %_imports.h irx_imports.h
 	$(CC) $(CFLAGS) -c $(@:.o=.c) -o $@
 
 $(OUT)/r3000a.elf: $(OBJS)
-	$(PS2MAX_IOP_BIN)/mipsel-none-elf-gcc -T$(PS2MAX_IOP_SDK)/iop/startup/linkfile -o $@ $^ -nostdlib -dc -r
+	$(LD) -o $@ $^
 
 $(OUT)/net.elf: $(OUT)/net.o $(OUT)/net_imports.o
-	$(PS2MAX_IOP_BIN)/mipsel-none-elf-gcc -T$(PS2MAX_IOP_SDK)/iop/startup/linkfile -o $@ $^ -nostdlib -dc -r
+	$(LD) -o $@ $^
 
 $(OUT)/rawnet.elf: $(OUT)/rawnet.o $(OUT)/rawnet_imports.o
-	$(PS2MAX_IOP_BIN)/mipsel-none-elf-gcc -T$(PS2MAX_IOP_SDK)/iop/startup/linkfile -o $@ $^ -nostdlib -dc -r
+	$(LD) -o $@ $^
 
 $(OUT)/rawnet_mx.elf: $(OUT)/rawnet_mx.o $(OUT)/rawnet_mx_imports.o
-	$(PS2MAX_IOP_BIN)/mipsel-none-elf-gcc -T$(PS2MAX_IOP_SDK)/iop/startup/linkfile -o $@ $^ -nostdlib -dc -r
+	$(LD) -o $@ $^
 
 $(OUT)/usbraw.elf: $(OUT)/usbraw.o $(OUT)/usbraw_imports.o
-	$(PS2MAX_IOP_BIN)/mipsel-none-elf-gcc -T$(PS2MAX_IOP_SDK)/iop/startup/linkfile -o $@ $^ -nostdlib -dc -r
+	$(LD) -o $@ $^
 
 $(OUT)/fileraw.elf: $(OUT)/fileraw.o $(OUT)/fileraw_imports.o
-	$(PS2MAX_IOP_BIN)/mipsel-none-elf-gcc -T$(PS2MAX_IOP_SDK)/iop/startup/linkfile -o $@ $^ -nostdlib -dc -r
+	$(LD) -o $@ $^
 
 $(OUT)/%.irx: $(OUT)/%.elf
-	$(PS2MAX_IOP_BIN)/mipsel-none-elf-strip --strip-unneeded --remove-section=.pdr \
-	  --remove-section=.comment --remove-section=.mdebug.abi32 --remove-section=.gnu.attributes \
-	  -o $(@:.irx=.stripped.elf) $<
+	$(LLVM)/llvm-objcopy --strip-unneeded $< $(@:.irx=.stripped.elf)
 	$(PS2MAX_IOP_SDK)/bin/iopfixup --irx1 -o $@ $(@:.irx=.stripped.elf)
 
 .PHONY: all
