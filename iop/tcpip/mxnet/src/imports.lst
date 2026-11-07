@@ -9,12 +9,22 @@ I_CpuResumeIntr
 I_QueryIntrContext
 intrman_IMPORTS_end
 
+#ifdef MXNET_MXETH
+mxeth_IMPORTS_start
+I_mxeth_attach
+I_mxeth_free
+I_mxeth_send
+I_mxeth_mac
+I_mxeth_free_frames
+mxeth_IMPORTS_end
+#else
 netman_IMPORTS_start
 I_NetManRegisterNetworkStack
 I_NetManUnregisterNetworkStack
 I_NetManNetIFXmit
 I_NetManIoctl
 netman_IMPORTS_end
+#endif
 
 thbase_IMPORTS_start
 I_CreateThread

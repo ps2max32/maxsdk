@@ -16,7 +16,12 @@
 #include <types.h>
 #include <stdio.h>
 #include <intrman.h>
+#ifdef MXNET_MXETH
+#include <mxeth.h>
+#include <stddef.h>
+#else
 #include <netman.h>
+#endif
 #include <loadcore.h>
 #include <thbase.h>
 #include <sysclib.h>
@@ -46,7 +51,9 @@ typedef struct pbuf	PBuf;
 typedef struct netif	NetIF;
 typedef struct ip4_addr	IPAddr;
 
+#ifndef MXNET_MXETH
 static struct pbuf *TxHead, *TxTail;
+#endif
 
 #include <mxfast.h>
 
@@ -239,6 +246,102 @@ int _exit(int argc, char *argv[])
 
 static struct netif NIF;
 
+#ifdef MXNET_MXETH
+/* mxnet.irx: the netif on maxsdk's mxeth (docs/iop-drivers.md). Received
+   frames come as mxeth's buffers, wrapped in a pbuf_custom in the frame's own
+   header (no copy), unless mxeth runs short of buffers: then they are copied
+   and the buffer goes back at once. */
+#define RX_COPY_BELOW 8
+#define TX_SLOTS 32
+
+typedef char frame_user_fits[sizeof(struct pbuf_custom) <= sizeof(((struct mxeth_frame *)0)->user) ? 1 : -1];
+
+static void RxFree(struct pbuf *p)
+{
+	mxeth_free((struct mxeth_frame *)((u8 *)p - offsetof(struct mxeth_frame, user)));
+}
+
+static int EthRx(struct mxeth_frame *f, void *arg)
+{
+	struct pbuf *p;
+
+	(void)arg;
+	if(mxeth_free_frames() < RX_COPY_BELOW)
+	{
+		p = pbuf_alloc(PBUF_RAW, f->len, PBUF_POOL);
+		if(p != NULL)
+			pbuf_take(p, f->data, f->len);
+		mxeth_free(f);
+		if(p == NULL)
+			return 1;
+	} else {
+		struct pbuf_custom *c = (struct pbuf_custom *)f->user;
+		c->custom_free_function = RxFree;
+		p = pbuf_alloced_custom(PBUF_RAW, f->len, PBUF_REF, c, f->data, MXETH_FRAME_SIZE);
+	}
+	if(!mxfast_rx(p))
+		ps2ip_input(p, &NIF);
+	return 1;
+}
+
+static void EthLink(int mode, void *arg)
+{
+	(void)arg;
+	tcpip_callback((void*)(mode ? &netif_set_link_up : &netif_set_link_down), &NIF);
+}
+
+static struct mxeth_client EthClient = {NULL, 30, EthRx, EthLink, NULL};
+
+static struct mxeth_tx TxSlot[TX_SLOTS], *TxFree;
+
+static void TxDone(struct mxeth_tx *t)
+{
+	int OldState;
+
+	pbuf_free((struct pbuf *)t->arg);
+	CpuSuspendIntr(&OldState);
+	t->next = TxFree;
+	TxFree = t;
+	CpuResumeIntr(OldState);
+}
+
+static err_t
+SMapLowLevelOutput(struct netif *pNetIF, struct pbuf* pOutput)
+{
+	struct pbuf *p;
+	struct mxeth_tx *t;
+	int OldState;
+
+	(void)pNetIF;
+
+	pbuf_ref(pOutput);	//Freed by TxDone, after mxeth took the frame.
+	if(pOutput->tot_len > pOutput->len)
+	{
+		if((p = pbuf_coalesce(pOutput, PBUF_RAW)) == pOutput)
+		{
+			pbuf_free(pOutput);
+			return ERR_MEM;
+		}
+	} else
+		p = pOutput;
+
+	CpuSuspendIntr(&OldState);
+	if((t = TxFree) != NULL)
+		TxFree = t->next;
+	CpuResumeIntr(OldState);
+	if(t == NULL)
+	{
+		pbuf_free(p);
+		return ERR_MEM;
+	}
+	t->data = p->payload;
+	t->len = p->len;
+	t->done = TxDone;
+	t->arg = p;
+	mxeth_send(t);
+	return ERR_OK;
+}
+#else
 static void LinkStateUp(void){
 	tcpip_callback((void*)&netif_set_link_up, &NIF);
 }
@@ -365,11 +468,21 @@ SMapLowLevelOutput(struct netif *pNetIF, struct pbuf* pOutput)
 	return result;
 }
 
+#endif
+
 //Should be called at the beginning of the program to set up the network interface.
 static err_t SMapIFInit(struct netif* pNetIF)
 {
+#ifdef MXNET_MXETH
+	for(int i = 0; i < TX_SLOTS; i++)
+	{
+		TxSlot[i].next = TxFree;
+		TxFree = &TxSlot[i];
+	}
+#else
 	TxHead = NULL;
 	TxTail = NULL;
+#endif
 
 	pNetIF->name[0]='s';
 	pNetIF->name[1]='m';
@@ -380,7 +493,11 @@ static err_t SMapIFInit(struct netif* pNetIF)
 	pNetIF->mtu=1500;
 
 	//Get MAC address.
+#ifdef MXNET_MXETH
+	mxeth_mac(pNetIF->hwaddr);
+#else
 	NetManIoctl(NETMAN_NETIF_IOCTL_ETH_GET_MAC, NULL, 0, pNetIF->hwaddr, sizeof(pNetIF->hwaddr));
+#endif
 //	DEBUG_PRINTF("MAC address : %02x:%02x:%02x:%02x:%02x:%02x\n",pNetIF->hwaddr[0],pNetIF->hwaddr[1],pNetIF->hwaddr[2],
 //				 pNetIF->hwaddr[3],pNetIF->hwaddr[4],pNetIF->hwaddr[5]);
 
@@ -420,6 +537,7 @@ static inline int InitializeLWIP(void){
 
 static inline int InitLWIPStack(IPAddr *IP, IPAddr *NM, IPAddr *GW){
 	int result;
+#ifndef MXNET_MXETH
 	static struct NetManNetProtStack stack={
 		&LinkStateUp,
 		&LinkStateDown,
@@ -431,6 +549,7 @@ static inline int InitLWIPStack(IPAddr *IP, IPAddr *NM, IPAddr *GW){
 		NULL,
 		NULL
 	};
+#endif
 
 	if((result = InitializeLWIP()) != 0)
 		return result;
@@ -438,8 +557,13 @@ static inline int InitLWIPStack(IPAddr *IP, IPAddr *NM, IPAddr *GW){
 	netif_add(&NIF, IP, NM, GW, NULL, &SMapIFInit, tcpip_input);
 	netif_set_default(&NIF);
 
+#ifdef MXNET_MXETH
+	netif_set_up(&NIF);
+	mxeth_attach(&EthClient);
+#else
 	NetManRegisterNetworkStack(&stack);
 	netif_set_up(&NIF);
+#endif
 
 	return 0;
 }

@@ -682,7 +682,7 @@ int _start(int argc, char **argv) {
   if (!pool)
     return MODULE_NO_RESIDENT_END;
   for (u32 i = 0; i < frames; i++) {
-    pool[i].index = (u16)i;
+    pool[i].nr = (u16)i;
     pool[i].next = free_list;
     free_list = &pool[i];
   }

@@ -16,7 +16,7 @@
 struct mxeth_frame {
   struct mxeth_frame *next; /* mxeth's while queued, the client's once taken */
   u16 len;
-  u16 index;
+  u16 nr; /* the buffer's number */
   u32 user[6]; /* the client's */
   u8 data[MXETH_FRAME_SIZE] __attribute__((aligned(16)));
 };

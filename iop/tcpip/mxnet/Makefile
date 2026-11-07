@@ -1,12 +1,22 @@
 # The TCP/IP stack: lwIP (libs/lwip), as ps2sdk's ps2ip-nm.irx builds it, with the
 # same exports (library "ps2ip") and the fast path (mxfast.c, common/include/mxfast.h).
 
+# MXETH=1: mxnet.irx, the same on maxsdk's mxeth (docs/iop-drivers.md); built too.
+ifdef MXETH
+MODULE = mxnet
+CFLAGS_MXETH = -DMXNET_MXETH -I../../dev9/mxeth/include
+else
 MODULE = ps2ip-nm
+all: mxnet-on-mxeth
+mxnet-on-mxeth:
+	$(MAKE) MXETH=1
+.PHONY: mxnet-on-mxeth
+endif
 SRCS   = ps2ip.c mxfast.c sys_arch.c
 
 LWIP ?= $(abspath ../../../../lwip)
 CFLAGS_MODULE = -DLWIP_NOASSERT -DLWIP_COMPAT_MUTEX -DLWIP_COMPAT_MUTEX_ALLOWED -DPS2IP_DHCP \
-                -DPS2IP_DNS -I$(LWIP)/src/include -I$(LWIP)/src/include/ipv4
+                -DPS2IP_DNS -I$(LWIP)/src/include -I$(LWIP)/src/include/ipv4 $(CFLAGS_MXETH)
 
 LWIP_SRCS = api/api_lib.c api/api_msg.c api/err.c api/netbuf.c api/netdb.c api/sockets.c api/tcpip.c \
             core/def.c core/dns.c core/inet_chksum.c core/init.c core/ip.c core/mem.c core/memp.c \

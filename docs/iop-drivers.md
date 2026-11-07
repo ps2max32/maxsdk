@@ -146,6 +146,10 @@ lowest priority gets of the IOP.
 | receive to the EE, 12 MB/s | 11.77 MB/s, 19% free | 11.75 MB/s, 33% free |
 | send 4000 frames of 1514 bytes | 7.92 MB/s, 39% free | 10.91 MB/s, 0% free |
 
+TCP through lwIP (`probe/iop/net.c`, `net_host.py`: 8 MiB each way), where lwIP is the limit as
+before: to the PS2 3.12 s with ps2sdk's modules and `ps2ip-nm`, 3.27 s with mxdev9, mxeth and
+`mxnet`; back 4.14 s and 3.73 s.
+
 No frame lost in any run. Two designs measured first, both left 4% free at 12 MB/s:
 
 - **Everything in interrupt context**, chained by the DMA queue (each frame: the SMAP's
@@ -164,8 +168,9 @@ Sending is bound by the IOP: one TXEND and one wake-up a frame (the FIFO holds t
 
 1. mxdev9 and mxeth, measured with `p26_rawnet` (`rawnet` built for mxeth: `rawnet_mx.irx`)
    against ps2sdk's modules. Done: "Measurements".
-2. mxnet on mxeth (lwIP's netif on `mxeth_send` and an mxeth client), the fast path as an mxeth
-   client; mxlink loads mxdev9, mxeth, mxnet, with the ps2sdk set as fallback.
+2. mxnet on mxeth (lwIP's netif on `mxeth_send` and an mxeth client: `mxnet.irx`, built beside
+   `ps2ip-nm.irx` from `iop/tcpip/mxnet`; done, measured above), the fast path as an mxeth client;
+   mxlink loads mxdev9, mxeth, mxnet, with the ps2sdk set as fallback.
 3. Console over the fast-path protocol; udptty gone.
 4. netman, smap and ps2dev9 off the card.
 5. mxata.

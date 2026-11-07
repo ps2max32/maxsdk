@@ -94,6 +94,9 @@
  */
 #define IP_FRAG			0
 
+/* mxnet.irx: mxeth's receive buffers become pbufs without a copy */
+#define LWIP_SUPPORT_CUSTOM_PBUF	1
+
 /*
    ------------------------------------------------
    ---------- Internal Memory Pool Sizes ----------

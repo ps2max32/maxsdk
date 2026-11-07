@@ -22,6 +22,7 @@ mxdev9_IMPORTS_end
 
 sysclib_IMPORTS_start
 I_memcmp
+I_strcmp
 I_memcpy
 I_memset
 sysclib_IMPORTS_end

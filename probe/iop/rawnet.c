@@ -45,7 +45,7 @@ static u8 rxbuf[SLOTS][SLOT] __attribute__((aligned(16)));
 #endif
 static int dma_id[SLOTS];
 static u32 slot, sif_mode, ee_ring, waits, drops;
-static u8 reply[192] __attribute__((aligned(16)));
+static u8 reply[256] __attribute__((aligned(16)));
 static u8 blast[1536] __attribute__((aligned(16)));
 static u32 rx_len, reply_len, tx_left, tx_sent;
 
@@ -96,7 +96,7 @@ static void headers(u8 *f, u32 size) {
 }
 
 #ifdef RAWNET_MXETH
-static u32 c0[MXETH_STATS + 6];
+static u32 c0[MXETH_STATS + 6], kinds[6], udp_from, udp_ports, udp_last[8], udp_n;
 #endif
 
 static void start_count(void) {
@@ -130,8 +130,14 @@ static void report(u8 what) {
   mxdev9_stats(c + MXETH_STATS);
   for (u32 i = 0; i < MXETH_STATS + 6; i++)
     put32(d + 32 + 4 * i, c[i] - c0[i]);
-  headers(reply, 32 + 4 * (MXETH_STATS + 6));
-  reply_len = HDR + 32 + 4 * (MXETH_STATS + 6);
+  for (u32 i = 0; i < 6; i++)
+    put32(d + 32 + 4 * (MXETH_STATS + 6 + i), kinds[i]);
+  put32(d + 32 + 4 * (MXETH_STATS + 12), udp_from);
+  put32(d + 32 + 4 * (MXETH_STATS + 13), udp_ports);
+  for (u32 i = 0; i < 8; i++)
+    put32(d + 32 + 4 * (MXETH_STATS + 14 + i), udp_last[(udp_n + i) % 8]);
+  headers(reply, 32 + 4 * (MXETH_STATS + 22));
+  reply_len = HDR + 32 + 4 * (MXETH_STATS + 22);
 #endif
   XMIT();
 }
@@ -277,8 +283,47 @@ static void deq_tx(void) {
    DMA is done */
 static struct mxeth_frame *held[SLOTS];
 
+/* With a stack beside it (an argument "beside"), only the frames to PORT are
+   rawnet's, and ARP is the stack's: rawnet then only reports mxeth's
+   counters while the stack works. */
+static int beside;
+/* beside a stack: the frames it got, by kind (sent to the host in place of the
+   receive counters of a report): ARP, TCP with data, TCP without, UDP, other,
+   the same as the frame before */
+static u8 last[64];
+static u32 last_len;
+
+static void count_kind(const u8 *d, u32 len, u32 buf) {
+  u32 k = 4;
+  if (be16(d + 12) == 0x0806)
+    k = 0;
+  else if (be16(d + 12) == 0x0800 && d[23] == 6)
+    k = be16(d + 16) > (u32)(d[14] & 15) * 4 + (d[46] >> 4) * 4 ? 1 : 2;
+  else if (be16(d + 12) == 0x0800 && d[23] == 17) {
+    k = 3;
+    udp_from = (u32)be16(d + 26) << 16 | be16(d + 28);
+    udp_ports = (u32)be16(d + 34) << 16 | be16(d + 36);
+    /* the IP ID, the buffer and the length of the last 8 */
+    udp_last[udp_n++ % 8] = be16(d + 18) << 16 | buf << 11 | len;
+  }
+  kinds[k]++;
+  u32 n = len < 64 ? len : 64;
+  if (len == last_len && !memcmp(d, last, n))
+    kinds[5]++;
+  memcpy(last, d, n);
+  last_len = len;
+}
+
 static int mx_rx(struct mxeth_frame *f, void *arg) {
   (void)arg;
+  if (beside) {
+    const u8 *d = f->data;
+    count_kind(d, f->len, f->nr);
+    if (be16(d + 12) != 0x0800 || d[23] != 17 || memcmp(d + 30, my_ip, 4) || be16(d + 36) != PORT)
+      return 0;
+    if (!peer_mac[0] && !peer_mac[1] && !peer_mac[2])
+      memcpy(peer_mac, d + 6, 6);
+  }
   slot = (slot + 1) % SLOTS;
   for (u32 i = 0; dma_id[slot] && sceSifDmaStat(dma_id[slot]) >= 0; i++) {
     waits++;
@@ -353,8 +398,16 @@ static u32 hex(const char *s) {
 }
 
 int _start(int argc, char **argv) {
+#ifdef RAWNET_MXETH
+  for (int i = 1; i < argc; i++)
+    if (!strcmp(argv[i], "beside"))
+      beside = 1;
+    else
+      ee_ring = hex(argv[i]);
+#else
   if (argc > 1)
     ee_ring = hex(argv[1]);
+#endif
 #ifndef RAWNET_MXETH
   static const struct NetManNetProtStack stack = {
       link_up, link_down, alloc_rx, free_rx, enq_rx, next_tx, deq_tx, 0, 0};
@@ -377,6 +430,8 @@ int _start(int argc, char **argv) {
 #ifdef RAWNET_MXETH
   mxeth_mac(my_mac);
   mxeth_attach(&client);
+  if (beside)
+    return MODULE_RESIDENT_END; /* the next module (the stack's probe) loads */
 #else
   NetManIoctl(NETMAN_NETIF_IOCTL_ETH_GET_MAC, 0, 0, my_mac, sizeof my_mac);
   NetManRegisterNetworkStack(&stack);
