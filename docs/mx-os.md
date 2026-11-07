@@ -55,7 +55,7 @@ Retail PS2s have 32 MiB; never count on more.
    (`<mx/hires.h>`).
 9. **A pad is all there is.** Every prompt must work without a keyboard: Cross confirms where an
    engine asks for `Y`. Quit must be reachable from the menu.
-10. **Saves and configs** go next to the ELF, by relative path. Writes are slow (about 600 KB/s
+10. **Saves and configs** go next to the ELF, by relative path. Writes are slow (about 750 KB/s
     on USB) and FAT keeps a file's size until it is closed: close files.
   Files go through mxio when the card has it (`kernel.md`): nothing changes for a program, but keep
   read buffers 16-byte aligned and sizes whole quadwords: anything else takes a copy on the EE.

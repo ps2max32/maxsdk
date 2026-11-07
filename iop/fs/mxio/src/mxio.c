@@ -7,7 +7,9 @@
 
 IRX_ID("mxio", 1, 0);
 
-#define PIECE 16384u /* of a read from a driver */
+/* Of a read from a driver. A read is one command on USB, where each costs about
+   1 ms: 870 KiB/s at 16 KiB, 922 at 64 KiB (probe/iop/fileraw.c). */
+#define PIECE 65536u
 
 static struct {
   int used, host, h;
