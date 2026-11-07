@@ -91,12 +91,21 @@ static void report(void) {
 /* defined by the kernel (mxlink): its own fatal ends print no marker either */
 extern const int mx__kernel_self __attribute__((weak));
 
+/* The end marker. mxlink prints it when the program is back: here a host
+   would stop at it and go away while the program still ends, with its files on
+   host:. Without a loader to go back to (PCSX2 with -elf, ps2link) the program
+   prints it, once: at MX_TEST_END, else at mx_exit. */
+static int marker_done;
+static void end_marker(int status) {
+  if (!loader_ret && !&mx__kernel_self && !marker_done) {
+    marker_done = 1;
+    mx_printf("@@PS2TEST_END@@ status=%d\n", status);
+  }
+}
+
 void mx__test_end(int status) {
   report();
-  /* mxlink prints it when the program is back. Here a host would stop at it
-     and go away while the program still ends, with its files on host: */
-  if (!loader_ret && !&mx__kernel_self)
-    mx_printf("@@PS2TEST_END@@ status=%d\n", status);
+  end_marker(status);
 }
 
 void mx__vm_shutdown(void);
@@ -116,6 +125,7 @@ void mx_exit(int status) {
   if (mx__sleep_stop)
     mx__sleep_stop();
   report();
+  end_marker(status);
   mx_debug_flush();
   /* the BIOS's TLB back for ps2link (with VM on) */
   mx__vm_shutdown();

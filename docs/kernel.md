@@ -64,7 +64,8 @@ program with the pad. It stays silent when the program started another with `mx_
 run ends with the last one. `MX_TEST_END` prints nothing under mxlink, nor in the kernel itself (a
 fatal error of the VM), only the statistics: a host
 that stopped at it would go away while the program still ends, with its files on `host:`. A program
-started without mxlink (PCSX2 with `-elf`, ps2link) prints it there.
+started without mxlink (PCSX2 with `-elf`, ps2link) prints it there, at `MX_TEST_END` or else at
+`mx_exit`, so a game needs none of its own there either.
 
 When a program is back with the IOP as mxlink left it, mxlink cleans up after it: open files, sockets,
 pad ports, the sound. Each of those calls gives up after a second; a server of the IOP that does not
