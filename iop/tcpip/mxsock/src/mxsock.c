@@ -163,6 +163,60 @@ static void *rpc(int fno, void *data, int size) {
   return r;
 }
 
+/* A wait service: lwIP's select over the sockets asked for, with the timeout. */
+static int wait_set(u32 bits, fd_set *set) {
+  int top = 0;
+  FD_ZERO(set);
+  for (int s = 0; s < MXSOCK_SOCKETS; s++)
+    if (bits >> s & 1 && sockets[s].fd) {
+      FD_SET(sockets[s].fd - 1, set);
+      if (sockets[s].fd > top)
+        top = sockets[s].fd;
+    }
+  return top;
+}
+
+static u32 wait_ready(u32 bits, fd_set *set) {
+  u32 ready = 0;
+  for (int s = 0; s < MXSOCK_SOCKETS; s++)
+    if (bits >> s & 1 && sockets[s].fd && FD_ISSET(sockets[s].fd - 1, set))
+      ready |= 1u << s;
+  return ready;
+}
+
+static u32 wait_in[MXSOCK_WAITERS][MXSOCK_WAIT_WORDS] __attribute__((aligned(16)));
+static s32 wait_out[MXSOCK_WAITERS][MXSOCK_WAIT_WORDS] __attribute__((aligned(16)));
+
+static void *wait_rpc(int fno, void *data, int size) {
+  u32 *a = data;
+  int i = (int)(a - wait_in[0]) / MXSOCK_WAIT_WORDS;
+  s32 *r = wait_out[i];
+  fd_set rd, wr;
+  (void)fno, (void)size;
+  int top = wait_set(a[0], &rd), w = wait_set(a[1], &wr);
+  if (w > top)
+    top = w;
+  u32 us = a[2] > MXSOCK_WAIT_MAX_US ? MXSOCK_WAIT_MAX_US : a[2];
+  struct timeval t = {0, (long)us};
+  int n = top ? lwip_select(top, a[0] ? &rd : 0, a[1] ? &wr : 0, 0, &t) : 0;
+  if (!top && us)
+    DelayThread(us); /* nothing to wait for: the timeout, as select would */
+  r[0] = n < 0 ? MXSOCK_BADF : n;
+  r[1] = n > 0 ? (s32)wait_ready(a[0], &rd) : 0;
+  r[2] = n > 0 ? (s32)wait_ready(a[1], &wr) : 0;
+  r[3] = 0;
+  return r;
+}
+
+static void wait_thread(void *arg) {
+  static SifRpcDataQueue_t queue[MXSOCK_WAITERS];
+  static SifRpcServerData_t server[MXSOCK_WAITERS];
+  int i = (int)arg;
+  sceSifSetRpcQueue(&queue[i], GetThreadId());
+  sceSifRegisterRpc(&server[i], MXSOCK_WAIT_SID + i, wait_rpc, wait_in[i], 0, 0, &queue[i]);
+  sceSifRpcLoop(&queue[i]);
+}
+
 static void thread(void *arg) {
   static SifRpcDataQueue_t queue;
   static SifRpcServerData_t server;
@@ -180,5 +234,10 @@ int _start(int argc, char **argv) {
   if (id <= 0)
     return MODULE_NO_RESIDENT_END;
   StartThread(id, 0);
+  for (int i = 0; i < MXSOCK_WAITERS; i++) {
+    iop_thread_t w = {TH_C, 0, wait_thread, 0x800, 0x50};
+    if ((id = CreateThread(&w)) > 0)
+      StartThread(id, (void *)i);
+  }
   return MODULE_RESIDENT_END;
 }

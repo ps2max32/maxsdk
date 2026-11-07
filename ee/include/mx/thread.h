@@ -24,6 +24,10 @@ int mx_thread_prio(int id);
 int mx_thread_set_prio(int id, int prio);
 /* Let the other ready threads of the same priority run. */
 void mx_thread_yield(void);
+/* Sleep at least us microseconds while other threads run (0: mx_thread_yield).
+   From a thread, not an interrupt handler. Takes EE timer 0 (<mx/timer.h>); up
+   to 16 threads sleep at once, more wait in mx_delay_us. */
+void mx_sleep_us(u32 us);
 /* Wait until thread id has ended (sleeps, so lower-priority threads run),
    then delete it. */
 void mx_thread_join(int id);

@@ -1,6 +1,6 @@
 /* BSD sockets on <mx/net.h> (ee/compat/net). A socket's descriptor is
-   SOCK_FD + its number, below FD_SETSIZE for select. mxsock never waits: blocking
-   is done here, by polling and giving other threads the time. */
+   SOCK_FD + its number, below FD_SETSIZE for select. mxsock's calls never wait:
+   blocking is done here, by sleeping in mx_net_wait until the socket can go on. */
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -38,9 +38,10 @@ static int fail(int r) {
   return -1;
 }
 
-static void wait_a_little(void) {
-  mx_thread_yield();
-  mx_delay_us(100);
+/* sleep until socket s can read (or accept), or write (or has connected) */
+static void wait_for(int s, int want) {
+  u32 bit = 1u << s;
+  mx_net_wait(want & MX_NET_READ ? bit : 0, want & MX_NET_WRITE ? bit : 0, MX_NET_FOREVER, 0, 0);
 }
 
 static int nonblocking(int s, int flags) { return sock[s].nonblock || flags & MSG_DONTWAIT; }
@@ -103,7 +104,7 @@ int accept(int fd, struct sockaddr *addr, socklen_t *len) {
   while ((r = mx_net_accept(s, &ip, &port)) == MX_NET_AGAIN) {
     if (sock[s].nonblock)
       return fail(r);
-    wait_a_little();
+    wait_for(s, MX_NET_READ);
   }
   if (r < 0 || r >= SOCKETS)
     return fail(r);
@@ -128,7 +129,7 @@ int connect(int fd, const struct sockaddr *addr, socklen_t len) {
       errno = EINPROGRESS;
       return -1;
     }
-    wait_a_little();
+    wait_for(s, MX_NET_WRITE);
   }
   return r < 0 ? fail(r) : 0;
 }
@@ -146,7 +147,7 @@ ssize_t send(int fd, const void *data, size_t size, int flags) {
     if (r == MX_NET_AGAIN) {
       if (nonblocking(s, flags))
         return done ? (ssize_t)done : fail(r);
-      wait_a_little();
+      wait_for(s, MX_NET_WRITE);
       continue;
     }
     if (r < 0)
@@ -173,7 +174,7 @@ ssize_t sendto(int fd, const void *data, size_t size, int flags, const struct so
   while ((r = mx_net_sendto(s, data, size, a->sin_addr.s_addr, ntohs(a->sin_port))) == MX_NET_AGAIN) {
     if (nonblocking(s, flags))
       return fail(r);
-    wait_a_little();
+    wait_for(s, MX_NET_WRITE);
   }
   return r < 0 ? fail(r) : r;
 }
@@ -193,7 +194,7 @@ ssize_t recvfrom(int fd, void *data, size_t size, int flags, struct sockaddr *fr
       break;
     if (nonblocking(s, flags))
       return fail(r);
-    wait_a_little();
+    wait_for(s, MX_NET_READ);
   }
   if (r < 0)
     return fail(r);
@@ -280,43 +281,41 @@ __attribute__((weak)) int ioctl(int fd, unsigned long request, ...) {
 }
 
 int select(int n, fd_set *r, fd_set *w, fd_set *e, struct timeval *timeout) {
-  fd_set in_r, in_w;
-  u32 t0 = mx_count(), us = timeout ? (u32)timeout->tv_sec * 1000000u + (u32)timeout->tv_usec : 0;
-  FD_ZERO(&in_r);
-  FD_ZERO(&in_w);
-  if (r)
-    in_r = *r;
-  if (w)
-    in_w = *w;
+  u32 rd = 0, wr = 0, rr = 0, rw = 0;
+  u32 us = timeout ? (u32)timeout->tv_sec * 1000000u + (u32)timeout->tv_usec : MX_NET_FOREVER;
+  for (int fd = SOCK_FD; fd < n && fd < SOCK_FD + SOCKETS; fd++) {
+    int s = fd - SOCK_FD;
+    if (!sock[s].open)
+      continue;
+    if (r && FD_ISSET(fd, r))
+      rd |= 1u << s;
+    if (w && FD_ISSET(fd, w))
+      wr |= 1u << s;
+  }
   if (e)
     FD_ZERO(e);
-  for (;;) {
-    int ready = 0;
-    if (r)
-      FD_ZERO(r);
-    if (w)
-      FD_ZERO(w);
-    for (int fd = SOCK_FD; fd < n && fd < SOCK_FD + SOCKETS; fd++) {
-      int want = (FD_ISSET(fd, &in_r) ? MX_NET_READ : 0) | (FD_ISSET(fd, &in_w) ? MX_NET_WRITE : 0);
-      int s = fd - SOCK_FD;
-      if (!want || !sock[s].open)
-        continue;
-      int got = mx_net_poll(s, want);
-      if (got > 0 && got & MX_NET_READ && r) {
-        FD_SET(fd, r);
-        ready++;
-      }
-      if (got > 0 && got & MX_NET_WRITE && w) {
-        FD_SET(fd, w);
-        ready++;
-      }
-    }
-    if (ready)
-      return ready;
-    if (timeout && (mx_count() - t0) / (MX_EE_HZ / 1000000u) >= us)
-      return 0;
-    wait_a_little();
+  if (r)
+    FD_ZERO(r);
+  if (w)
+    FD_ZERO(w);
+  if (!rd && !wr) {
+    if (us != MX_NET_FOREVER)
+      mx_sleep_us(us);
+    return 0;
   }
+  int got = mx_net_wait(rd, wr, us, &rr, &rw);
+  if (got < 0) {
+    errno = EIO;
+    return -1;
+  }
+  int ready = 0;
+  for (int s = 0; s < SOCKETS; s++) {
+    if (r && rr >> s & 1)
+      FD_SET(SOCK_FD + s, r), ready++;
+    if (w && rw >> s & 1)
+      FD_SET(SOCK_FD + s, w), ready++;
+  }
+  return ready;
 }
 
 struct hostent *gethostbyname(const char *name) {

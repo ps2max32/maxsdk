@@ -2,9 +2,10 @@
 #define MX_TIMER_H
 
 /* Time: COP0 Count for short intervals (EE clock), and the EE timers for
-   periodic interrupts. Use 0 and 1: the BIOS uses timer 3 for alarms, and
-   maps the page of timers 2 and 3 (0x10001000) read-only, so a user-mode
-   write to them raises a TLB modified exception (docs/vm.md). */
+   periodic interrupts. Timer 0 is mx_sleep_us's (<mx/thread.h>) once a thread
+   has slept; timer 1 is free (the profiler takes it). The BIOS uses timer 3 for
+   alarms, and maps the page of timers 2 and 3 (0x10001000) read-only, so a
+   user-mode write to them raises a TLB modified exception (docs/vm.md). */
 
 #include <mx/irq.h>
 #include <mx/types.h>
@@ -12,7 +13,7 @@
 #define MX_EE_HZ 294912000u
 #define MX_BUS_HZ 147456000u
 
-/* Busy-wait. */
+/* Busy-wait: the CPU stays in it. To wait without, mx_sleep_us. */
 void mx_delay_cycles(u32 cycles);
 MX_INLINE void mx_delay_us(u32 us) { mx_delay_cycles(us * (MX_EE_HZ / 1000000u)); }
 

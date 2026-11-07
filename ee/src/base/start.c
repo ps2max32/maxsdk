@@ -104,6 +104,8 @@ void mx__vm_swap_close(void);
 
 /* the program's other threads (thread.c, when it has any) */
 void mx__threads_stop(void) __attribute__((weak));
+/* mx_sleep_us's timer (thread/sleep.c, when the program slept) */
+void mx__sleep_stop(void) __attribute__((weak));
 void mx__fio_ending(void (*stop)(void));
 
 void mx_exit(int status) {
@@ -111,6 +113,8 @@ void mx_exit(int status) {
      program that ran then would touch VM with its TLB gone, and hang. */
   if (mx__threads_stop)
     mx__fio_ending(mx__threads_stop);
+  if (mx__sleep_stop)
+    mx__sleep_stop();
   report();
   mx_debug_flush();
   /* the BIOS's TLB back for ps2link (with VM on) */

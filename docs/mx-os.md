@@ -61,9 +61,14 @@ Retail PS2s have 32 MiB; never count on more.
   read buffers 16-byte aligned and sizes whole quadwords: anything else takes a copy on the EE.
 
 Sockets: `<mx/net.h>`, for the LAN. No call waits (`MX_NET_AGAIN`), so a game polls each frame; at most
-4 KiB moves per call. A port with BSD socket code adds `$(MX_NET_CFLAGS)`: `socket`, `select`, `fcntl` and
-the rest are in libmxc (`ee/libc/net.c`), blocking unless made non-blocking. Not there: DNS (dotted
+4 KiB moves per call. To wait, `mx_net_wait`: the thread sleeps until a socket can go on. A port with BSD
+socket code adds `$(MX_NET_CFLAGS)`: `socket`, `select`, `fcntl` and the rest are in libmxc
+(`ee/libc/net.c`), blocking unless made non-blocking; a blocking call sleeps, it does not spin. Not there: DNS (dotted
 addresses only), `MSG_PEEK`, `FIONREAD`, broadcast, and options, which are accepted and ignored.
+
+Waiting: sleep, do not spin. `mx_sleep_us` (`<mx/thread.h>`) lets the other threads run and takes EE
+timer 0 once a thread has slept; `mx_delay_us` keeps the CPU. Leave timer 0 to it; timer 1 is the
+profiler's.
 
 Provided for every program: Select + Start + L1 + R1 ends it (`mx_pad`); L3 + R3 toggles libgl's
 counters, off by default. Do not bind these combinations.

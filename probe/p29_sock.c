@@ -4,13 +4,16 @@
      p29_sock host:mxsock.irx <a.b.c.d of the host> [stage]
 
    stage: 1 only loads the module, 2 opens and closes a socket, 3 adds UDP, 4 TCP,
-   5 (the default) all, 6 leaves a socket open, to see the next run find it closed.
+   5 (the default) all, 6 leaves a socket open, to see the next run find it closed,
+   7 waits without UDP echo: mx_sleep_us and mx_net_wait, with a thread of lower
+   priority that counts while this one sleeps (it gets nothing while it spins).
    A first argument "-" takes the service the IOP has. */
 
 #include <mx/iop.h>
 #include <mx/mx.h>
 #include <mx/net.h>
 #include <mx/sif.h>
+#include <mx/thread.h>
 #include <mx/timer.h>
 
 #define UDP_PORT 18770
@@ -121,6 +124,70 @@ static int test_listen(void) {
   return mx_net_close(l) < 0;
 }
 
+/* Stage 7: a thread below this one counts; it only runs while this one sleeps */
+static volatile u32 counted;
+static u8 counter_stack[4096] MX_CORE_DATA MX_ALIGNED(16); /* thread stacks: core */
+static void counter(void *arg) {
+  (void)arg;
+  for (;;)
+    counted++;
+}
+
+static u32 us_since(u32 t0) { return (mx_count() - t0) / (MX_EE_HZ / 1000000u); }
+
+static int test_wait(u32 host) {
+  int me = mx_thread_self();
+  if (mx_thread_start(counter, 0, counter_stack, sizeof counter_stack, mx_thread_prio(me) + 1) < 0)
+    FAIL("counter thread\n");
+  u32 c0 = counted, t0 = mx_count();
+  mx_delay_us(20000);
+  mx_printf("p29: spin 20 ms: the counter %u\n", counted - c0);
+  c0 = counted, t0 = mx_count();
+  mx_sleep_us(100000);
+  u32 us = us_since(t0), c = counted - c0;
+  mx_printf("p29: sleep 100 ms: %u us, the counter %u\n", us, c);
+  if (us < 100000 || us > 103000 || c < 1000000)
+    FAIL("sleep\n");
+  t0 = mx_count();
+  for (int i = 0; i < 100; i++)
+    mx_sleep_us(1000);
+  us = us_since(t0);
+  mx_printf("p29: 100 sleeps of 1 ms: %u us\n", us);
+  if (us < 100000 || us > 110000)
+    FAIL("short sleeps\n");
+  int s = mx_net_socket(MX_NET_UDP);
+  if (s < 0 || mx_net_bind(s, 18774) < 0)
+    FAIL("udp socket %d\n", s);
+  u32 rr = 1, rw = 1;
+  c0 = counted, t0 = mx_count();
+  int n = mx_net_wait(1u << s, 0, 300000, &rr, &rw);
+  us = us_since(t0), c = counted - c0;
+  mx_printf("p29: wait 300 ms, nothing comes: %d after %u us, the counter %u\n", n, us, c);
+  if (n != 0 || rr || us < 300000 || us > 330000 || c < 1000000)
+    FAIL("wait for nothing\n");
+  n = mx_net_wait(0, 1u << s, 0, &rr, &rw);
+  if (n != 1 || rw != 1u << s)
+    FAIL("udp can write: %d %x\n", n, rw);
+  u32 rtt = 0, best = ~0u;
+  for (u32 i = 0; i < 100; i++) {
+    u32 sent = i * 5 + 3, ip, port, t1 = mx_count();
+    if (mx_net_sendto(s, &sent, 4, host, UDP_PORT) != 4)
+      FAIL("sendto\n");
+    n = mx_net_wait(1u << s, 0, 2000000, &rr, 0);
+    if (n != 1 || rr != 1u << s)
+      FAIL("no echo %u: %d\n", i, n);
+    if (mx_net_recvfrom(s, buf, sizeof buf, &ip, &port) != 4 || *(u32 *)buf != sent)
+      FAIL("echo %u\n", i);
+    u32 t = mx_count() - t1;
+    rtt += t;
+    if (t < best)
+      best = t;
+  }
+  mx_printf("p29: udp with waits: 100 echoes, %u us each, best %u\n",
+            rtt / 100 / (MX_EE_HZ / 1000000u), best / (MX_EE_HZ / 1000000u));
+  return mx_net_close(s) < 0;
+}
+
 /* a line that reaches the host, even if the IOP stops right after it */
 #define STEP(...)                                                                          \
   do {                                                                                     \
@@ -173,6 +240,10 @@ int main(int argc, char **argv) {
         break;
     } else
       part = part * 10 + (u32)(*p - '0');
+  }
+  if (stage == 7) {
+    bad = test_wait(host);
+    goto end;
   }
   bad = test_udp(host);
   if (!bad && stage >= 4)

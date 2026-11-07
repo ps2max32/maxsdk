@@ -29,6 +29,7 @@ sysclib_IMPORTS_end
 
 thbase_IMPORTS_start
 I_CreateThread
+I_DelayThread
 I_GetThreadId
 I_StartThread
 thbase_IMPORTS_end
