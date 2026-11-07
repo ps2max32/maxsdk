@@ -29,8 +29,7 @@ ps2sdk's network path works, but costs the IOP more than it needs to (measured w
 | `mxdev9.irx` | ps2dev9 | DEV9 power, SPEED interrupts, channel-8 DMA, MAC from the EEPROM, LED |
 | `mxeth.irx` | smap + netman | SMAP and PHY, RX buffers, frame sorting to its clients, TX queue |
 | `mxnet.irx` | ps2ip-nm | lwIP (as now), as a client of mxeth |
-| `mxfast.irx` | the fast path in ps2ip-nm | `host:` files past lwIP, as a client of mxeth |
-| mxeth client | udptty | the console, on the fast path's protocol (step 3) |
+| `mxfast.irx` | the fast path in ps2ip-nm, udptty | `host:` files past lwIP, and the console, as a client of mxeth |
 | `mxata.irx` (later) | atad, ata_bd | ATA on mxdev9's DMA queue, as a block device for mxio |
 
 The interfaces are maxsdk's own (`iop/dev9/*/include`); no ps2sdk program needs them. The ps2sdk
@@ -123,13 +122,30 @@ lwIP's 30. It takes every frame to UDP port 18197 (lwIP has no socket there):
 
 `ps2ip-nm.irx` keeps the fast path inside it (requests on a lwIP socket) for ps2sdk's drivers.
 
-## Console (step 3)
+## Console
 
-udptty sends each `printf` as a UDP packet through lwIP. The new console is a client of mxeth:
-lines go out as frames of the fast-path protocol (`common/include/mxfast.h`, a new type), from a
-ring the `printf` hook fills, without lwIP and without a socket. ps2client reads them on the
-fast-path port (on a branch, as all ps2client changes). Input from the host (stdin) can come the
-same way.
+udptty broadcast each `printf` as a UDP packet through lwIP: to every machine on the LAN, and lost
+when nobody listened yet or a packet went missing (the test end marker too). The console is now
+part of `mxfast.irx` (`src/console.c`): the IOP's `tty` device (stdin, stdout, stderr, so the EE's
+tty output too) and Kprintf write into a ring of 16 KiB, and a thread sends it on:
+
+- **To the host of the fast path.** ps2client's HELLO names its session; the console then goes
+  to that host alone as TTY frames (`MXFAST_TTY`), built by mxfast, without lwIP. Each frame
+  names its offset in the stream and the stream (new at each start of the module, so after an
+  IOP reset); the host prints each byte once and in order and answers how far it has the
+  stream. Without an answer for 100 ms the console sends again from there. While the host is
+  there a writer waits for room in the ring instead of losing output (not one at the driver's
+  priority or above, whose `rx` brings the answers; nor Kprintf in an interrupt: there the
+  oldest bytes give way).
+- **A new session** (the next ps2client) starts at what is written next: nothing the last one
+  did not take, a test end marker for instance, reaches it. A host silent for 3 s is gone, and
+  ps2client says goodbye when it stops (a HELLO without session).
+- **Else by broadcast**, as udptty did (UDP to port 18194 through lwIP's socket, looked up when
+  needed), for any client. At the start of the module the console waits up to 2 s for a HELLO
+  first, so that the IOP's start-up messages reach the host that is there.
+
+mxlink loads mxfast right after mxnet and leaves udptty out then; without mxfast, or on
+ps2sdk's drivers, udptty is the console. Input from the host (stdin) can come the same way later.
 
 ## HDD (step 5)
 
@@ -198,6 +214,6 @@ Sending is bound by the IOP: one TXEND and one wake-up a frame (the FIFO holds t
    `ps2ip-nm.irx` from `iop/tcpip/mxnet`; done, measured above); mxlink loads mxdev9, mxeth,
    mxnet when they are on the card, with the ps2sdk set as fallback (done); the fast path as an
    mxeth client, `mxfast.irx` (done).
-3. Console over the fast-path protocol; udptty gone.
+3. Console over the fast-path protocol, in `mxfast.irx`; udptty not loaded with it (done).
 4. netman, smap and ps2dev9 off the card.
 5. mxata.

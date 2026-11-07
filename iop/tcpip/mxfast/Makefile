@@ -2,7 +2,7 @@
 # docs/iop-drivers.md. Library "mxfast", which mxio looks for.
 
 MODULE = mxfast
-SRCS   = mxfast.c
+SRCS   = mxfast.c console.c
 CFLAGS_MODULE = -I../../dev9/mxeth/include
 
 include ../../Rules.mk

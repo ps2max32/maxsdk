@@ -12,6 +12,7 @@
    done, or by an alarm (a timeout); every wake checks why. */
 #include "irx_imports.h"
 #include <mxfast.h>
+#include "mxfast_int.h"
 
 #define MODNAME "mxfast"
 IRX_ID(MODNAME, 1, 0);
@@ -68,10 +69,10 @@ static volatile int answered;
 static int answer_a;
 static u32 answer_b;
 
-/* What a frame to the host starts with: its MAC, ours, type; at 26 our IP,
-   at 30 the host's */
-static u8 eth_ip[42];
-static volatile int have_peer;
+u8 fast_eth_ip[42];
+volatile int fast_have_peer;
+#define eth_ip fast_eth_ip
+#define have_peer fast_have_peer
 static u32 next_id;
 
 static u32 le32(const u8 *p) { return p[0] | p[1] << 8 | p[2] << 16 | (u32)p[3] << 24; }
@@ -150,7 +151,11 @@ static int rx(struct mxeth_frame *fr, void *arg) {
     memcpy(eth_ip + 26, f + 30, 4); /* our IP */
     memcpy(eth_ip + 30, f + 26, 4); /* its IP */
     have_peer = 1;
-    if (op & MXFAST_ANSWER && ask_id && le32(f + 46) == ask_id) {
+    if (op == MXFAST_HELLO)
+      console_hello(le32(f + 50));
+    else if (op == (MXFAST_TTY | MXFAST_ANSWER))
+      console_ack(le32(f + 56));
+    else if (op & MXFAST_ANSWER && ask_id && le32(f + 46) == ask_id) {
       answer_a = (int)le32(f + 50);
       answer_b = le32(f + 56);
       ask_id = 0;
@@ -176,7 +181,7 @@ static void finish_dma(void) {
 }
 
 /* The Ethernet, IP and UDP headers of a frame to the host, udp bytes after them */
-static void headers(u8 *f, u32 udp) {
+void fast_headers(u8 *f, u32 udp) {
   u32 sum = 0;
   memcpy(f, eth_ip, 14);
   u8 *ip = f + 14;
@@ -198,7 +203,7 @@ static void headers(u8 *f, u32 udp) {
   put16be(u + 6, 0); /* no checksum: Ethernet's CRC, on the LAN */
 }
 
-static void header(u8 *b, u32 op, u32 id, u32 a, u32 v, u32 c) {
+void fast_header(u8 *b, u32 op, u32 id, u32 a, u32 v, u32 c) {
   memset(b, 0, MXFAST_HDR);
   b[0] = 'M', b[1] = 'F', b[2] = op;
   put32(b + 4, id);
@@ -208,6 +213,9 @@ static void header(u8 *b, u32 op, u32 id, u32 a, u32 v, u32 c) {
 }
 
 /* ---- requests: one frame, sent again until its answer comes */
+
+#define headers fast_headers
+#define header fast_header
 
 static u8 req[42 + MXFAST_HDR + 4 + 256] __attribute__((aligned(16)));
 static u8 *const msg = req + 42;
@@ -431,5 +439,6 @@ int _start(int argc, char *argv[]) {
   if ((wake = CreateSema(&s)) < 0 || RegisterLibraryEntries(&_exp_mxfast) != 0)
     return MODULE_NO_RESIDENT_END;
   mxeth_attach(&client);
+  console_start();
   return MODULE_RESIDENT_END;
 }

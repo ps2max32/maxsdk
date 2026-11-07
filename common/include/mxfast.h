@@ -41,6 +41,9 @@ enum {
   MXFAST_COMMIT = 7, /* answer: a 0, b one bit for each frame of this id received */
   MXFAST_HELLO = 8,  /* from the host, every second: here is the file server */
   MXFAST_SIZE = 9,   /* handle; answer: the file's size */
+  MXFAST_TTY = 10,   /* console output: a its offset in the stream, b the stream (a new one
+                        at each start of the IOP's module), len bytes after the header;
+                        answer: b the stream offset the host has all bytes up to */
   MXFAST_ANSWER = 0x80 /* or'ed to the request's op */
 };
 
@@ -56,6 +59,11 @@ enum {
    WRITE:  a handle, len bytes of data, b offset in the file, c offset in the
            transfer. The host writes each frame when it comes, so a frame
            sent twice does no harm, and the frames of an id count in its COMMIT.
+   HELLO:  a the host's session (not 0): it takes the console (TTY). A host
+           with 0 does not; a new session drops what the last did not take.
+   TTY:    the PS2's console, to the host of the HELLO only: the host prints
+           a byte once, in order, and answers each frame with what it has
+           (b); the PS2 sends again from there when no answer comes.
    ANSWER: a result, b as above
 
    Writes leave the IOP without a copy and without lwIP: the data comes as frames,

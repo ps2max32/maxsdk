@@ -1,10 +1,20 @@
 intrman_IMPORTS_start
 I_CpuSuspendIntr
 I_CpuResumeIntr
+I_CpuInvokeInKmode
+I_QueryIntrContext
 intrman_IMPORTS_end
+
+ioman_IMPORTS_start
+I_open
+I_close
+I_AddDrv
+I_DelDrv
+ioman_IMPORTS_end
 
 loadcore_IMPORTS_start
 I_RegisterLibraryEntries
+I_QueryLibraryEntryTable
 loadcore_IMPORTS_end
 
 mxeth_IMPORTS_start
@@ -27,13 +37,22 @@ sysclib_IMPORTS_start
 I_memset
 I_memcpy
 I_strlen
+I_prnt
 sysclib_IMPORTS_end
+
+sysmem_IMPORTS_start
+I_KprintfSet
+sysmem_IMPORTS_end
 
 thbase_IMPORTS_start
 I_DelayThread
 I_SetAlarm
 I_CancelAlarm
 I_USec2SysClock
+I_GetSystemTime
+I_CreateThread
+I_StartThread
+I_ReferThreadStatus
 thbase_IMPORTS_end
 
 thsemap_IMPORTS_start

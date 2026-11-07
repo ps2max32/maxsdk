@@ -60,7 +60,10 @@ writer are not ended.
 
 When a program comes back, whichever way it ended, mxlink prints the test end marker with its exit
 status, before it says it is ready. A run on the host then ends, also when the player left the
-program with the pad. It stays silent when the program started another with `mx_loader_launch`: the
+program with the pad. The console (the tty) reaches the ps2client that serves the fast path
+without loss, the marker included, and a later ps2client gets none of an earlier run's rest
+(`iop/tcpip/mxfast`, `docs/iop-drivers.md`); other clients get it by broadcast, as from udptty.
+It stays silent when the program started another with `mx_loader_launch`: the
 run ends with the last one. `MX_TEST_END` prints nothing under mxlink, nor in the kernel itself (a
 fatal error of the VM), only the statistics: a host
 that stopped at it would go away while the program still ends, with its files on `host:`. A program
