@@ -40,7 +40,7 @@ virtual memory at 0x0800_0000, in 32 KiB pages held in the physical memory left 
   12.0 fps with its code in VM, 12.6 in core; 14.0 against 3.8 million refills in 80 s of
   `timedemo four` (with the code in VM 27% of them were code, and its entries pushed the
   data's out of the TLB), and 591 against 671 swap ins (2.2 MiB fewer frames).
-* Started by mxlink, the PS2's loader (`ps2max/tools/mxlink`: `execee host:app.elf args...`; on
+* Started by mxlink, the PS2's loader (`ps2max/apps/mxos`: `execee host:app.elf args...`; on
   PCSX2 its EMU build, `kernel.md`): it loads the core segments itself, leaves the VM ones, and
   starts the program in its own thread, argv[0] the program's path. The start-up turns VM on (`mx_vm_config`, or no swap
   file and every frame), opens argv[0] and registers the VM segments' pages with the pager

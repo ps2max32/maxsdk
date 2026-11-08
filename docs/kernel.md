@@ -20,7 +20,7 @@ both.
 A third library, `libmxkern.a`, is `libmx` with the VM: for the kernel, and for the tests
 of the VM's inside, which run with the VM in the program. Programs do not link it.
 
-The kernel is `tools/mxlink`, resident at 0x88000-0xFF800. `libmxk` calls it through
+The kernel is `apps/mxos`, resident at 0x88000-0xFF800. `libmxk` calls it through
 `struct mxk_services` (`<mx/kernel.h>`), a table the loader passes. Only `libmxk` sees how
 a call reaches the kernel, so that can change without changing programs. Kernel code runs
 in the caller's thread; the VM's writer and pager are threads of the kernel. Functions are
@@ -38,25 +38,25 @@ else its own code (the pad: version 6), so a new program still runs on an older 
 | Files | `<mx/sif.h>` (`mx_fio_*`) | the kernel's (version 4), through mxio if the IOP has it, else FILEIO |
 | Memory | `<mx/vm.h>`, `<mx/mem.h>` | the kernel's (version 4) |
 | IOP | `<mx/iop.h>`, `<mx/sif.h>` | over the kernel's SIF; `mx_iop_reboot_image` (an IOPRP image in EE memory) is libmx's only: -1 under the kernel, which resets the IOP by a path |
-| Pad | `<mx/pad.h>` | the kernel's (version 6, `ee/src/base/pad.c`'s reading in the kernel's memory): it opens the ports when a program asks, applies the pad's settings (ports swapped, Cross and Circle swapped: `tools/mxlink/ee/pad.c`) and closes them when the program ends; on a kernel of version 5 the program's own, over the kernel's SIF. With `mxpad.irx` on the card also the USB pads (`common/include/mxpad.h`: their state written by SIF DMA into an area above the kernel's code), after the SIO2 pads; the home button (`MX_PAD_HOME`) of any pad goes to every port. A program built before `MX_PAD_HOME` ends on the combination only, so on a SIO2 pad it no longer ends by the combination there (rebuild it). Version 11: `mx_pad_rumble` (`pad_rumble`) drives a USB or Bluetooth pad's motors through `mxpad.irx`, a SIO2 DualShock's through PADMAN (`mx__pad_act`: DualShock mode, the motors' alignment once, then their values, each when the pad is done with its last request); the kernel calls the IOP only on a change, and stops every motor a program left running at its end. A SIO2 pad holds its port for half a second after it was last seen, and one that was there before for 1.5 s after a program opens the ports (`pad_init`), so the pads after it keep their ports |
-| Display, home menu | `<mx/display.h>`, `<mx/gs.h>` | the kernel's (version 7): maxsdk's one writer of the display registers (`apply`, `ee/src/gs/gs.c`) hands them to the kernel, which writes and keeps them, and the video mode after SetGsCrt. Select + Start + L1 + R1 ask for the home menu (`tools/mxlink/ee/home.c`): the program stops at its next `mx_frame_begin_n` with the GS idle (`mx_frame_sync`), lends 35 pages of GS memory (free, else the texture cache's, dropped: `ee/src/gs/home.c`) and waits in `home_run`. The menu is drawn by the CPU and copied by IMAGE transfers through the GIF FIFO (no drawing register changes), shown on circuit 1 over the program's last picture. Not in hires mode, nor for a program that does not come within 2 s: the combination then ends it |
+| Pad | `<mx/pad.h>` | the kernel's (version 6, `ee/src/base/pad.c`'s reading in the kernel's memory): it opens the ports when a program asks, applies the pad's settings (ports swapped, Cross and Circle swapped: `apps/mxos/ee/pad.c`) and closes them when the program ends; on a kernel of version 5 the program's own, over the kernel's SIF. With `mxpad.irx` on the card also the USB pads (`common/include/mxpad.h`: their state written by SIF DMA into an area above the kernel's code), after the SIO2 pads; the home button (`MX_PAD_HOME`) of any pad goes to every port. A program built before `MX_PAD_HOME` ends on the combination only, so on a SIO2 pad it no longer ends by the combination there (rebuild it). Version 11: `mx_pad_rumble` (`pad_rumble`) drives a USB or Bluetooth pad's motors through `mxpad.irx`, a SIO2 DualShock's through PADMAN (`mx__pad_act`: DualShock mode, the motors' alignment once, then their values, each when the pad is done with its last request); the kernel calls the IOP only on a change, and stops every motor a program left running at its end. A SIO2 pad holds its port for half a second after it was last seen, and one that was there before for 1.5 s after a program opens the ports (`pad_init`), so the pads after it keep their ports |
+| Display, home menu | `<mx/display.h>`, `<mx/gs.h>` | the kernel's (version 7): maxsdk's one writer of the display registers (`apply`, `ee/src/gs/gs.c`) hands them to the kernel, which writes and keeps them, and the video mode after SetGsCrt. Select + Start + L1 + R1 ask for the home menu (`apps/mxos/ee/home.c`): the program stops at its next `mx_frame_begin_n` with the GS idle (`mx_frame_sync`), lends 35 pages of GS memory (free, else the texture cache's, dropped: `ee/src/gs/home.c`) and waits in `home_run`. The menu is drawn by the CPU and copied by IMAGE transfers through the GIF FIFO (no drawing register changes), shown on circuit 1 over the program's last picture. Not in hires mode, nor for a program that does not come within 2 s: the combination then ends it |
 | Sound | `<mx/snd.h>` | program's own, over the kernel's SIF |
 | Threads | `<mx/thread.h>`, `<mx/sched.h>` | the kernel's (version 10, below): threads, semaphores and interrupt handlers; `mx_sleep_us` takes EE timer 0, which `mx_exit` stops |
 | Network | `<mx/net.h>` | a service on the IOP, `iop/tcpip/mxsock`, loaded by mxlink when it is on the card, on lwIP over maxsdk's drivers (mxdev9, mxeth, mxnet); closed when a program ends. `mx_net_wait` sleeps at one of its four wait services (at most 100 ms a call); with an older mxsock it asks every millisecond |
 
 The program's first call gives the kernel its core memory after `_end` and its VM part;
 the heaps and the program break work in those. It also gives the program an ASID of its own
-(1-255 in turn; `mx__asid_set`, `tools/mxlink/ee/exec.c`): the VM's entries are written under
+(1-255 in turn; `mx__asid_set`, `apps/mxos/ee/exec.c`): the VM's entries are written under
 it and not global, so they match only that program's address space (`docs/mx-os-plan.md`,
 step 2b). The kernel is at ASID 0 again at the program's end (`tlb_restore`). Programs not on
 `libmxk` stay at ASID 0.
 
 From version 9 a `libmxk` program carries a note (`PT_NOTE`, name "MXK", `src/base/kstubs.c`):
 the version it was built for and the address of its `mx__core_off`. One linked into VM gets
-its core at a physical run of its own before its load (`core_place`, `tools/mxlink/ee/exec.c`):
+its core at a physical run of its own before its load (`core_place`, `apps/mxos/ee/exec.c`):
 [0x10_0000, its end + 256 KiB of core heap) rounded to 1 MiB, at the top of main memory, mapped
 by entries of its ASID in the slots of the BIOS's cached entries from 0x10_0000
-(`tlb_core_map`, `tools/mxlink/ee/tlb.c`; 4 MiB, 1 MiB or 256 KiB pages, at most 8). The kernel
+(`tlb_core_map`, `apps/mxos/ee/tlb.c`; 4 MiB, 1 MiB or 256 KiB pages, at most 8). The kernel
 writes the offset into the program's `mx__core_off` after the load and keeps it in its own while
 the program runs, so `mx_paddr_of` and `MX_UNCACHED` / `MX_UCAB` translate the program's
 pointers in both. The VM's frames are the memory below the run (`mx__vm_frames`), the core heap
@@ -67,7 +67,7 @@ when it asks for one with `MX_CORE_HEAP(bytes)` (`<mx/loader.h>`, a second note)
 is then that much and no more.
 
 A program with its core at a run of its own and without VM that calls `mx_loader_launch` stays
-(`exec_park`, `tools/mxlink/ee/exec.c`; `docs/mx-os-plan.md`, step 2c): the kernel keeps its own
+(`exec_park`, `apps/mxos/ee/exec.c`; `docs/mx-os-plan.md`, step 2c): the kernel keeps its own
 state of it (the `.data` and `.bss` of `ee/resident.ld`'s program part) in the program's core
 heap, takes its interrupt handlers from the BIOS (the slots' entry functions are in
 `irq_tables`, version 9), closes the pad's ports, suspends its other threads and starts the
@@ -82,7 +82,7 @@ restart after each program.
 
 ## Interrupts and threads
 
-The kernel is first at every INTC and DMAC interrupt (`tools/mxlink/ee/kirq.S`, `kirq.c`;
+The kernel is first at every INTC and DMAC interrupt (`apps/mxos/ee/kirq.S`, `kirq.c`;
 `docs/bios.md`): the BIOS's interrupt table at 0x8001_5380 points its entries 2 and 3 at the
 kernel's entry, through kseg0, which saves the registers C may change and runs `kirq()` on a
 stack of its own. Only while the kernel or a program with its note runs: before a program
@@ -90,7 +90,7 @@ without it or a loader (ExecPS2) the table is the BIOS's again, so one that load
 loader over the kernel finds the BIOS as it was.
 
 From version 10 the threads, semaphores and interrupt handlers are the kernel's
-(`tools/mxlink/ee/ksched.c`, `ksched.S`; `docs/mx-os-plan.md`, step 2d-2). Every thread of the
+(`apps/mxos/ee/ksched.c`, `ksched.S`; `docs/mx-os-plan.md`, step 2d-2). Every thread of the
 kernel and of a `libmxk` program of version 10 is a kernel thread, all on one BIOS thread,
 which the BIOS never switches. maxsdk's `mx_bios_*` calls for them (`ee/src/base/ksys.c`,
 generated by `ee/gen/gen.py` from the K entries of `hw_desc.py`) go to the kernel's table
@@ -115,17 +115,17 @@ generated by `ee/gen/gen.py` from the K entries of `hw_desc.py`) go to the kerne
   for the BIOS thread (the kernel's).
 A program that is not on `libmxk` of version 10 (ps2sdk's, `libmx`, an older `libmxk`) calls the
 BIOS's threads itself: mxlink starts again (ExecPS2) with the BIOS's threads before it
-(`bios_mode`, `tools/mxlink/ee/main.c`), and with its own again before the next program of
+(`bios_mode`, `apps/mxos/ee/main.c`), and with its own again before the next program of
 version 10, the launch's arguments, swap file and the shell kept over the restart.
 
 ## The end of a program
 
 A `libmxk` program (one that called the kernel's `program` service) ends **without a restart**
-(version 8, `tools/mxlink/ee/end.c`): its way back (`mx_exit`, a crash, BIOS `Exit`) wakes the
+(version 8, `apps/mxos/ee/end.c`): its way back (`mx_exit`, a crash, BIOS `Exit`) wakes the
 command thread and sleeps; the command thread then does what ExecPS2 did:
 - the program's threads and semaphores are terminated and deleted: on the kernel's threads those
   of its process (a thread or semaphore is the process's of the thread that made it; a program's
-  first thread gets a process of its own, `tools/mxlink/ee/ksched.c`), on the BIOS's those that
+  first thread gets a process of its own, `apps/mxos/ee/ksched.c`), on the BIOS's those that
   were not there just before the program started (the program's, the VM's pager and writer, its clients' semaphores);
 - the program's interrupt handlers are removed: its `libmxk` told the kernel where its slots
   are (`irq_tables`), the kernel reads their BIOS ids and runs none of the program's code; a
@@ -179,7 +179,7 @@ from the EE: the PS2 must be switched off then.
 
 ## PCSX2
 
-`make -C tools/mxlink emu` builds the kernel for PCSX2 (`build/tools/mxlink-emu/mxlink.elf`,
+`make -C apps/mxos emu` builds the kernel for PCSX2 (`build/apps/mxos-emu/mxlink.elf`,
 `MX_LOADER` in `mk/maxsdk.mk`): no network, no IOP modules, no commands. It starts the
 program in `host:mxload.txt` (path and arguments, in words) from the directory of the
 ELF. Run it with `PCSX2_EE=interp`.

@@ -1,6 +1,6 @@
 # mx OS: design, for porting games and apps
 
-mxlink (`tools/mxlink`) is growing into a small resident OS for the PS2. A program uses what it
+mxlink (`apps/mxos`) is growing into a small resident OS for the PS2. A program uses what it
 offers and keeps the graphics. Library split and service state: [kernel.md](kernel.md). Virtual
 memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-os-plan.md).
 
@@ -22,7 +22,7 @@ memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-
   the pads paired with it (over USB, as a PS3 or PS4 pairs them), kept in `mc0:/MXOS/BTPADS.DAT`. The internal HDD (`mxata`, `docs/iop-drivers.md`) is a FAT32 or exFAT
   disk like a USB stick: `ata0:`, with `PS2MAX/` as on the other devices. The shell's fourth
   device is `host:`: the directory of a `ps2client listen` on the PC.
-- Boot: the memory card's system update is mxboot (`tools/mxboot`): its phase 1 starts
+- Boot: the memory card's system update is mxboot (`apps/mxboot`): its phase 1 starts
   `mc0:/MXOS/MXBOOT.ELF`, which starts the ELF that `MXOS/BOOTONCE.CFG` names (once: the file is
   removed first) or `MXOS/BOOT.CFG` (`mc?:/MXOS/MXLINK.ELF`). A new mxlink or program is tried as
   the one-shot: if it hangs, a reset boots the default again. New IOP modules the same way: an mxlink built
@@ -76,7 +76,7 @@ Retail PS2s have 32 MiB; never count on more.
    pointer (`& 0x0FFFFFFF`) or OR in `0x20000000` yourself. Nor read the TLB (`tlbr` changes the
    CPU's ASID while your own code is under it).
 11. **Starting another program.** `mx_loader_launch` ends a program, or, with its core at a run
-    of its own and without VM (`MX_CORE_HEAP`, as mxloader), returns the other's exit status when
+    of its own and without VM (`MX_CORE_HEAP`, as mxshell), returns the other's exit status when
     that ends: then set up again what the other had (the GS and the display, the pad's ports:
     `mx_pad_init`, files). The main stack is in the core after `.bss` (128 KiB), not at the top
     of memory.
@@ -122,13 +122,13 @@ DualShock mode) until the next call; the kernel stops them when the program ends
 <device>/PS2MAX/<game>/
   <game>.elf
   game.ini     title=, year=, type=, elf=, args=, description=, cover=
-  cover.t8     tools/mxlink/tools/mk-cover.py
+  cover.t8     apps/mxshell/tools/mk-cover.py
   <game data>
 <device>/PS2MAX/swap.bin
 ```
 
 All paths in `game.ini` are relative to its directory; a directory with just `<dir>.elf` is a game
-too. `tools/mxlink/package-games.sh` writes this layout.
+too. `apps/mxshell/package-games.sh` writes this layout.
 
 ## Testing a port
 

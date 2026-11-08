@@ -1,7 +1,7 @@
 #ifndef MX_KERNEL_H
 #define MX_KERNEL_H
 
-/* The services of mx-kernel (tools/mxlink, resident below 1 MiB), for libmxk:
+/* The services of mx-kernel (apps/mxos, resident below 1 MiB), for libmxk:
    docs/kernel.md. Programs do not use this header: they call the same
    functions in either library, libmx (no kernel) or libmxk (MX_MEMORY=vm).
 

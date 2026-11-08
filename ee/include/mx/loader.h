@@ -20,7 +20,7 @@ struct mx_args {
 struct mx_loader_args {
   u32 pid; /* ps2link: the address of its thread id; mxlink: MX_LOADER_MAGIC */
   struct mx_args args;
-  /* mxlink (ps2max/tools/mxlink) only, after ps2link's block (programs of
+  /* mxlink (ps2max/apps/mxos) only, after ps2link's block (programs of
      ps2sdk and older maxsdk ones do not read them): ret_magic is
      MX_LOADER_RET, and ret(status) returns to mxlink instead of the BIOS's
      Exit (which reboots the PS2). mx_exit calls it. */

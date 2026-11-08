@@ -54,7 +54,7 @@ on `libmxk` (the kernel's pad); the others keep the combination as quit.
   picture on circuit 2. Circuit 1 covers the whole screen (320 x 224 CT32, 35 pages), so its
   alpha outside its rectangle does not matter.
 
-  1b-1d written 2026-11-07 (kernel table version 7; `tools/mxlink/ee/home.c`,
+  1b-1d written 2026-11-07 (kernel table version 7; `apps/mxos/ee/home.c`,
   `ee/src/gs/home.c`). `tests/ps2/vm24_home.c auto` passes on the PS2 (240 frames, their flips
   through the kernel). The menu works on the PS2 and a TV (`vm24_home` without `auto`, PAL
   640 x 512 interlaced: opened over the picture, the pad's settings, quit ending the program
@@ -133,21 +133,21 @@ A program whose run starts at its own addresses is as now.
   note); `mx_loader_launch` from such a program keeps it (`exec_park`): its kernel state saved
   in its core heap, its interrupt handlers taken from the BIOS and added again after (the slots'
   entry functions in `irq_tables`), its pad's ports closed, its other threads suspended; the
-  other's run goes below it, and the call returns the other's exit status. mxloader asks for
+  other's run goes below it, and the call returns the other's exit status. mxshell asks for
   512 KiB and sets the GS, its font and covers and the pad up again after a game. On the PS2:
   `tests/ps2/k29_stay.c` with `vm26_launch` and Quake as the other (its memory, core offset and
-  ASID as before), a missing program (-1), mxloader from `host:` starting Quake (back at once,
-  its picture whole) and a program without a run (`vm5_tlb`: mxloader given up, as before), no
-  thread or semaphore left (`vm25_ids`). mxloader's VM pages giving way to the game's (one frame
-  pool for all) is not done: mxloader has no VM yet.
+  ASID as before), a missing program (-1), mxshell from `host:` starting Quake (back at once,
+  its picture whole) and a program without a run (`vm5_tlb`: mxshell given up, as before), no
+  thread or semaphore left (`vm25_ids`). mxshell's VM pages giving way to the game's (one frame
+  pool for all) is not done: mxshell has no VM yet.
 
-**2c. Processes side by side.** No program is limited to a share: mxloader (the shell,
-`MXSHELL.ELF`) may grow as large as a game. Only the cores take fixed memory (mxloader's about
+**2c. Processes side by side.** No program is limited to a share: mxshell (the shell,
+`MXSHELL.ELF`) may grow as large as a game. Only the cores take fixed memory (mxshell's about
 1.5 MiB, Quake's 1.7 MiB, each with its pinned memory); everything else is VM, paged from one
-frame pool for all processes, with one swap file. mxloader stays when it starts a game: the
+frame pool for all processes, with one swap file. mxshell stays when it starts a game: the
 kernel suspends its threads (and saves VU0's registers), runs the game under the game's ASID,
-and at its end sets mxloader's ASID again and resumes it, back at once and as it was. While
-the game runs mxloader's VM pages give way to the game's (LRU over all processes).
+and at its end sets mxshell's ASID again and resumes it, back at once and as it was. While
+the game runs mxshell's VM pages give way to the game's (LRU over all processes).
 
 **2d. The kernel's own scheduler.** The BIOS's threads know no processes: switching from one
 process's thread to another's it keeps the ASID (the CPU's) and no VU0 register (`bios.md`), so
@@ -167,10 +167,10 @@ address space, or as events (the frame pipeline waits for its vblank).
     Probed 2026-11-08 (`probe/p37_irqhook.c`, `bios.md`): the vector takes its handler from a
     table in RAM (0x8001_5380: INTC index 2, DMAC 3), so the kernel only writes two words; a
     stub there saw every vblank, at no measurable cost. In the kernel the same day
-    (`tools/mxlink/ee/kirq.S`, `kirq.c`): its entry saves the registers C may change, runs
+    (`apps/mxos/ee/kirq.S`, `kirq.c`): its entry saves the registers C may change, runs
     `kirq()` on a stack of its own and goes on into the BIOS's handler; on while the kernel or
     a program built for it runs, the BIOS's table again before a program without the note or a
-    loader. On the PS2 the VM tests, Quake, k29 and mxloader's paths as before, the entry
+    loader. On the PS2 the VM tests, Quake, k29 and mxshell's paths as before, the entry
     counting every INTC and DMAC interrupt.
   - *How (chosen 2026-11-08: all threads the kernel's).* The BIOS's INTC handler
     (0x8000_0380, dumped) handles one cause per interrupt: it clears EXL, IE and KSU, saves the
@@ -200,7 +200,7 @@ address space, or as events (the frame pipeline waits for its vblank).
     maxsdk uses: SIF waits, the VM lock, `mx_sleep_us`).
     Done 2026-11-08 (kernel version 10; `kernel.md`, Interrupts and threads): the threads,
     semaphores and interrupt handlers of the kernel and of `libmxk` programs of version 10 are
-    the kernel's (`tools/mxlink/ee/ksched.c`, `ksched.S`), on one BIOS thread; the kernel owns
+    the kernel's (`apps/mxos/ee/ksched.c`, `ksched.S`), on one BIOS thread; the kernel owns
     both interrupt lines and goes into the BIOS's handler no more; other programs run after a
     restart with the BIOS's threads. On the PS2 the VM tests (vm11-vm30), k29 with vm26 and
     with Quake as the other, and Quake itself. Learned: `mx_di` clears EIE, not IE (a context's
@@ -225,14 +225,16 @@ address space, or as events (the frame pipeline waits for its vblank).
     kernel's own (SIF, VM, home menu) always run. Moved to 2f with the switch, for the same
     reason: today the parked process's handlers are removed with it.
 
-**2e. mxlink a program.** `MXLINK.ELF` is the kernel and the host link in one. Split: the
+**2e. mxlink a program.** Worked out in [mx-os-apps-plan.md](mx-os-apps-plan.md) (the app model, the
+kernel's interface for every app, the repos `apps/mxos`, `apps/mxlink`, `apps/mxshell`), whose steps
+2e-1 - 2f-2 replace what follows here. `MXLINK.ELF` is the kernel and the host link in one. Split: the
 kernel (`MXOS.ELF`: the boot, its services, processes, the scheduler, the home menu) and mxlink,
-a `libmxk` program started at the boot beside mxloader: ps2link's protocol with ps2client,
+a `libmxk` program started at the boot beside mxshell: ps2link's protocol with ps2client,
 `host:` files, the console and its screen. With 2d's threads it answers the host while a game
 runs (now it cannot), and in step 3 it is a window like the others.
 
-**2f. Both run.** mxloader draws while a game is paused (its threads suspended, its GS memory
-kept), and the game goes on when mxloader gives it back: the base of step 3's windows.
+**2f. Both run.** mxshell draws while a game is paused (its threads suspended, its GS memory
+kept), and the game goes on when mxshell gives it back: the base of step 3's windows.
 Here two processes first run side by side, so 2d-3's switch (ASID, core TLB slots, VU0) and
 2d-4's interrupts per process come with it.
 

@@ -42,7 +42,7 @@ MX_NET_CFLAGS = -I$(MAXSDK)/ee/compat/net
 MX_LIB   = $(MAXSDK_OUT)/libmx$(if $(filter vm,$(MX_MEMORY))$(MX_KERNEL),k).a
 MX_CRT0  = $(MAXSDK_OUT)/obj/crt0.o
 # MX_MEMORY=vm: the program's own objects linked into VM (docs/vm.md),
-# started by mxlink (tools/mxlink, the PS2's loader; on PCSX2 MX_LOADER); phys (the default):
+# started by mxlink (apps/mxos, the PS2's loader; on PCSX2 MX_LOADER); phys (the default):
 # all in core
 MX_MEMORY ?= phys
 MX_LD_phys = $(MAXSDK)/ee/ld/maxsdk.ld
@@ -52,7 +52,7 @@ MX_LD_vm   = $(MAXSDK)/ee/ld/maxsdk-vm$(if $(filter core,$(MX_VM_TEXT)),-coretex
 MX_LD    = $(MX_LD_$(MX_MEMORY))
 # PCSX2: mx-kernel without network, for programs on libmxk. It starts what
 # host:mxload.txt says.
-MX_LOADER = $(abspath $(MAXSDK)/../../build/tools/mxlink-emu/mxlink.elf)
+MX_LOADER = $(abspath $(MAXSDK)/../../build/apps/mxos-emu/mxlink.elf)
 MX_HDRS := $(wildcard $(MAXSDK)/ee/include/mx/*.h $(MAXSDK)/ee/include/mx/hw/*.h)
 # $(call link,out,objs)
 # With MX_MEMORY=vm, the objects of objs also in MX_CORE_OBJS (a library
@@ -80,7 +80,7 @@ endif
 endif
 
 $(MX_LOADER):
-	$(MAKE) -C $(MAXSDK)/../../tools/mxlink emu
+	$(MAKE) -C $(MAXSDK)/../../apps/mxos emu
 
 # ---- VU microcode -------------------------------------------------------------
 # *.vsm, assembled by llvm-mc -triple=vu: each becomes an EE object with the

@@ -179,7 +179,7 @@ void mx__main(void) {
   /* no way to go on: its memory, files and VM are the kernel's */
   if (!mx__kernel) {
     mx_debug_sinks(MX_SINK_SIO);
-    mx_printf("maxsdk: this program needs mx-kernel: start it with mxlink (tools/mxlink)\n");
+    mx_printf("maxsdk: this program needs mx-kernel: start it with mxlink (apps/mxos)\n");
     mx_bios_exit(255);
   }
   mx__kstart(_end, heap_end);
@@ -208,7 +208,7 @@ void mx__main(void) {
     static const struct mx_vm_config none;
     if (!by_mxload) {
       mx_printf("maxsdk: this program is linked into VM: start it with mxlink (the PS2's loader, "
-                "tools/mxlink)\n");
+                "apps/mxos)\n");
       mx_exit(255);
     }
     if (mx_vm_init(&mx_vm_config ? &mx_vm_config : &none) < 0 ||

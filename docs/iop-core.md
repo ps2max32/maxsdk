@@ -278,12 +278,12 @@ All clang output, with `objdump -z` (without it, `...` hides nops):
 | `r3000a.c` | 4204 | 0 | 0 |
 | `r3000a_asm.S`, the control: hazards on purpose | 7792 | 24 | 183 |
 
-The clang `ps2link.irx` also ran on hardware, see `tools/mxlink` (`IOP_CLANG=1`): hello, fio_stress,
+The clang `ps2link.irx` also ran on hardware, see `apps/mxlink` (`IOP_CLANG=1`): hello, fio_stress,
 fio_big, iop, all status 0.
 
 Since 2026-11-07 every IOP module of ps2max is clang's and ld.lld's (`iop/Rules.mk`;
 `IOP_CLANG` is gone). On an SCPH-70004 (a real R3000A), mxlink with the clang/lld ps2link, chime, mxdev9, mxeth, mxnet,
-mxio, mxsock, and mxboot's SECRMAN (`tools/mxboot`): maxsdk's hello, fio, iop and snd, all status 0.
+mxio, mxsock, and mxboot's SECRMAN (`apps/mxboot`): maxsdk's hello, fio, iop and snd, all status 0.
 Code size against the IOP gcc 15.2 (`-Os`, same sources): .text +6.7% over the 11 modules (mxio +0.7%,
 mxnet +6.6%, mxfast +13%).
 

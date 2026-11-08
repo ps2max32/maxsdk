@@ -1,6 +1,6 @@
 /* Probe: what ReferThreadStatus (its result:status word) and ReferSemaStatus return for ids that are
    there and ids that are not (mxlink's end of a program scans all ids:
-   tools/mxlink/ee/end.c). Ids 0-24 and 250-256, before and after a thread
+   apps/mxos/ee/end.c). Ids 0-24 and 250-256, before and after a thread
    and a semaphore are made and deleted. */
 #include <mx/bios.h>
 #include <mx/mx.h>
