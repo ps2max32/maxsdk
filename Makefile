@@ -29,16 +29,11 @@ LIB_VSMS := $(wildcard $(HERE)/ee/src/*/*.vsm)
 LIB_OBJS += $(patsubst %.vsm,$(OUT)/vu/%.o,$(notdir $(LIB_VSMS)))
 vpath %.vsm $(sort $(dir $(LIB_VSMS)))
 # IOP modules of ps2sdk that libmx loads (the sound driver, ee/src/base/snd.c),
-# as data between the symbols <name>_irx and <name>_irx_end. They are the
-# prebuilt modules of ps2dev: ps2max has no IOP toolchain of its own.
+# as data: #embed <name.irx>, from ps2dev's prebuilt modules.
 PS2MAX_IRX ?= $(PS2MAX)/../ps2dev/install/ps2sdk/iop/irx
 LIB_IRX  := libsd audsrv
-LIB_OBJS += $(patsubst %,$(OUT)/irx/%.o,$(LIB_IRX))
-$(OUT)/irx/%.o: $(PS2MAX_IRX)/%.irx
-	@mkdir -p $(dir $@)
-	printf '%s\n' '.section .rodata.$*_irx, "a"' '.balign 16' '.globl $*_irx' '$*_irx:' \
-	  '.incbin "$<"' '.globl $*_irx_end' '$*_irx_end:' > $(@:.o=.S)
-	$(CC) $(CFLAGS) -c $(@:.o=.S) -o $@
+$(OUT)/obj/ee/src/base/snd.c.o: CFLAGS += --embed-dir=$(PS2MAX_IRX)
+$(OUT)/obj/ee/src/base/snd.c.o: $(LIB_IRX:%=$(PS2MAX_IRX)/%.irx)
 # the VU0 renderer's feeder: its asm statements keep VF registers live
 $(OUT)/obj/ee/src/vu/vu0r.c.o: CFLAGS += -mvu0 $(foreach r,$(shell seq 1 31),-ffixed-vf$(r))
 

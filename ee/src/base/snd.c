@@ -1,5 +1,5 @@
 /* Sound through ps2sdk's audsrv.irx (on libsd.irx), carried in libmx as
-   data (<name>_irx .. <name>_irx_end, from the Makefile) and loaded from EE
+   data (#embed, from the Makefile's --embed-dir) and loaded from EE
    memory. audsrv's RPC server is 0x870884e: each function takes its
    arguments as words and answers with a word (ps2sdk ee/rpc/audsrv has its
    client, iop/sound/audsrv its source). Its INIT binds back to an EE server
@@ -32,7 +32,16 @@
 #define QUEUE_MAX 16368
 #define CHUNK 16384
 
-extern const u8 libsd_irx[], libsd_irx_end[], audsrv_irx[], audsrv_irx_end[];
+/* An IOP module as data: 16-byte aligned for the transfer to the IOP */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc23-extensions"
+static const u8 libsd_irx[] __attribute__((aligned(16))) = {
+#embed <libsd.irx>
+};
+static const u8 audsrv_irx[] __attribute__((aligned(16))) = {
+#embed <audsrv.irx>
+};
+#pragma clang diagnostic pop
 
 static struct mx_sif_client srv;
 /* the stream's calls (PLAY_AUDIO, AVAILABLE) run without waiting
@@ -82,7 +91,8 @@ int mx_snd_init(void) {
   if (mx_sif_serve(AUDSRV_SID, callback, 0) < 0)
     return -1;
   if (mx_sif_bind_tries(&srv, AUDSRV_SID, 2) < 0 || !srv.server) {
-    if (load(libsd_irx, libsd_irx_end) < 0 || load(audsrv_irx, audsrv_irx_end) < 0)
+    if (load(libsd_irx, libsd_irx + sizeof libsd_irx) < 0 ||
+        load(audsrv_irx, audsrv_irx + sizeof audsrv_irx) < 0)
       return -1;
     if (mx_sif_bind_tries(&srv, AUDSRV_SID, 100) < 0 || !srv.server)
       return -1;
