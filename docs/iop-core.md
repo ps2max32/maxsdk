@@ -281,11 +281,17 @@ All clang output, with `objdump -z` (without it, `...` hides nops):
 The clang `ps2link.irx` also ran on hardware, see `tools/mxlink` (`IOP_CLANG=1`): hello, fio_stress,
 fio_big, iop, all status 0.
 
-Since 2026-11-07 every IOP module of ps2max is clang's and ld.lld's (`iop/Rules.mk`, `iop/irx.ld`;
+Since 2026-11-07 every IOP module of ps2max is clang's and ld.lld's (`iop/Rules.mk`;
 `IOP_CLANG` is gone). On an SCPH-70004 (a real R3000A), mxlink with the clang/lld ps2link, chime, mxdev9, mxeth, mxnet,
 mxio, mxsock, and mxboot's SECRMAN (`tools/mxboot`): maxsdk's hello, fio, iop and snd, all status 0.
 Code size against the IOP gcc 15.2 (`-Os`, same sources): .text +6.7% over the 11 modules (mxio +0.7%,
 mxnet +6.6%, mxfast +13%).
+
+Since 2026-11-08 ld.lld writes the IRX itself (`ld.lld --irx`, which clang runs for `--target=mipsel-none-irx`):
+no `ld.lld -r` with a link script, no `iopfixup`. The target also sets what the flags did (R3000A, soft float,
+no abicalls, no gp-relative data, no unwind tables, `_IOP`). Every module of maxsdk, the probes, mxlink and
+mxboot's SECRMAN came out the same as with iopfixup in what the loader reads (`.iopmod`, the loaded image,
+the relocations in the same order); `r3000a.irx` from lld ran on the SCPH-70004 (84 checks, 0 failed).
 
 ## Open: to run on a real R3000A
 

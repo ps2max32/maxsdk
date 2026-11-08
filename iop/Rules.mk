@@ -6,8 +6,10 @@
 #
 # and includes this file. Its exports (src/exports.tab, if there is one) are linked
 # first, and imports come from src/imports.lst. All of it is LLVM's: the feature
-# clang (-mcpu=r3000a; the import and export tables through irx_clang.h), ld.lld
-# -r with irx.ld, llvm-objcopy; then ps2sdk's iopfixup makes the IRX.
+# clang for the IOP target, mipsel-none-irx (R3000A, soft float, no abicalls or
+# gp-relative data; the import and export tables through irx_clang.h), which
+# links with ld.lld --irx: lld writes the IRX itself (.iopmod, the relocations
+# for the IOP's loader), in its built-in layout of ps2sdk's linkfile.
 #
 #   make [OUT=<dir>]    <dir>/<module>.irx
 
@@ -19,11 +21,8 @@ PS2MAX_IOP_SDK  ?= $(PS2MAX_PS2DEV)/ps2sdk
 PS2MAX_LLVM_BIN ?= $(PS2MAX)/build/toolchain/llvm/feature/bin
 
 OBJ    = $(OUT)/obj/$(MODULE)
-CC     = $(PS2MAX_LLVM_BIN)/clang --target=mipsel-none-elf -mcpu=r3000a
-LD     = $(PS2MAX_LLVM_BIN)/ld.lld -m elf32ltsmip -r -T $(MAXSDK)/iop/irx.ld
-OBJCOPY = $(PS2MAX_LLVM_BIN)/llvm-objcopy
-CFLAGS = -std=gnu23 -D_IOP -fno-builtin -ffreestanding -G0 -Os -Wall -Wno-unused-but-set-global \
-         -msoft-float -mno-abicalls -fno-pic -fno-unwind-tables -fno-asynchronous-unwind-tables \
+CC     = $(PS2MAX_LLVM_BIN)/clang --target=mipsel-none-irx
+CFLAGS = -std=gnu23 -fno-builtin -ffreestanding -Os -Wall -Wno-unused-but-set-global \
          $(CFLAGS_MODULE) $(EXTRA_CFLAGS) \
          -Iinclude -Isrc -I$(MAXSDK)/common/include \
          -I$(PS2MAX_IOP_SDK)/iop/include -I$(PS2MAX_IOP_SDK)/common/include
@@ -51,12 +50,9 @@ $(OBJ)/imports.o: src/imports.lst src/irx_imports.h $(BUILD_DEPS)
 	{ echo '#include "irx_imports.h"'; cat $<; } > $(@:.o=.c)
 	$(CC) $(CFLAGS) $(TABLE_CFLAGS) -c $(@:.o=.c) -o $@
 
-$(OBJ)/$(MODULE).elf: $(OBJS)
-	$(LD) -o $@ $^
-
-$(OUT)/$(MODULE).irx: $(OBJ)/$(MODULE).elf
-	$(OBJCOPY) --strip-unneeded $< $(@:.irx=.stripped.elf)
-	$(PS2MAX_IOP_SDK)/bin/iopfixup --irx1 -o $@ $(@:.irx=.stripped.elf)
-	@rm -f $(@:.irx=.stripped.elf)
+# $(OBJ)/$(MODULE).irx keeps the symbols, for looking up addresses
+$(OUT)/$(MODULE).irx: $(OBJS)
+	$(CC) -o $(OBJ)/$(MODULE).irx $^
+	$(CC) -s -o $@ $^
 
 .PHONY: all

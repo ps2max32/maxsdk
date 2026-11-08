@@ -1,5 +1,5 @@
-# IOP probes, with LLVM as maxsdk's iop/Rules.mk: clang, ld.lld -r with
-# ../../iop/irx.ld, llvm-objcopy; then ps2sdk's iopfixup.
+# IOP probes, with LLVM as maxsdk's iop/Rules.mk: clang for mipsel-none-irx,
+# which links with ld.lld --irx into the IRX.
 #
 #   make [OUT=<dir>]    <dir>/r3000a.irx, <dir>/net.irx, <dir>/rawnet.irx, <dir>/usbraw.irx, <dir>/fileraw.irx,
 #                       <dir>/rawnet_mx.irx (rawnet.c on mxeth),
@@ -12,11 +12,8 @@ OUT    ?= $(PS2MAX)/build/libs/maxsdk/probe/iop
 LLVM   ?= $(PS2MAX)/build/toolchain/llvm/feature/bin
 PS2MAX_PS2DEV  ?= $(abspath $(PS2MAX)/../ps2dev/install)
 PS2MAX_IOP_SDK ?= $(PS2MAX_PS2DEV)/ps2sdk
-LD      = $(LLVM)/ld.lld -m elf32ltsmip -r -T ../../iop/irx.ld
-
-CC      = $(LLVM)/clang --target=mipsel-none-elf -mcpu=r3000a
-CFLAGS  = -std=gnu23 -D_IOP -fno-builtin -ffreestanding -G0 -O2 -Wall -Werror -Wno-unused-but-set-global \
-          -msoft-float -mno-abicalls -fno-pic -fno-unwind-tables -fno-asynchronous-unwind-tables \
+CC      = $(LLVM)/clang --target=mipsel-none-irx
+CFLAGS  = -std=gnu23 -fno-builtin -ffreestanding -O2 -Wall -Werror -Wno-unused-but-set-global \
           -I$(PS2MAX_IOP_SDK)/iop/include -I$(PS2MAX_IOP_SDK)/common/include -I. \
           -I../../iop/dev9/mxeth/include -I../../iop/dev9/mxdev9/include
 OBJS    = $(OUT)/r3000a.o $(OUT)/r3000a_asm.o $(OUT)/imports.o
@@ -49,29 +46,25 @@ $(OUT)/%_imports.o: %_imports.lst %_imports.h irx_imports.h
 	{ echo '#include "$*_imports.h"'; cat $<; } > $(@:.o=.c)
 	$(CC) $(CFLAGS) -c $(@:.o=.c) -o $@
 
-$(OUT)/r3000a.elf: $(OBJS)
-	$(LD) -o $@ $^
+$(OUT)/r3000a.irx: $(OBJS)
+	$(CC) -s -o $@ $^
 
-$(OUT)/net.elf: $(OUT)/net.o $(OUT)/net_imports.o
-	$(LD) -o $@ $^
+$(OUT)/net.irx: $(OUT)/net.o $(OUT)/net_imports.o
+	$(CC) -s -o $@ $^
 
-$(OUT)/rawnet.elf: $(OUT)/rawnet.o $(OUT)/rawnet_imports.o
-	$(LD) -o $@ $^
+$(OUT)/rawnet.irx: $(OUT)/rawnet.o $(OUT)/rawnet_imports.o
+	$(CC) -s -o $@ $^
 
-$(OUT)/rawnet_mx.elf: $(OUT)/rawnet_mx.o $(OUT)/rawnet_mx_imports.o
-	$(LD) -o $@ $^
+$(OUT)/rawnet_mx.irx: $(OUT)/rawnet_mx.o $(OUT)/rawnet_mx_imports.o
+	$(CC) -s -o $@ $^
 
-$(OUT)/usbraw.elf: $(OUT)/usbraw.o $(OUT)/usbraw_imports.o
-	$(LD) -o $@ $^
+$(OUT)/usbraw.irx: $(OUT)/usbraw.o $(OUT)/usbraw_imports.o
+	$(CC) -s -o $@ $^
 
-$(OUT)/fileraw.elf: $(OUT)/fileraw.o $(OUT)/fileraw_imports.o
-	$(LD) -o $@ $^
+$(OUT)/fileraw.irx: $(OUT)/fileraw.o $(OUT)/fileraw_imports.o
+	$(CC) -s -o $@ $^
 
-$(OUT)/hidprobe.elf: $(OUT)/hidprobe.o $(OUT)/hidprobe_imports.o
-	$(LD) -o $@ $^
-
-$(OUT)/%.irx: $(OUT)/%.elf
-	$(LLVM)/llvm-objcopy --strip-unneeded $< $(@:.irx=.stripped.elf)
-	$(PS2MAX_IOP_SDK)/bin/iopfixup --irx1 -o $@ $(@:.irx=.stripped.elf)
+$(OUT)/hidprobe.irx: $(OUT)/hidprobe.o $(OUT)/hidprobe_imports.o
+	$(CC) -s -o $@ $^
 
 .PHONY: all
