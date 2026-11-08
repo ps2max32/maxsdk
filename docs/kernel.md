@@ -143,4 +143,5 @@ a write 6.4 ms). On USB the PS2's host controller carries 937 KiB/s
 64 KiB at 922 KiB/s on the IOP, against 719 for ps2sdk's driver. A program reading 64 KiB a call gets
 903 KiB/s through mxio, 843 at 16 KiB. Writes reach 706 KiB/s at 16 KiB and 761 at 32 KiB (mxio's
 largest write): they take about 12.8 packets a frame, and a write's CSW is only asked for
-after its data. The memory card is limited by the device.
+after its data. The memory card is limited by the device. The internal HDD (`ata0:`) is
+`iop/dev9/mxata` under bdm, as USB: speed on a PS2 not measured yet.

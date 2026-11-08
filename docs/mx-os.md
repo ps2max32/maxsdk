@@ -15,12 +15,13 @@ memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-
   `host:` files is its own module beside mxnet (mxfast, which is the console too: to the
   ps2client that serves the fast path, without loss, else by broadcast as udptty sent it).
   Between programs mxlink closes files, pad ports and sound, and
-  keeps the IOP and the network.
+  keeps the IOP and the network. The internal HDD (`mxata`, `docs/iop-drivers.md`) is a FAT32 or exFAT
+  disk like a USB stick: `ata0:`, with `PS2MAX/` as on the other devices.
 - Boot: the memory card's system update is mxboot (`tools/mxboot`): its phase 1 starts
   `mc0:/MXOS/MXBOOT.ELF`, which starts the ELF that `MXOS/BOOTONCE.CFG` names (once: the file is
   removed first) or `MXOS/BOOT.CFG` (`mc?:/MXOS/MXLINK.ELF`). A new mxlink or program is tried as
   the one-shot: if it hangs, a reset boots the default again.
-- Start: mxlink loads the ELF (from `host:`, `usb0:`, `mx4sio0:`, ...) and runs it in a thread
+- Start: mxlink loads the ELF (from `host:`, `usb0:`, `mx4sio0:`, `ata0:`, ...) and runs it in a thread
   at priority 64. End: back to mxlink, then the shell (`mc0:/MXOS/MXSHELL.ELF`) if it started
   the program. A `libmxk` program ends without a restart: the kernel removes its threads,
   semaphores and interrupt handlers and resets the units (`kernel.md`, The end of a program).

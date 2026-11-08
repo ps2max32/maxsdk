@@ -1,7 +1,7 @@
 # IOP drivers: DEV9, Ethernet, console, HDD
 
 The design of maxsdk's own IOP drivers for the expansion bay (DEV9). They replace ps2sdk's
-`ps2dev9`, `smap`, `netman` and `udptty`, and later its ATA and HDD drivers. Status per step is
+`ps2dev9`, `smap`, `netman` and `udptty`, and its ATA driver. Status per step is
 at the end.
 
 ## Why new drivers
@@ -30,7 +30,7 @@ ps2sdk's network path works, but costs the IOP more than it needs to (measured w
 | `mxeth.irx` | smap + netman | SMAP and PHY, RX buffers, frame sorting to its clients, TX queue |
 | `mxnet.irx` | ps2ip-nm | lwIP (as now), as a client of mxeth |
 | `mxfast.irx` | the fast path in ps2ip-nm, udptty | `host:` files past lwIP, and the console, as a client of mxeth |
-| `mxata.irx` (later) | atad, ata_bd | ATA on mxdev9's DMA queue, as a block device for mxio |
+| `mxata.irx` | atad, ata_bd | ATA on mxdev9's DMA queue, as a block device for bdm |
 
 The interfaces are maxsdk's own (`iop/dev9/*/include`); no ps2sdk program needs them. mxlink has
 no other network: ps2sdk's modules are not on the card and not loaded (step 4).
@@ -147,10 +147,31 @@ same way later.
 
 ## HDD (step 5)
 
-`mxata.irx` drives the SPEED's ATA interface on mxdev9 (interrupt bits 0-1 and DMA device 0),
-with UDMA, and offers the disk as a block device to mxio, with its own interface. Transfers are
-split into requests of at most 64 KiB so that frames get the channel in between. Power-off flushes
-and stops the disk (mxdev9's power-off functions).
+`mxata.irx` (`iop/dev9/mxata`) drives the SPEED's ATA interface on mxdev9 (interrupt bits 0-1
+and DMA device 0) and offers the disk to bdm as a block device (`ata`), as ps2sdk's `ata_bd` does:
+bdm finds its MBR or GPT partitions and `bdmfs_fatfs` mounts FAT32 or exFAT as `ata0:`, the way it
+mounts `usb0:`. A disk formatted on a PC works; Sony's APA/PFS (the HDD browser's format) does not.
+
+- **One disk**, device 0, UDMA (the highest mode up to 4 that it offers), 48-bit LBA when it has it
+  and needs it (28-bit commands otherwise). PIO only for IDENTIFY at the start.
+- **DMA in the buffer's pieces.** The SPEED's buffer says how many sectors it holds (reading) or
+  takes (writing): at most 31. Each piece is one request in mxdev9's queue, so frames get the
+  channel in between and a request never waits for the disk. The next piece is queued from the
+  interrupts: the DMA's end, or the buffer's ready interrupt (bit 1) when it was empty. The thread
+  sleeps until the command's end (bit 0): nothing spins. A command is aborted after 30 s.
+- **Start** in a thread of its own, so loading the module does not wait for the disk: reset,
+  IDENTIFY, UDMA mode, a standby timer of 21 minutes, then `bdm_connect_bd`. Without the HDD
+  connector (a slim PS2) or on a PSX (DVR) it does not stay loaded.
+- **Buffers** must be 4-byte aligned for DMA; others go through a 4 KiB copy.
+- **Flush and stop**: bdm's flush is FLUSH CACHE, its stop also STANDBY IMMEDIATE. The same runs
+  as mxdev9's power-off function, but nothing calls `mxdev9_off` yet.
+- Compatible adaptors (not Sony's, `SPEED 0x20` not 1) get ps2sdk's workaround: the transfer
+  direction set before the command, DMA enabled with it.
+
+Tested on PCSX2 (`probe/p34_ata.c`, the image given by the PCSX2 runner's `PCSX2_HDD`): FAT32 and
+exFAT, a 4 MiB file read in 16, 32 and 64 KiB right, written and read back. Not yet on a PS2 with
+a disk. Found on the way: `bdmfs_fatfs` (ps2sdk's) fails writes into a FAT32 file that `O_TRUNC`
+emptied, after about 0.5 MB, with ps2sdk's `ata_bd` as well; exFAT does not.
 
 ## Waits
 
@@ -160,7 +181,7 @@ and stops the disk (mxdev9's power-off functions).
 | SMAP FIFO DMAEN after a DMA | checked once; it is clear by then (counted if not) |
 | RX | the interrupt after a quiet time, else an alarm each `poll` us |
 | TX | TXEND; the thread waits on its event flag |
-| ATA DMA (step 5) | channel-8 interrupt |
+| ATA DMA | channel-8 interrupt per piece; the buffer's interrupt when it is empty; the command's end |
 | PHY access (MDIO) | `DelayThread` polls, about 30 us, at start and once a second |
 | Link check | a thread sleeping 1 s (100 ms while there is no link) |
 | Power-on, FIFO and MAC resets | `DelayThread` polls, at start only |
@@ -216,4 +237,5 @@ Sending is bound by the IOP: one TXEND and one wake-up a frame (the FIFO holds t
 4. ps2sdk's network off the card and out of mxlink: ps2dev9, netman, smap, ps2ip-nm (mxnet's netman
    build, with its own copy of the fast path) and udptty; no fallback, so no network on a PCMCIA
    PS2 or when one of maxsdk's modules does not load (done).
-5. mxata.
+5. mxata, the HDD as a bdm block device (FAT32, exFAT) as `ata0:`; the shell's third device
+   (done on PCSX2; on a PS2 with a disk still to do).

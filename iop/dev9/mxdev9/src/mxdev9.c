@@ -132,6 +132,9 @@ static int dma_irq(void *unused) {
   struct mxdev9_dma *d = head;
   if (busy != 1 || !d)
     return 1; /* a short transfer's end, which mxdev9_dma_end waits for */
+  /* the same, late: mxdev9_dma_end started the queue's head before this ran */
+  if (chan->chcr & CHCR_TR)
+    return 1;
   head = d->next;
   if (!head)
     tail = 0;
