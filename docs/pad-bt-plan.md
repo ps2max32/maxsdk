@@ -129,6 +129,12 @@ Connection Request for **SDP** (PSM `0x0001`) first, and hangs up when that is r
 unanswered (as a PS4 does), with the host opening the HID control and then the interrupt
 channel itself, it authenticates with the key, turns encryption on, and after GET_REPORT `0x02`
 sends report `0x11` (the USB report's bytes from offset 3): its slot then reads as a USB pad's.
+The **DualShock 3** over Bluetooth (2026-11-08): paired over USB (feature `0xF5`), it connects
+when its PS button is pressed and opens both HID channels itself; SET_REPORT `F4` (`42 03`)
+starts its input, all buttons, pressures and sticks as over USB. Its light: SET_REPORT output 1
+of 36 bytes with the id (Linux's length; 48 made it hang), sent only after the pad's handshake
+to `F4` (one transaction at a time on the control channel, as Linux's hidp waits; sent at
+once, the DS3 kept all four lights blinking). A DS4 and a DS3 at once on one dongle work.
 The pairings are kept in `mc0:/MXOS/BTPADS.DAT` (address, kind, key; up to 8), read when a
 dongle comes up and written by mxpad's Bluetooth thread after a new key: after an IOP reset the
 DS4 connects with its key without the cable first. On the PS2 the DS4's light over Bluetooth

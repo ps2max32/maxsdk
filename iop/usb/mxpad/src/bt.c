@@ -315,6 +315,7 @@ static struct conn {
   int kind, slot;
   u16 ctrl, intr;   /* the pad's channel ids, 0: not open */
   u8 ctrl_cfg, intr_cfg, started, id;
+  u8 led_wanted; /* the DS3's light, after the pad answered its start (HID handshake) */
 } conns[CONNS];
 
 static void open_channel(struct conn *c, u16 psm, u16 ours);
@@ -442,14 +443,9 @@ static void hid_start(struct conn *c) {
     /* SET_REPORT feature 0xF4 over Bluetooth: 42 03 */
     static const u8 start[6] = {0x53, 0xf4, 0x42, 0x03, 0x00, 0x00};
     l2cap_send(c, c->ctrl, start, 6);
-    /* SET_REPORT output 1: the slot's light */
-    u8 o[2 + 48] = {0x52, 0x01};
-    o[2 + 9] = (u8)(0x02 << c->slot);
-    for (int i = 0; i < 4; i++) {
-      u8 *l = o + 2 + 10 + 5 * i;
-      l[0] = 0xff, l[1] = 0x27, l[2] = 0x10, l[3] = 0, l[4] = 0x32;
-    }
-    l2cap_send(c, c->ctrl, o, sizeof o);
+    /* the light once the pad answered: one transaction at a time on the
+       control channel, as Linux's hidp waits for each handshake */
+    c->led_wanted = 1;
   } else if (c->kind == MXPAD_DS4) {
     /* GET_REPORT feature 0x02: the DS4 sends its full report 0x11 from then on */
     static const u8 get2[2] = {0x43, 0x02};
@@ -465,6 +461,18 @@ static void hid_start(struct conn *c) {
     l2cap_send(c, c->intr, o, sizeof o);
   }
   LOG("slot %d: %s over Bluetooth\n", c->slot, c->kind == MXPAD_DS3 ? "DualShock 3" : "DualShock 4");
+}
+
+/* the DS3's light: SET_REPORT output 1, 36 bytes with the id, as Linux's
+   hid-sony sends it (48, the USB length, made a DS3 hang over Bluetooth) */
+static void ds3_led(struct conn *c) {
+  u8 o[1 + 36] = {0x52, 0x01};
+  o[2 + 9] = (u8)(0x02 << c->slot);
+  for (int i = 0; i < 4; i++) {
+    u8 *l = o + 2 + 10 + 5 * i;
+    l[0] = 0xff, l[1] = 0x27, l[2] = 0x10, l[3] = 0, l[4] = 0x32;
+  }
+  l2cap_send(c, c->ctrl, o, sizeof o);
 }
 
 static void check_ready(struct conn *c) {
@@ -735,7 +743,16 @@ static void acl(const u8 *d, u32 n) {
     signalling(c, d + 8, len);
   else if (cid == CID_INTR)
     hid_input(c, d + 8, len);
-  /* the control channel: answers to GET_REPORT, not needed */
+  else if (cid == CID_CTRL && len >= 1 && (d[8] & 0xf0) == 0x00) {
+    /* a HID handshake: the answer to our last SET_REPORT */
+    if (d[8] != 0x00)
+      LOG("handshake %02x\n", d[8]);
+    if (c->led_wanted) {
+      c->led_wanted = 0;
+      ds3_led(c);
+    }
+  }
+  /* other answers on the control channel (GET_REPORT's data): not needed */
 }
 
 static void bt_thread(void *arg) {
