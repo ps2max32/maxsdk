@@ -16,7 +16,8 @@ memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-
   ps2client that serves the fast path, without loss, else by broadcast as udptty sent it).
   Between programs mxlink closes files, pad ports and sound, and
   keeps the IOP and the network. The internal HDD (`mxata`, `docs/iop-drivers.md`) is a FAT32 or exFAT
-  disk like a USB stick: `ata0:`, with `PS2MAX/` as on the other devices.
+  disk like a USB stick: `ata0:`, with `PS2MAX/` as on the other devices. The shell's fourth
+  device is `host:`: the directory of a `ps2client listen` on the PC.
 - Boot: the memory card's system update is mxboot (`tools/mxboot`): its phase 1 starts
   `mc0:/MXOS/MXBOOT.ELF`, which starts the ELF that `MXOS/BOOTONCE.CFG` names (once: the file is
   removed first) or `MXOS/BOOT.CFG` (`mc?:/MXOS/MXLINK.ELF`). A new mxlink or program is tried as
