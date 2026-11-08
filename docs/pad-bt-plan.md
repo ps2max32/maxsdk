@@ -173,7 +173,13 @@ program left running when it ends. Over Bluetooth mxpad sends the pad's output r
 thread (DS3: SET_REPORT on the control channel, one at a time after each handshake; DS4 and
 DualSense: report `0x11` / `0x31` on the interrupt channel with the CRC). On the PS2 with
 `tests/ps2/vm31_rumble.c`: a DualSense on USB, a DS4 and a DS3 over Bluetooth, a DS3 on USB.
-A SIO2 pad's motors (PADMAN's actuators) are not done yet.
+A SIO2 DualShock 2's motors through PADMAN (ps2sdk's libpad, the ROM protocol: SET_ACT_ALIGN
+`0x80000107`, SET_ACT_DIRECT `0x80000106`): only in DualShock mode (a digital pad is switched),
+on a stable pad whose last request is done; after each command the pad is busy for a moment and
+after the mode switch PADMAN reports it found again, so a value waits and is never dropped (a
+dropped stop left a DS2 rumbling). The SIO2 ports are held: half a second after a pad was last
+seen (plugging it in or out moves the USB pads once, no flicker), 1.5 s after a program opens
+the ports for a pad that was there before (it keeps port 0 from the start).
 
 ### 4. Kernel and home menu
 

@@ -98,6 +98,9 @@ struct mx_pad_state {
 int mx__pad_init(void);
 void mx__pad_forget(void);
 int mx__pad_read(int port, struct mx_pad_state *s, int sticks);
+/* the motors of a SIO2 pad (a DualShock): small 0/1, big 0..255, sent when
+   the pad takes them (from the next mx__pad_read); 0, or -1 with no pad */
+int mx__pad_act(int port, u32 small, u32 big);
 
 /* A program's interrupt slots (ee/src/irq/irq.c), for the kernel at its end:
    each slot's BIOS handler id (0: none) at id_offset (version 8). */

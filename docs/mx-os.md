@@ -25,7 +25,8 @@ memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-
 - Boot: the memory card's system update is mxboot (`tools/mxboot`): its phase 1 starts
   `mc0:/MXOS/MXBOOT.ELF`, which starts the ELF that `MXOS/BOOTONCE.CFG` names (once: the file is
   removed first) or `MXOS/BOOT.CFG` (`mc?:/MXOS/MXLINK.ELF`). A new mxlink or program is tried as
-  the one-shot: if it hangs, a reset boots the default again.
+  the one-shot: if it hangs, a reset boots the default again. New IOP modules the same way: an mxlink built
+  with `MODULE_DIR=mc0:/MXOS/NEW/` reads them (and its shell) from that directory.
 - Start: mxlink loads the ELF (from `host:`, `usb0:`, `mx4sio0:`, `ata0:`, ...) and runs it in a thread
   at priority 64: one of the kernel's own threads for a `libmxk` program of version 10, which
   uses the kernel's threads, semaphores and interrupt dispatch (`kernel.md`, Interrupts and
@@ -108,10 +109,12 @@ home button reaches whichever port a program reads. L3 + R3 toggles libgl's coun
 default. Do not bind these.
 
 The pads a program reads (`mx_pad_*`): first the SIO2 pads that are there, in port order, then
-the USB pads in the order they came; a pad plugged into a SIO2 port moves the USB pads up a port.
+the USB pads in the order they came; a pad plugged into a SIO2 port moves the USB pads up a port
+(a SIO2 pad holds its port for half a second after it was last seen, so plugging it in or out
+moves the others once).
 A USB pad's Share (Create) is Select, Options is Start; its sticks and buttons are the SIO2 pad's
-(`<mx/pad.h>`). `mx_pad_rumble` runs a USB or Bluetooth pad's motors until the next call; the
-kernel stops them when the program ends.
+(`<mx/pad.h>`). `mx_pad_rumble` runs a pad's motors (USB, Bluetooth or a SIO2 DualShock, which it puts in
+DualShock mode) until the next call; the kernel stops them when the program ends.
 
 ## Packaging
 

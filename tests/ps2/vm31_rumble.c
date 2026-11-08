@@ -35,8 +35,8 @@ int main(int argc, char **argv) {
   }
   for (int p = 0; p < PORTS; p++)
     if (mx_pad_connected(p))
-      mx_printf("vm31_rumble: port %d: big motor on at the end: %d\n", p, mx_pad_rumble(p, 0, 120));
-  mx_sleep_us(500000);
+      mx_printf("vm31_rumble: port %d: big motor on at the end: %d\n", p, mx_pad_rumble(p, 0, 255));
+  mx_sleep_us(1500000); /* a DualShock 2's big motor takes a while to spin up */
   mx_printf("vm31_rumble: end, the motors left on (the kernel stops them)\n");
   MX_TEST_END(0);
   return 0;

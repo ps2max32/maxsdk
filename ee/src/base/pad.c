@@ -8,14 +8,20 @@
 #include <mx/mx.h>
 #include <mx/pad.h>
 #include <mx/sif.h>
+#include <mx/timer.h>
 
 #define PAD_SID 0x8000010F
 #define PAD_SID2 0x8000011F
 #define PAD_CMD_OPEN 0x80000100
 #define PAD_CMD_SET_MAIN_MODE 0x80000105 /* port, slot, mode (1: analog), lock (3) */
+/* the motors (ps2sdk's libpad, the ROM's PADMAN): port, slot, 6 bytes */
+#define PAD_CMD_SET_ACT_DIRECT 0x80000106 /* the motors' values */
+#define PAD_CMD_SET_ACT_ALIGN 0x80000107  /* which byte drives which motor */
+#define PAD_REQ_COMPLETE 0
 
 #define PAD_STATE_STABLE 6
 #define PAD_STATE_FINDCTP1 2
+#define PAD_STATE_FINDPAD 1 /* and 0, DISCONN: no pad on the port */
 
 struct pad_record {
   u32 frame;
@@ -33,6 +39,9 @@ static s32 res[32] MX_DMA_LINES;
 static int ready;
 static u32 prev[2];
 static u32 analog_polls[2];
+/* the motors: aligned since the port opened (or the pad came), the values
+   wanted, and whether they still have to go (mx__pad_act) */
+static u8 act_aligned[2], act_small[2], act_big[2], act_pending[2];
 
 /* The kernel, when a program that waited for another goes on (step 2c): its
    ports were closed at the other's end, so its next mx_pad_init opens them
@@ -62,6 +71,7 @@ int mx__pad_init(void) {
       r[i].length = 0;
     }
     mx_dcache_invalidate(area[port], sizeof area[port]);
+    act_aligned[port] = 0;
     cmd[0] = PAD_CMD_OPEN;
     cmd[1] = port;
     cmd[2] = 0; /* slot */
@@ -81,6 +91,63 @@ static volatile struct pad_record *newest(int port) {
 static int connected(volatile struct pad_record *n) {
   return (n->state == PAD_STATE_STABLE || n->state == PAD_STATE_FINDCTP1) && n->length >= 4 &&
          n->data[0] == 0;
+}
+
+/* The motors: PADMAN takes them only from a pad that is stable, in
+   DualShock (analog) mode and done with its last request; the alignment
+   (byte 0 the small motor, byte 1 the big one) once, then the values. A
+   digital pad is put in DualShock mode for them. */
+static void act_call(u32 command, int port, const u8 d[6]) {
+  cmd[0] = (s32)command;
+  cmd[1] = port;
+  cmd[2] = 0; /* slot */
+  u8 *b = (u8 *)&cmd[3];
+  for (int i = 0; i < 6; i++)
+    b[i] = d[i];
+  mx_sif_call(&pad, 1, cmd, sizeof cmd, (void *)MX_UNCACHED(res), sizeof res);
+}
+
+static u32 act_mode_at[2];
+
+static void act_service(int port, volatile struct pad_record *n) {
+  if (!act_pending[port] || n->state != PAD_STATE_STABLE || n->req_state != PAD_REQ_COMPLETE)
+    return;
+  if ((n->data[1] >> 4) != 7) {
+    /* the motors only in DualShock mode, as libpad's examples set it first:
+       asked for here when the program never read the sticks (want_analog) */
+    if (mx_count() - act_mode_at[port] > MX_EE_HZ) {
+      act_mode_at[port] = mx_count();
+      cmd[0] = PAD_CMD_SET_MAIN_MODE;
+      cmd[1] = port;
+      cmd[2] = 0; /* slot */
+      cmd[3] = 1; /* analog */
+      cmd[4] = 3; /* locked */
+      mx_sif_call(&pad, 1, cmd, sizeof cmd, (void *)MX_UNCACHED(res), sizeof res);
+    }
+    return;
+  }
+  if (!act_aligned[port]) {
+    static const u8 align[6] = {0, 1, 0xff, 0xff, 0xff, 0xff};
+    act_call(PAD_CMD_SET_ACT_ALIGN, port, align);
+    act_aligned[port] = 1;
+    return; /* the values once the pad took it */
+  }
+  u8 v[6] = {act_small[port], act_big[port], 0, 0, 0, 0};
+  act_call(PAD_CMD_SET_ACT_DIRECT, port, v);
+  act_pending[port] = 0;
+}
+
+int mx__pad_act(int port, u32 small, u32 big) {
+  if (!ready || (unsigned)port > 1)
+    return -1;
+  volatile struct pad_record *n = newest(port);
+  /* kept whatever the pad does now, and sent when it can take them: busy
+     with a command (PADMAN's EXECCMD after each one) or found again (as
+     after the switch to DualShock mode, which a stop must not miss) */
+  act_small[port] = small ? 1 : 0, act_big[port] = (u8)(big > 255 ? 255 : big);
+  act_pending[port] = 1;
+  act_service(port, n);
+  return n->state <= PAD_STATE_FINDPAD ? -1 : 0;
 }
 
 /* A DualShock starts digital: once it is stable, ask for analog mode,
@@ -105,8 +172,14 @@ int mx__pad_read(int port, struct mx_pad_state *s, int sticks) {
   if (!ready || (unsigned)port > 1)
     return 0;
   volatile struct pad_record *n = newest(port);
-  if (!connected(n))
+  if (!connected(n)) {
+    if (n->state <= PAD_STATE_FINDPAD)
+      act_aligned[port] = 0; /* gone: a pad that comes is aligned again */
+    else
+      act_service(port, n); /* busy: what waits goes when it is done */
     return 0;
+  }
+  act_service(port, n);
   s->buttons = ~(u32)(n->data[2] | n->data[3] << 8) & 0xFFFF;
   /* no home button on this pad: the combination is it */
   if ((s->buttons & MX_PAD_QUIT) == MX_PAD_QUIT)
