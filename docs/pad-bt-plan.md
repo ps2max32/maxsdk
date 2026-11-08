@@ -123,12 +123,16 @@ not the pads).
 
 State (2026-11-08): steps 2 and 3 work for the **DualShock 4** with the CSR8510 dongle, in
 `iop/usb/mxpad/src/bt.c`. Paired over USB (feature `0x13`: the dongle's address and a new link
-key, kept in the IOP's memory only so far), the DS4 on battery connects to the dongle when its
+key), the DS4 on battery connects to the dongle when its
 PS button is pressed; it asks for no link key until the host authenticates, sends an L2CAP
 Connection Request for **SDP** (PSM `0x0001`) first, and hangs up when that is refused. Left
 unanswered (as a PS4 does), with the host opening the HID control and then the interrupt
 channel itself, it authenticates with the key, turns encryption on, and after GET_REPORT `0x02`
 sends report `0x11` (the USB report's bytes from offset 3): its slot then reads as a USB pad's.
+The pairings are kept in `mc0:/MXOS/BTPADS.DAT` (address, kind, key; up to 8), read when a
+dongle comes up and written by mxpad's Bluetooth thread after a new key: after an IOP reset the
+DS4 connects with its key without the cable first. On the PS2 the DS4's light over Bluetooth
+was blue (its slot's) once the colour sat at the bytes Linux gives.
 Linux (`hid-playstation`, `hid-sony`; BlueZ's input profile, `sixaxis` plugin and SDP server)
 is the reference from here on, for the facts: BlueZ answers the SDP request and the pad opens
 the channels itself, likely what the DualSense needs.

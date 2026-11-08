@@ -199,6 +199,7 @@ static struct {
   u8 addr[6], key[16], used, has_key, kind;
 } keys[KEYS];
 static u32 key_next;
+static volatile int keys_dirty;
 
 static int key_find(const u8 *addr) {
   for (int i = 0; i < KEYS; i++)
@@ -221,9 +222,62 @@ static void key_put(const u8 *addr, const u8 *key, int kind) {
   if (kind)
     keys[i].kind = (u8)kind;
   keys[i].used = 1;
+  keys_dirty = 1;
+  if (bt.used && !bt.gone)
+    SignalSema(bt.sema); /* the thread writes the card */
 }
 
 void bt_known(const u8 addr[6], int kind) { key_put(addr, 0, kind); }
+
+/* ---- the pairings on the memory card ----
+   mc0:/MXOS/BTPADS.DAT: "MXBT", a version, the count, then per pad its
+   address (HCI byte order), kind, whether it has a key, and the key. Read
+   when a dongle comes up, written by the thread after a new key. */
+
+#define KEYS_FILE "mc0:/MXOS/BTPADS.DAT"
+#define KEYS_VERSION 1
+#define KEY_REC 24
+static u8 keys_io[4 + 2 + KEYS * KEY_REC];
+
+static void keys_load(void) {
+  int fd = open(KEYS_FILE, O_RDONLY);
+  if (fd < 0)
+    return;
+  int n = read(fd, keys_io, sizeof keys_io), loaded = 0;
+  close(fd);
+  if (n < 6 || memcmp(keys_io, "MXBT", 4) || keys_io[4] != KEYS_VERSION)
+    return;
+  for (u32 i = 0; i < keys_io[5] && i < KEYS && 6 + (i + 1) * KEY_REC <= (u32)n; i++) {
+    const u8 *r = keys_io + 6 + i * KEY_REC;
+    key_put(r, r[7] ? r + 8 : 0, r[6]);
+    loaded++;
+  }
+  keys_dirty = 0;
+  LOG("%d paired pads from %s\n", loaded, KEYS_FILE);
+}
+
+static void keys_save(void) {
+  u32 n = 0;
+  keys_dirty = 0;
+  memcpy(keys_io, "MXBT", 4);
+  keys_io[4] = KEYS_VERSION;
+  for (int i = 0; i < KEYS; i++) {
+    if (!keys[i].used)
+      continue;
+    u8 *r = keys_io + 6 + n * KEY_REC;
+    memcpy(r, keys[i].addr, 6);
+    r[6] = keys[i].kind, r[7] = keys[i].has_key;
+    memcpy(r + 8, keys[i].key, 16);
+    n++;
+  }
+  keys_io[5] = (u8)n;
+  int fd = open(KEYS_FILE, O_WRONLY | O_CREAT | O_TRUNC);
+  int w = fd < 0 ? fd : write(fd, keys_io, (int)(6 + n * KEY_REC));
+  if (fd >= 0)
+    close(fd);
+  if (w != (int)(6 + n * KEY_REC))
+    LOG("%s not written (%d)\n", KEYS_FILE, w);
+}
 
 void bt_new_key(const u8 addr[6], u8 key[16]) {
   iop_sys_clock_t c;
@@ -686,9 +740,12 @@ static void acl(const u8 *d, u32 n) {
 
 static void bt_thread(void *arg) {
   (void)arg;
+  keys_load();
   setup();
   while (!bt.gone) {
     WaitSema(bt.sema);
+    if (keys_dirty)
+      keys_save();
     while (rx_tail != rx_head && !bt.gone) {
       u32 i = rx_tail % RX_SLOTS;
       if (rx[i].type == PKT_EVENT)

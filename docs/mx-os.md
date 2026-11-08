@@ -18,7 +18,8 @@ memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-
   ps2client that serves the fast path, without loss, else by broadcast as udptty sent it).
   Between programs mxlink closes files, pad ports and sound, and
   keeps the IOP and the network. USB pads (DualShock 3, DualShock 4, DualSense) run on usbd and
-  maxsdk's `mxpad`, loaded at the boot (`docs/pad-bt-plan.md`). The internal HDD (`mxata`, `docs/iop-drivers.md`) is a FAT32 or exFAT
+  maxsdk's `mxpad`, loaded at the boot (`docs/pad-bt-plan.md`), and with a Bluetooth dongle on USB
+  the pads paired with it (over USB, as a PS3 or PS4 pairs them), kept in `mc0:/MXOS/BTPADS.DAT`. The internal HDD (`mxata`, `docs/iop-drivers.md`) is a FAT32 or exFAT
   disk like a USB stick: `ata0:`, with `PS2MAX/` as on the other devices. The shell's fourth
   device is `host:`: the directory of a `ps2client listen` on the PC.
 - Boot: the memory card's system update is mxboot (`tools/mxboot`): its phase 1 starts

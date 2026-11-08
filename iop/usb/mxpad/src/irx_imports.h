@@ -4,6 +4,8 @@
 #include <irx.h>
 
 #include <intrman.h>
+#include <ioman.h>
+#include <sys/fcntl.h>
 #include <loadcore.h>
 #include <sifcmd.h>
 #include <sifman.h>
