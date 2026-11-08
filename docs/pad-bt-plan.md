@@ -73,6 +73,19 @@ Bluetooth dongles, one plugged in at a time).
 - Kernel: the merged ports, an extended pad record, the RPC for output. New kernel table
   version; `mx-os.md` and `kernel.md` in the same commit.
 
+State (2026-11-08): **1a done**, `iop/usb/mxpad` (`common/include/mxpad.h`): the three pads on
+USB, a slot each (up to 4), 32-byte records by SIF DMA into an area of EE memory the EE gives
+(`MXPAD_AREA`), only when a pad's state changes; the slot's light at connect (DS3 LED n, DS4 and
+DualSense light bar blue, red, green, pink, DualSense player lights); rumble and light bar by
+`MXPAD_OUTPUT`. `probe/p36_mxpad.c` reads the area as the kernel will: a DS4 on the PS2 with
+buttons, d-pad (diagonals as two bits), sticks, battery, rumble, and unplugged and plugged in
+again, back in slot 0 each time. Lessons: a record must be a multiple of 16 bytes (SIF DMA
+writes 16 at a time: a 36-byte record wrote over the next); usbd does not call back a pad's
+pending transfers after it is unplugged, so a slot is freed at once and callbacks carry the
+connection's generation. Next, **1b**: the kernel (mxlink loads usbd and mxpad at boot,
+`pad_read` takes ports 0 and 1 from a USB pad when no SIO2 pad is there), `mx-os.md`,
+`kernel.md`.
+
 ### 2. Bluetooth transport (HCI)
 
 - USB class E0/01/01: commands on the control pipe, events on the interrupt pipe, ACL data on
