@@ -12,17 +12,17 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     container: ghcr.io/ps2max32/ps2max:latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build
         run: make -j$(nproc) OUT=$PWD/out all
       - name: Host tests
         run: make OUT=$PWD/out test-host
       - name: No ps2sdk
         run: make OUT=$PWD/out check-deps
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: maxsdk-${{ github.sha }}
           path: |
