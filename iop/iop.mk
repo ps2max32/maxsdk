@@ -27,8 +27,15 @@ PS2MAX_IOP_SDK  ?= $(PS2MAX_PS2DEV)/ps2sdk
 PS2MAX_LLVM_BIN ?= $(PS2MAX)/build/toolchain/llvm/feature/bin
 
 IOP_CC     = $(PS2MAX_LLVM_BIN)/clang --target=mipsel-none-irx
-IOP_CFLAGS = -std=gnu23 -fno-builtin -ffreestanding -Wall -Wno-unused-but-set-global
-# IOP_LTO=1: link-time optimization across a module's sources
+# Small modules: a section per function and variable, and the link keeps only
+# what is used (IOP_GC=0: all of it); ld.lld --irx also turns the module's
+# calls and jumps into PC-relative branches, which need no relocation.
+# IOP_LTO=1: link-time optimization across a module's sources, a little
+# smaller (mxnet -9%), but with it the network modules do not run yet.
+IOP_GC    ?= 1
+IOP_LTO   ?= 0
+IOP_CFLAGS = -std=gnu23 -fno-builtin -ffreestanding -Wall -Wno-unused-but-set-global \
+             $(if $(filter 1,$(IOP_GC)),-ffunction-sections -fdata-sections)
 IOP_LTO_FLAGS = $(if $(filter 1,$(IOP_LTO)),-flto)
 IOP_CFLAGS   += $(IOP_LTO_FLAGS)
 IOP_INCS   = -I$(MAXSDK)/common/include -I$(PS2MAX_IOP_SDK)/iop/include \
@@ -38,7 +45,7 @@ IOP_ILB_DIR  ?= $(PS2MAX)/build/libs/maxsdk/iop/ilb
 IOP_ILB_RSP   = $(IOP_ILB_DIR)/ps2sdk.rsp
 MAXSDK_ILBS   = $(sort $(wildcard $(MAXSDK)/iop/*/*/src/exports.ilb))
 iop_comma    := ,
-iop_link_libs = $(IOP_LTO_FLAGS) $(if $(1),-Wl$(iop_comma)--irx-export=$(abspath $(1))) $(MAXSDK_ILBS) @$(IOP_ILB_RSP)
+iop_link_libs = $(IOP_LTO_FLAGS) $(if $(filter 1,$(IOP_GC)),-Wl$(iop_comma)--gc-sections) $(IOP_LDFLAGS) $(if $(1),-Wl$(iop_comma)--irx-export=$(abspath $(1))) $(MAXSDK_ILBS) @$(IOP_ILB_RSP)
 
 $(IOP_ILB_RSP): $(MAXSDK)/iop/mkilb.py
 	python3 $< $(IOP_ILB_DIR) $(PS2MAX_IOP_SDK)/iop/include $(PS2MAX_IOP_SDK)/common/include
