@@ -6,6 +6,7 @@
 The outputs are committed, so users of the SDK do not need Python.
 """
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -79,16 +80,58 @@ def gen_formats():
     return "\n".join(out)
 
 
+def split_proto(proto):
+    i = proto.index("(")
+    ret, args = proto[:i].strip(), proto[i + 1:]
+    args, attrs = args.rsplit(")", 1)
+    return ret, args, attrs
+
+
+def arg_names(args):
+    """the parameter names of a prototype's list, for a call"""
+    if args.strip() in ("void", ""):
+        return []
+    parts, depth, cur = [], 0, ""
+    for ch in args:
+        if ch == "," and depth == 0:
+            parts.append(cur)
+            cur = ""
+            continue
+        depth += ch == "("
+        depth -= ch == ")"
+        cur += ch
+    parts.append(cur)
+    names = []
+    for p in parts:
+        m = re.search(r"\(\*\s*(\w+)\)", p) or re.search(r"(\w+)\s*$", p)
+        names.append(m.group(1))
+    return names
+
+
+def kernels():
+    return [(n, num, proto) for n, num, proto, *k in D.SYSCALLS if k]
+
+
 def gen_bios_h():
     out = [HEADER, "#ifndef MX_BIOS_H", "#define MX_BIOS_H", "",
            "/* BIOS (EE kernel) syscalls. Names ending in an i-prefix call are for",
            "   interrupt handlers only. */", "",
            "#ifdef __cplusplus", 'extern "C" {', "#endif", ""]
-    for name, num, proto in D.SYSCALLS:
-        i = proto.index("(")
-        ret, args = proto[:i].strip(), proto[i + 1:]
-        args, attrs = args.rsplit(")", 1)
+    for name, num, proto, *_ in D.SYSCALLS:
+        ret, args, attrs = split_proto(proto)
         out.append(f"{ret} {name}({args}){attrs};")
+    out += ["", "/* The threads, semaphores and interrupt handlers are the kernel's under",
+            "   mx-kernel (docs/mx-os-plan.md, step 2d): the calls above go to its table",
+            "   when it has set mx__kthreads (src/base/ksys.c), else to the BIOS's own",
+            "   syscalls, here. */"]
+    for name, num, proto in kernels():
+        ret, args, attrs = split_proto(proto)
+        out.append(f"{ret} mx__sys_{name[len('mx_bios_'):]}({args}){attrs};")
+    out += ["", "struct mx_kthreads {"]
+    for name, num, proto in kernels():
+        ret, args, attrs = split_proto(proto)
+        out.append(f"  {ret} (*{name[len('mx_bios_'):]})({args});")
+    out += ["};", "extern const struct mx_kthreads *mx__kthreads;"]
     out += ["", "#ifdef __cplusplus", "}", "#endif", "", "#endif", ""]
     return "\n".join(out)
 
@@ -96,11 +139,33 @@ def gen_bios_h():
 def gen_syscalls_s():
     out = [HEADER.replace("/*", "#").replace(" */", ""),
            "\t.set noreorder", "\t.text", ""]
-    for name, num, _ in D.SYSCALLS:
+    for name, num, _, *k in D.SYSCALLS:
+        if k:
+            name = "mx__sys_" + name[len("mx_bios_"):]
         out += [f"\t.globl {name}", f"\t.type {name}, @function",
                 f"\t.ent {name}", f"{name}:",
                 f"\tli $3, {num}", "\tsyscall", "\tjr $31", "\tnop",
                 f"\t.end {name}", f"\t.size {name}, .-{name}", ""]
+    return "\n".join(out)
+
+
+def gen_ksys_c():
+    out = [HEADER, "/* The BIOS's thread, semaphore and interrupt handler calls, the kernel's",
+           "   when it has set its table (mx-kernel, docs/mx-os-plan.md step 2d), else",
+           "   the BIOS's syscalls (src/base/syscalls.S). */", "",
+           "#include <mx/bios.h>", "",
+           "const struct mx_kthreads *mx__kthreads;", ""]
+    for name, num, proto in kernels():
+        ret, args, attrs = split_proto(proto)
+        short = name[len("mx_bios_"):]
+        call = ", ".join(arg_names(args))
+        r = "" if ret == "void" else "return "
+        out += [f"{ret} {name}({args}) {{",
+                f"  if (mx__kthreads)",
+                f"    {r}mx__kthreads->{short}({call});",
+                f"  else",
+                f"    {r}mx__sys_{short}({call});",
+                "}", ""]
     return "\n".join(out)
 
 
@@ -141,6 +206,7 @@ def main():
     write("include/mx/hw/formats.h", gen_formats())
     write("include/mx/bios.h", gen_bios_h())
     write("src/base/syscalls.S", gen_syscalls_s())
+    write("src/base/ksys.c", gen_ksys_c())
     write("../tests/host/test_gen.c", gen_test())
 
 

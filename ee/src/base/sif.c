@@ -104,7 +104,9 @@ static u32 sif_epoch;
 
 static volatile u32 *uw(void *p) { return (volatile u32 *)MX_UNCACHED(p); }
 
-static u32 send_cmd(int intr, u32 cid, void *pkt, u32 psize, const void *src, u32 dest,
+/* src: the data's physical address (mx_paddr_range of a pointer; an RDATA
+   request's is physical already, given by the IOP) */
+static u32 send_cmd(int intr, u32 cid, void *pkt, u32 psize, mx_paddr src, u32 dest,
                     u32 dsize) {
   volatile u32 *h = uw(pkt);
   struct sif_dma t[2];
@@ -113,7 +115,7 @@ static u32 send_cmd(int intr, u32 cid, void *pkt, u32 psize, const void *src, u3
   h[1] = dsize ? dest : 0;
   h[2] = cid;
   if (dsize) {
-    t[n].src = mx_paddr_range(src, dsize).v;
+    t[n].src = src.v;
     t[n].dest = dest;
     t[n].size = (s32)dsize;
     t[n].attr = 0;
@@ -157,7 +159,9 @@ static void send_rdata(int intr, const u32 *w) {
   rp[5] = w[0];
   rp[7] = w[1];
   rp[8] = CMD_RPC_RDATA;
-  if (!send_cmd(intr, CMD_RPC_END, r, RPC_PKT_SIZE, (const void *)(uintptr_t)w[2], w[3], w[4]) &&
+  /* w[2]: the physical address the IOP asks for (it was given one), not a
+     pointer: through mx_paddr_of a program's core offset would come twice */
+  if (!send_cmd(intr, CMD_RPC_END, r, RPC_PKT_SIZE, (mx_paddr){w[2]}, w[3], w[4]) &&
       ndeferred < NPKT) {
     for (int i = 0; i < 5; i++)
       (&deferred[ndeferred].pkt_addr)[i] = w[i];
@@ -255,7 +259,7 @@ static void serve(const u32 *pkt) {
     if (s >= servers && s < servers + NSERVER && s->fn)
       s->fn((int)pkt[8], s->arg);
   }
-  send_cmd(1, CMD_RPC_END, r, RPC_PKT_SIZE, 0, 0, 0);
+  send_cmd(1, CMD_RPC_END, r, RPC_PKT_SIZE, (mx_paddr){0}, 0, 0);
 }
 
 /* SIF0 (IOP -> EE) DMA end: one command packet is in rx_buf. */
@@ -387,7 +391,7 @@ int mx_sif_init(void) {
     /* The IOP side is already set up (by ps2link): tell it our receive
        buffer. */
     uw(init_pkt)[4] = (u32)(uintptr_t)MX_UNCACHED(rx_buf);
-    send_cmd(0, CMD_CHANGE_SADDR, init_pkt, 32, 0, 0, 0);
+    send_cmd(0, CMD_CHANGE_SADDR, init_pkt, 32, (mx_paddr){0}, 0, 0);
   } else {
     u32 t0 = mx_count();
     while (!(mx_bios_sif_get_reg(REG_SMFLAG) & SMFLAG_CMDINIT))
@@ -397,13 +401,13 @@ int mx_sif_init(void) {
     mx_bios_sif_set_reg(SYSREG_SUBADDR, (s32)iop_buf);
     uw(init_pkt)[3] = 0;
     uw(init_pkt)[4] = (u32)(uintptr_t)MX_UNCACHED(rx_buf);
-    send_cmd(0, CMD_INIT_CMD, init_pkt, 32, 0, 0, 0);
+    send_cmd(0, CMD_INIT_CMD, init_pkt, 32, (mx_paddr){0}, 0, 0);
   }
 
   if (!mx_bios_sif_get_reg(SYSREG_RPCINIT)) {
     static u8 rpc_init_pkt[16] MX_DMA_LINES;
     uw(rpc_init_pkt)[3] = 1;
-    send_cmd(0, CMD_INIT_CMD, rpc_init_pkt, 16, 0, 0, 0);
+    send_cmd(0, CMD_INIT_CMD, rpc_init_pkt, 16, (mx_paddr){0}, 0, 0);
     u32 t0 = mx_count();
     while (!sregs[0])
       if (mx_count() - t0 > 300000000u)
@@ -543,7 +547,7 @@ int mx_sif_bind_tries(struct mx_sif_client *c, u32 sid, int n) {
     c->server = 0;
     w[7] = (u32)(uintptr_t)c;
     w[8] = sid;
-    send_cmd(0, CMD_RPC_BIND, p, RPC_PKT_SIZE, 0, 0, 0);
+    send_cmd(0, CMD_RPC_BIND, p, RPC_PKT_SIZE, (mx_paddr){0}, 0, 0);
     if (wait_answer(c, 1) < 0)
       return -1;
     if (c->server) {
@@ -635,7 +639,8 @@ static void sif_send_call(struct mx_sif_client *c, int fno, const void *send, u3
   w[13] = c->server;
   if (!mx_is_spr(send) && ((uintptr_t)send & 0xF0000000u) != 0x20000000u)
     mx_dcache_writeback(send, ssize);
-  send_cmd(0, CMD_RPC_CALL, p, RPC_PKT_SIZE, send, c->buf, ssize);
+  send_cmd(0, CMD_RPC_CALL, p, RPC_PKT_SIZE, ssize ? mx_paddr_range(send, ssize) : (mx_paddr){0},
+           c->buf, ssize);
 }
 
 /* ---- IOP memory ----------------------------------------------------------- */
@@ -665,7 +670,7 @@ int mx_iop_read(u32 iop, void *dst, u32 size) {
     w[8] = base;
     w[9] = (u32)(uintptr_t)rd_buf;
     w[10] = len;
-    send_cmd(0, CMD_RPC_RDATA, p, RPC_PKT_SIZE, 0, 0, 0);
+    send_cmd(0, CMD_RPC_RDATA, p, RPC_PKT_SIZE, (mx_paddr){0}, 0, 0);
     if (wait_done(&rdc) < 0)
       return -1;
     const volatile u8 *b = MX_UNCACHED(rd_buf);

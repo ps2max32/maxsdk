@@ -80,302 +80,302 @@ mx_bios_set_common_handler:
 	.end mx_bios_set_common_handler
 	.size mx_bios_set_common_handler, .-mx_bios_set_common_handler
 
-	.globl mx_bios_add_intc_handler
-	.type mx_bios_add_intc_handler, @function
-	.ent mx_bios_add_intc_handler
-mx_bios_add_intc_handler:
+	.globl mx__sys_add_intc_handler
+	.type mx__sys_add_intc_handler, @function
+	.ent mx__sys_add_intc_handler
+mx__sys_add_intc_handler:
 	li $3, 16
 	syscall
 	jr $31
 	nop
-	.end mx_bios_add_intc_handler
-	.size mx_bios_add_intc_handler, .-mx_bios_add_intc_handler
+	.end mx__sys_add_intc_handler
+	.size mx__sys_add_intc_handler, .-mx__sys_add_intc_handler
 
-	.globl mx_bios_remove_intc_handler
-	.type mx_bios_remove_intc_handler, @function
-	.ent mx_bios_remove_intc_handler
-mx_bios_remove_intc_handler:
+	.globl mx__sys_remove_intc_handler
+	.type mx__sys_remove_intc_handler, @function
+	.ent mx__sys_remove_intc_handler
+mx__sys_remove_intc_handler:
 	li $3, 17
 	syscall
 	jr $31
 	nop
-	.end mx_bios_remove_intc_handler
-	.size mx_bios_remove_intc_handler, .-mx_bios_remove_intc_handler
+	.end mx__sys_remove_intc_handler
+	.size mx__sys_remove_intc_handler, .-mx__sys_remove_intc_handler
 
-	.globl mx_bios_add_dmac_handler
-	.type mx_bios_add_dmac_handler, @function
-	.ent mx_bios_add_dmac_handler
-mx_bios_add_dmac_handler:
+	.globl mx__sys_add_dmac_handler
+	.type mx__sys_add_dmac_handler, @function
+	.ent mx__sys_add_dmac_handler
+mx__sys_add_dmac_handler:
 	li $3, 18
 	syscall
 	jr $31
 	nop
-	.end mx_bios_add_dmac_handler
-	.size mx_bios_add_dmac_handler, .-mx_bios_add_dmac_handler
+	.end mx__sys_add_dmac_handler
+	.size mx__sys_add_dmac_handler, .-mx__sys_add_dmac_handler
 
-	.globl mx_bios_remove_dmac_handler
-	.type mx_bios_remove_dmac_handler, @function
-	.ent mx_bios_remove_dmac_handler
-mx_bios_remove_dmac_handler:
+	.globl mx__sys_remove_dmac_handler
+	.type mx__sys_remove_dmac_handler, @function
+	.ent mx__sys_remove_dmac_handler
+mx__sys_remove_dmac_handler:
 	li $3, 19
 	syscall
 	jr $31
 	nop
-	.end mx_bios_remove_dmac_handler
-	.size mx_bios_remove_dmac_handler, .-mx_bios_remove_dmac_handler
+	.end mx__sys_remove_dmac_handler
+	.size mx__sys_remove_dmac_handler, .-mx__sys_remove_dmac_handler
 
-	.globl mx_bios_enable_intc
-	.type mx_bios_enable_intc, @function
-	.ent mx_bios_enable_intc
-mx_bios_enable_intc:
+	.globl mx__sys_enable_intc
+	.type mx__sys_enable_intc, @function
+	.ent mx__sys_enable_intc
+mx__sys_enable_intc:
 	li $3, 20
 	syscall
 	jr $31
 	nop
-	.end mx_bios_enable_intc
-	.size mx_bios_enable_intc, .-mx_bios_enable_intc
+	.end mx__sys_enable_intc
+	.size mx__sys_enable_intc, .-mx__sys_enable_intc
 
-	.globl mx_bios_disable_intc
-	.type mx_bios_disable_intc, @function
-	.ent mx_bios_disable_intc
-mx_bios_disable_intc:
+	.globl mx__sys_disable_intc
+	.type mx__sys_disable_intc, @function
+	.ent mx__sys_disable_intc
+mx__sys_disable_intc:
 	li $3, 21
 	syscall
 	jr $31
 	nop
-	.end mx_bios_disable_intc
-	.size mx_bios_disable_intc, .-mx_bios_disable_intc
+	.end mx__sys_disable_intc
+	.size mx__sys_disable_intc, .-mx__sys_disable_intc
 
-	.globl mx_bios_enable_dmac
-	.type mx_bios_enable_dmac, @function
-	.ent mx_bios_enable_dmac
-mx_bios_enable_dmac:
+	.globl mx__sys_enable_dmac
+	.type mx__sys_enable_dmac, @function
+	.ent mx__sys_enable_dmac
+mx__sys_enable_dmac:
 	li $3, 22
 	syscall
 	jr $31
 	nop
-	.end mx_bios_enable_dmac
-	.size mx_bios_enable_dmac, .-mx_bios_enable_dmac
+	.end mx__sys_enable_dmac
+	.size mx__sys_enable_dmac, .-mx__sys_enable_dmac
 
-	.globl mx_bios_disable_dmac
-	.type mx_bios_disable_dmac, @function
-	.ent mx_bios_disable_dmac
-mx_bios_disable_dmac:
+	.globl mx__sys_disable_dmac
+	.type mx__sys_disable_dmac, @function
+	.ent mx__sys_disable_dmac
+mx__sys_disable_dmac:
 	li $3, 23
 	syscall
 	jr $31
 	nop
-	.end mx_bios_disable_dmac
-	.size mx_bios_disable_dmac, .-mx_bios_disable_dmac
+	.end mx__sys_disable_dmac
+	.size mx__sys_disable_dmac, .-mx__sys_disable_dmac
 
-	.globl mx_bios_ienable_intc
-	.type mx_bios_ienable_intc, @function
-	.ent mx_bios_ienable_intc
-mx_bios_ienable_intc:
+	.globl mx__sys_ienable_intc
+	.type mx__sys_ienable_intc, @function
+	.ent mx__sys_ienable_intc
+mx__sys_ienable_intc:
 	li $3, -26
 	syscall
 	jr $31
 	nop
-	.end mx_bios_ienable_intc
-	.size mx_bios_ienable_intc, .-mx_bios_ienable_intc
+	.end mx__sys_ienable_intc
+	.size mx__sys_ienable_intc, .-mx__sys_ienable_intc
 
-	.globl mx_bios_idisable_intc
-	.type mx_bios_idisable_intc, @function
-	.ent mx_bios_idisable_intc
-mx_bios_idisable_intc:
+	.globl mx__sys_idisable_intc
+	.type mx__sys_idisable_intc, @function
+	.ent mx__sys_idisable_intc
+mx__sys_idisable_intc:
 	li $3, -27
 	syscall
 	jr $31
 	nop
-	.end mx_bios_idisable_intc
-	.size mx_bios_idisable_intc, .-mx_bios_idisable_intc
+	.end mx__sys_idisable_intc
+	.size mx__sys_idisable_intc, .-mx__sys_idisable_intc
 
-	.globl mx_bios_ienable_dmac
-	.type mx_bios_ienable_dmac, @function
-	.ent mx_bios_ienable_dmac
-mx_bios_ienable_dmac:
+	.globl mx__sys_ienable_dmac
+	.type mx__sys_ienable_dmac, @function
+	.ent mx__sys_ienable_dmac
+mx__sys_ienable_dmac:
 	li $3, -28
 	syscall
 	jr $31
 	nop
-	.end mx_bios_ienable_dmac
-	.size mx_bios_ienable_dmac, .-mx_bios_ienable_dmac
+	.end mx__sys_ienable_dmac
+	.size mx__sys_ienable_dmac, .-mx__sys_ienable_dmac
 
-	.globl mx_bios_idisable_dmac
-	.type mx_bios_idisable_dmac, @function
-	.ent mx_bios_idisable_dmac
-mx_bios_idisable_dmac:
+	.globl mx__sys_idisable_dmac
+	.type mx__sys_idisable_dmac, @function
+	.ent mx__sys_idisable_dmac
+mx__sys_idisable_dmac:
 	li $3, -29
 	syscall
 	jr $31
 	nop
-	.end mx_bios_idisable_dmac
-	.size mx_bios_idisable_dmac, .-mx_bios_idisable_dmac
+	.end mx__sys_idisable_dmac
+	.size mx__sys_idisable_dmac, .-mx__sys_idisable_dmac
 
-	.globl mx_bios_create_thread
-	.type mx_bios_create_thread, @function
-	.ent mx_bios_create_thread
-mx_bios_create_thread:
+	.globl mx__sys_create_thread
+	.type mx__sys_create_thread, @function
+	.ent mx__sys_create_thread
+mx__sys_create_thread:
 	li $3, 32
 	syscall
 	jr $31
 	nop
-	.end mx_bios_create_thread
-	.size mx_bios_create_thread, .-mx_bios_create_thread
+	.end mx__sys_create_thread
+	.size mx__sys_create_thread, .-mx__sys_create_thread
 
-	.globl mx_bios_delete_thread
-	.type mx_bios_delete_thread, @function
-	.ent mx_bios_delete_thread
-mx_bios_delete_thread:
+	.globl mx__sys_delete_thread
+	.type mx__sys_delete_thread, @function
+	.ent mx__sys_delete_thread
+mx__sys_delete_thread:
 	li $3, 33
 	syscall
 	jr $31
 	nop
-	.end mx_bios_delete_thread
-	.size mx_bios_delete_thread, .-mx_bios_delete_thread
+	.end mx__sys_delete_thread
+	.size mx__sys_delete_thread, .-mx__sys_delete_thread
 
-	.globl mx_bios_start_thread
-	.type mx_bios_start_thread, @function
-	.ent mx_bios_start_thread
-mx_bios_start_thread:
+	.globl mx__sys_start_thread
+	.type mx__sys_start_thread, @function
+	.ent mx__sys_start_thread
+mx__sys_start_thread:
 	li $3, 34
 	syscall
 	jr $31
 	nop
-	.end mx_bios_start_thread
-	.size mx_bios_start_thread, .-mx_bios_start_thread
+	.end mx__sys_start_thread
+	.size mx__sys_start_thread, .-mx__sys_start_thread
 
-	.globl mx_bios_exit_thread
-	.type mx_bios_exit_thread, @function
-	.ent mx_bios_exit_thread
-mx_bios_exit_thread:
+	.globl mx__sys_exit_thread
+	.type mx__sys_exit_thread, @function
+	.ent mx__sys_exit_thread
+mx__sys_exit_thread:
 	li $3, 35
 	syscall
 	jr $31
 	nop
-	.end mx_bios_exit_thread
-	.size mx_bios_exit_thread, .-mx_bios_exit_thread
+	.end mx__sys_exit_thread
+	.size mx__sys_exit_thread, .-mx__sys_exit_thread
 
-	.globl mx_bios_exit_delete_thread
-	.type mx_bios_exit_delete_thread, @function
-	.ent mx_bios_exit_delete_thread
-mx_bios_exit_delete_thread:
+	.globl mx__sys_exit_delete_thread
+	.type mx__sys_exit_delete_thread, @function
+	.ent mx__sys_exit_delete_thread
+mx__sys_exit_delete_thread:
 	li $3, 36
 	syscall
 	jr $31
 	nop
-	.end mx_bios_exit_delete_thread
-	.size mx_bios_exit_delete_thread, .-mx_bios_exit_delete_thread
+	.end mx__sys_exit_delete_thread
+	.size mx__sys_exit_delete_thread, .-mx__sys_exit_delete_thread
 
-	.globl mx_bios_suspend_thread
-	.type mx_bios_suspend_thread, @function
-	.ent mx_bios_suspend_thread
-mx_bios_suspend_thread:
-	li $3, 55
-	syscall
-	jr $31
-	nop
-	.end mx_bios_suspend_thread
-	.size mx_bios_suspend_thread, .-mx_bios_suspend_thread
-
-	.globl mx_bios_resume_thread
-	.type mx_bios_resume_thread, @function
-	.ent mx_bios_resume_thread
-mx_bios_resume_thread:
-	li $3, 57
-	syscall
-	jr $31
-	nop
-	.end mx_bios_resume_thread
-	.size mx_bios_resume_thread, .-mx_bios_resume_thread
-
-	.globl mx_bios_terminate_thread
-	.type mx_bios_terminate_thread, @function
-	.ent mx_bios_terminate_thread
-mx_bios_terminate_thread:
+	.globl mx__sys_terminate_thread
+	.type mx__sys_terminate_thread, @function
+	.ent mx__sys_terminate_thread
+mx__sys_terminate_thread:
 	li $3, 37
 	syscall
 	jr $31
 	nop
-	.end mx_bios_terminate_thread
-	.size mx_bios_terminate_thread, .-mx_bios_terminate_thread
+	.end mx__sys_terminate_thread
+	.size mx__sys_terminate_thread, .-mx__sys_terminate_thread
 
-	.globl mx_bios_change_thread_priority
-	.type mx_bios_change_thread_priority, @function
-	.ent mx_bios_change_thread_priority
-mx_bios_change_thread_priority:
+	.globl mx__sys_change_thread_priority
+	.type mx__sys_change_thread_priority, @function
+	.ent mx__sys_change_thread_priority
+mx__sys_change_thread_priority:
 	li $3, 41
 	syscall
 	jr $31
 	nop
-	.end mx_bios_change_thread_priority
-	.size mx_bios_change_thread_priority, .-mx_bios_change_thread_priority
+	.end mx__sys_change_thread_priority
+	.size mx__sys_change_thread_priority, .-mx__sys_change_thread_priority
 
-	.globl mx_bios_rotate_thread_ready_queue
-	.type mx_bios_rotate_thread_ready_queue, @function
-	.ent mx_bios_rotate_thread_ready_queue
-mx_bios_rotate_thread_ready_queue:
+	.globl mx__sys_rotate_thread_ready_queue
+	.type mx__sys_rotate_thread_ready_queue, @function
+	.ent mx__sys_rotate_thread_ready_queue
+mx__sys_rotate_thread_ready_queue:
 	li $3, 43
 	syscall
 	jr $31
 	nop
-	.end mx_bios_rotate_thread_ready_queue
-	.size mx_bios_rotate_thread_ready_queue, .-mx_bios_rotate_thread_ready_queue
+	.end mx__sys_rotate_thread_ready_queue
+	.size mx__sys_rotate_thread_ready_queue, .-mx__sys_rotate_thread_ready_queue
 
-	.globl mx_bios_get_thread_id
-	.type mx_bios_get_thread_id, @function
-	.ent mx_bios_get_thread_id
-mx_bios_get_thread_id:
+	.globl mx__sys_get_thread_id
+	.type mx__sys_get_thread_id, @function
+	.ent mx__sys_get_thread_id
+mx__sys_get_thread_id:
 	li $3, 47
 	syscall
 	jr $31
 	nop
-	.end mx_bios_get_thread_id
-	.size mx_bios_get_thread_id, .-mx_bios_get_thread_id
+	.end mx__sys_get_thread_id
+	.size mx__sys_get_thread_id, .-mx__sys_get_thread_id
 
-	.globl mx_bios_refer_thread_status
-	.type mx_bios_refer_thread_status, @function
-	.ent mx_bios_refer_thread_status
-mx_bios_refer_thread_status:
+	.globl mx__sys_suspend_thread
+	.type mx__sys_suspend_thread, @function
+	.ent mx__sys_suspend_thread
+mx__sys_suspend_thread:
+	li $3, 55
+	syscall
+	jr $31
+	nop
+	.end mx__sys_suspend_thread
+	.size mx__sys_suspend_thread, .-mx__sys_suspend_thread
+
+	.globl mx__sys_resume_thread
+	.type mx__sys_resume_thread, @function
+	.ent mx__sys_resume_thread
+mx__sys_resume_thread:
+	li $3, 57
+	syscall
+	jr $31
+	nop
+	.end mx__sys_resume_thread
+	.size mx__sys_resume_thread, .-mx__sys_resume_thread
+
+	.globl mx__sys_refer_thread_status
+	.type mx__sys_refer_thread_status, @function
+	.ent mx__sys_refer_thread_status
+mx__sys_refer_thread_status:
 	li $3, 48
 	syscall
 	jr $31
 	nop
-	.end mx_bios_refer_thread_status
-	.size mx_bios_refer_thread_status, .-mx_bios_refer_thread_status
+	.end mx__sys_refer_thread_status
+	.size mx__sys_refer_thread_status, .-mx__sys_refer_thread_status
 
-	.globl mx_bios_sleep_thread
-	.type mx_bios_sleep_thread, @function
-	.ent mx_bios_sleep_thread
-mx_bios_sleep_thread:
+	.globl mx__sys_sleep_thread
+	.type mx__sys_sleep_thread, @function
+	.ent mx__sys_sleep_thread
+mx__sys_sleep_thread:
 	li $3, 50
 	syscall
 	jr $31
 	nop
-	.end mx_bios_sleep_thread
-	.size mx_bios_sleep_thread, .-mx_bios_sleep_thread
+	.end mx__sys_sleep_thread
+	.size mx__sys_sleep_thread, .-mx__sys_sleep_thread
 
-	.globl mx_bios_wakeup_thread
-	.type mx_bios_wakeup_thread, @function
-	.ent mx_bios_wakeup_thread
-mx_bios_wakeup_thread:
+	.globl mx__sys_wakeup_thread
+	.type mx__sys_wakeup_thread, @function
+	.ent mx__sys_wakeup_thread
+mx__sys_wakeup_thread:
 	li $3, 51
 	syscall
 	jr $31
 	nop
-	.end mx_bios_wakeup_thread
-	.size mx_bios_wakeup_thread, .-mx_bios_wakeup_thread
+	.end mx__sys_wakeup_thread
+	.size mx__sys_wakeup_thread, .-mx__sys_wakeup_thread
 
-	.globl mx_bios_iwakeup_thread
-	.type mx_bios_iwakeup_thread, @function
-	.ent mx_bios_iwakeup_thread
-mx_bios_iwakeup_thread:
+	.globl mx__sys_iwakeup_thread
+	.type mx__sys_iwakeup_thread, @function
+	.ent mx__sys_iwakeup_thread
+mx__sys_iwakeup_thread:
 	li $3, -52
 	syscall
 	jr $31
 	nop
-	.end mx_bios_iwakeup_thread
-	.size mx_bios_iwakeup_thread, .-mx_bios_iwakeup_thread
+	.end mx__sys_iwakeup_thread
+	.size mx__sys_iwakeup_thread, .-mx__sys_iwakeup_thread
 
 	.globl mx_bios_setup_thread
 	.type mx_bios_setup_thread, @function
@@ -399,93 +399,93 @@ mx_bios_setup_heap:
 	.end mx_bios_setup_heap
 	.size mx_bios_setup_heap, .-mx_bios_setup_heap
 
-	.globl mx_bios_create_sema
-	.type mx_bios_create_sema, @function
-	.ent mx_bios_create_sema
-mx_bios_create_sema:
+	.globl mx__sys_create_sema
+	.type mx__sys_create_sema, @function
+	.ent mx__sys_create_sema
+mx__sys_create_sema:
 	li $3, 64
 	syscall
 	jr $31
 	nop
-	.end mx_bios_create_sema
-	.size mx_bios_create_sema, .-mx_bios_create_sema
+	.end mx__sys_create_sema
+	.size mx__sys_create_sema, .-mx__sys_create_sema
 
-	.globl mx_bios_delete_sema
-	.type mx_bios_delete_sema, @function
-	.ent mx_bios_delete_sema
-mx_bios_delete_sema:
+	.globl mx__sys_delete_sema
+	.type mx__sys_delete_sema, @function
+	.ent mx__sys_delete_sema
+mx__sys_delete_sema:
 	li $3, 65
 	syscall
 	jr $31
 	nop
-	.end mx_bios_delete_sema
-	.size mx_bios_delete_sema, .-mx_bios_delete_sema
+	.end mx__sys_delete_sema
+	.size mx__sys_delete_sema, .-mx__sys_delete_sema
 
-	.globl mx_bios_signal_sema
-	.type mx_bios_signal_sema, @function
-	.ent mx_bios_signal_sema
-mx_bios_signal_sema:
+	.globl mx__sys_signal_sema
+	.type mx__sys_signal_sema, @function
+	.ent mx__sys_signal_sema
+mx__sys_signal_sema:
 	li $3, 66
 	syscall
 	jr $31
 	nop
-	.end mx_bios_signal_sema
-	.size mx_bios_signal_sema, .-mx_bios_signal_sema
+	.end mx__sys_signal_sema
+	.size mx__sys_signal_sema, .-mx__sys_signal_sema
 
-	.globl mx_bios_isignal_sema
-	.type mx_bios_isignal_sema, @function
-	.ent mx_bios_isignal_sema
-mx_bios_isignal_sema:
+	.globl mx__sys_isignal_sema
+	.type mx__sys_isignal_sema, @function
+	.ent mx__sys_isignal_sema
+mx__sys_isignal_sema:
 	li $3, -67
 	syscall
 	jr $31
 	nop
-	.end mx_bios_isignal_sema
-	.size mx_bios_isignal_sema, .-mx_bios_isignal_sema
+	.end mx__sys_isignal_sema
+	.size mx__sys_isignal_sema, .-mx__sys_isignal_sema
 
-	.globl mx_bios_wait_sema
-	.type mx_bios_wait_sema, @function
-	.ent mx_bios_wait_sema
-mx_bios_wait_sema:
+	.globl mx__sys_wait_sema
+	.type mx__sys_wait_sema, @function
+	.ent mx__sys_wait_sema
+mx__sys_wait_sema:
 	li $3, 68
 	syscall
 	jr $31
 	nop
-	.end mx_bios_wait_sema
-	.size mx_bios_wait_sema, .-mx_bios_wait_sema
+	.end mx__sys_wait_sema
+	.size mx__sys_wait_sema, .-mx__sys_wait_sema
 
-	.globl mx_bios_poll_sema
-	.type mx_bios_poll_sema, @function
-	.ent mx_bios_poll_sema
-mx_bios_poll_sema:
+	.globl mx__sys_poll_sema
+	.type mx__sys_poll_sema, @function
+	.ent mx__sys_poll_sema
+mx__sys_poll_sema:
 	li $3, 69
 	syscall
 	jr $31
 	nop
-	.end mx_bios_poll_sema
-	.size mx_bios_poll_sema, .-mx_bios_poll_sema
+	.end mx__sys_poll_sema
+	.size mx__sys_poll_sema, .-mx__sys_poll_sema
 
-	.globl mx_bios_ipoll_sema
-	.type mx_bios_ipoll_sema, @function
-	.ent mx_bios_ipoll_sema
-mx_bios_ipoll_sema:
+	.globl mx__sys_ipoll_sema
+	.type mx__sys_ipoll_sema, @function
+	.ent mx__sys_ipoll_sema
+mx__sys_ipoll_sema:
 	li $3, -70
 	syscall
 	jr $31
 	nop
-	.end mx_bios_ipoll_sema
-	.size mx_bios_ipoll_sema, .-mx_bios_ipoll_sema
+	.end mx__sys_ipoll_sema
+	.size mx__sys_ipoll_sema, .-mx__sys_ipoll_sema
 
-	.globl mx_bios_refer_sema_status
-	.type mx_bios_refer_sema_status, @function
-	.ent mx_bios_refer_sema_status
-mx_bios_refer_sema_status:
+	.globl mx__sys_refer_sema_status
+	.type mx__sys_refer_sema_status, @function
+	.ent mx__sys_refer_sema_status
+mx__sys_refer_sema_status:
 	li $3, 71
 	syscall
 	jr $31
 	nop
-	.end mx_bios_refer_sema_status
-	.size mx_bios_refer_sema_status, .-mx_bios_refer_sema_status
+	.end mx__sys_refer_sema_status
+	.size mx__sys_refer_sema_status, .-mx__sys_refer_sema_status
 
 	.globl mx_bios_enable_intc_handler
 	.type mx_bios_enable_intc_handler, @function

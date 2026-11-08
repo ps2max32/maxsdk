@@ -1,3 +1,4 @@
+#include <mx/bios.h>
 #include <mx/debug.h>
 #include <mx/dma.h>
 #include <mx/frame.h>
@@ -77,12 +78,15 @@ void mx__frame_stalled(const char *what) {
   mx_printf("mx_frame: %s for 1 s: frames %u done %u shown %u (immediate %u); VIF1_STAT %08x "
             "VIF1_CODE %08x VIF1_MARK %04x (%u interrupts) "
             "VIF1 CHCR %08x MADR %08x TADR %08x; GIF_STAT %08x GIF CHCR %08x MADR %08x; "
-            "VPU_STAT %08x\n",
+            "VPU_STAT %08x; INTC %04x/%04x (GS %u, vblank %u interrupts); GS CSR %08x IMR %04x; D_STAT %08x D_CTRL %08x\n",
             what, mx_gs.frames, mx_gs.frames_done, mx_gs.shown, mx_gs.immediate,
             MX_R32(MX_VIF_VIF1_STAT), MX_R32(MX_VIF_VIF1_CODE), MX_R32(MX_VIF_VIF1_MARK),
             mx_irq_intc_count(MX_INTC_VIF1), MX_DMA_REG(MX_CH_VIF1, CHCR),
             MX_DMA_REG(MX_CH_VIF1, MADR), MX_DMA_REG(MX_CH_VIF1, TADR), MX_R32(MX_GIF_STAT),
-            MX_DMA_REG(MX_CH_GIF, CHCR), MX_DMA_REG(MX_CH_GIF, MADR), mx_vpu_stat());
+            MX_DMA_REG(MX_CH_GIF, CHCR), MX_DMA_REG(MX_CH_GIF, MADR), mx_vpu_stat(),
+            MX_R32(MX_I_STAT), MX_R32(MX_I_MASK), mx_irq_intc_count(MX_INTC_GS),
+            mx_irq_intc_count(MX_INTC_VBON), (u32)MX_R64(MX_GS_CSR),
+            (u32)mx_bios_gs_get_imr(), MX_R32(MX_D_STAT), MX_R32(MX_D_CTRL));
   /* the VIF1 chain's tags before TADR (uncached: DMA wrote them) */
   u32 t = MX_DMA_REG(MX_CH_VIF1, TADR) & 0x1FFFFFF0u;
   if (t >= 0x100080 && t < 0x2000000)

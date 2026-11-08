@@ -25,14 +25,16 @@ memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-
   removed first) or `MXOS/BOOT.CFG` (`mc?:/MXOS/MXLINK.ELF`). A new mxlink or program is tried as
   the one-shot: if it hangs, a reset boots the default again.
 - Start: mxlink loads the ELF (from `host:`, `usb0:`, `mx4sio0:`, `ata0:`, ...) and runs it in a thread
-  at priority 64. End: back to mxlink, then the shell (`mc0:/MXOS/MXSHELL.ELF`) if it started
+  at priority 64: one of the kernel's own threads for a `libmxk` program of version 10, which
+  uses the kernel's threads, semaphores and interrupt dispatch (`kernel.md`, Interrupts and
+  threads); for every other program mxlink first starts again with the BIOS's threads. End: back to mxlink, then the shell (`mc0:/MXOS/MXSHELL.ELF`) if it started
   the program. A `libmxk` program (version 8 on) ends without a restart: the kernel removes its
   threads, semaphores and interrupt handlers, waits for its IOP calls, resets the units and
   empties the caches (`kernel.md`, The end of a program).
 
 | Who | Owns |
 |---|---|
-| Kernel (mxlink) | IOP, SIF, program start and end, TLB and VM, heaps, files, exceptions, the pad (`libmxk`); later sound |
+| Kernel (mxlink) | IOP, SIF, program start and end, TLB and VM, heaps, files, exceptions, the pad, threads, semaphores and interrupt dispatch (`libmxk`); later sound |
 | Program | GS, VIF, VU, DMAC, its frame loop |
 
 ## Memory (EE)

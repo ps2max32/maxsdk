@@ -77,6 +77,85 @@ int mx_bios_machine_type(void);
 void mx_bios_get_gs_dxdy_offset(int mode, int *dx, int *dy, int *dw, int *dh);
 int mx_bios_get_memory_size(void);
 
+/* The threads, semaphores and interrupt handlers are the kernel's under
+   mx-kernel (docs/mx-os-plan.md, step 2d): the calls above go to its table
+   when it has set mx__kthreads (src/base/ksys.c), else to the BIOS's own
+   syscalls, here. */
+int mx__sys_add_intc_handler(int cause, int (*handler)(int cause, void *arg, void *addr), int next, void *arg);
+int mx__sys_remove_intc_handler(int cause, int id);
+int mx__sys_add_dmac_handler(int channel, int (*handler)(int channel, void *arg, void *addr), int next, void *arg);
+int mx__sys_remove_dmac_handler(int channel, int id);
+int mx__sys_enable_intc(int cause);
+int mx__sys_disable_intc(int cause);
+int mx__sys_enable_dmac(int channel);
+int mx__sys_disable_dmac(int channel);
+int mx__sys_ienable_intc(int cause);
+int mx__sys_idisable_intc(int cause);
+int mx__sys_ienable_dmac(int channel);
+int mx__sys_idisable_dmac(int channel);
+int mx__sys_create_thread(void *param);
+int mx__sys_delete_thread(int id);
+int mx__sys_start_thread(int id, void *arg);
+void mx__sys_exit_thread(void);
+void mx__sys_exit_delete_thread(void);
+int mx__sys_terminate_thread(int id);
+int mx__sys_change_thread_priority(int id, int priority);
+int mx__sys_rotate_thread_ready_queue(int priority);
+int mx__sys_get_thread_id(void);
+int mx__sys_suspend_thread(int id);
+int mx__sys_resume_thread(int id);
+int mx__sys_refer_thread_status(int id, void *status);
+int mx__sys_sleep_thread(void);
+int mx__sys_wakeup_thread(int id);
+int mx__sys_iwakeup_thread(int id);
+int mx__sys_create_sema(void *param);
+int mx__sys_delete_sema(int id);
+int mx__sys_signal_sema(int id);
+int mx__sys_isignal_sema(int id);
+int mx__sys_wait_sema(int id);
+int mx__sys_poll_sema(int id);
+int mx__sys_ipoll_sema(int id);
+int mx__sys_refer_sema_status(int id, void *status);
+
+struct mx_kthreads {
+  int (*add_intc_handler)(int cause, int (*handler)(int cause, void *arg, void *addr), int next, void *arg);
+  int (*remove_intc_handler)(int cause, int id);
+  int (*add_dmac_handler)(int channel, int (*handler)(int channel, void *arg, void *addr), int next, void *arg);
+  int (*remove_dmac_handler)(int channel, int id);
+  int (*enable_intc)(int cause);
+  int (*disable_intc)(int cause);
+  int (*enable_dmac)(int channel);
+  int (*disable_dmac)(int channel);
+  int (*ienable_intc)(int cause);
+  int (*idisable_intc)(int cause);
+  int (*ienable_dmac)(int channel);
+  int (*idisable_dmac)(int channel);
+  int (*create_thread)(void *param);
+  int (*delete_thread)(int id);
+  int (*start_thread)(int id, void *arg);
+  void (*exit_thread)(void);
+  void (*exit_delete_thread)(void);
+  int (*terminate_thread)(int id);
+  int (*change_thread_priority)(int id, int priority);
+  int (*rotate_thread_ready_queue)(int priority);
+  int (*get_thread_id)(void);
+  int (*suspend_thread)(int id);
+  int (*resume_thread)(int id);
+  int (*refer_thread_status)(int id, void *status);
+  int (*sleep_thread)(void);
+  int (*wakeup_thread)(int id);
+  int (*iwakeup_thread)(int id);
+  int (*create_sema)(void *param);
+  int (*delete_sema)(int id);
+  int (*signal_sema)(int id);
+  int (*isignal_sema)(int id);
+  int (*wait_sema)(int id);
+  int (*poll_sema)(int id);
+  int (*ipoll_sema)(int id);
+  int (*refer_sema_status)(int id, void *status);
+};
+extern const struct mx_kthreads *mx__kthreads;
+
 #ifdef __cplusplus
 }
 #endif

@@ -42,6 +42,9 @@ static void find_kernel(const struct mx_loader_args *l) {
   mx__kernel = k;
   loader_ret = k->exit;
   loader_launch = k->launch;
+  /* version 10: its threads, semaphores and interrupt handlers (ksys.c) */
+  if (k->version >= 10 && k->kthreads)
+    mx__kthreads = k->kthreads;
 #else
   (void)l;
 #endif
@@ -184,7 +187,9 @@ void mx__main(void) {
   if (loader_args_ok(l) && l->pid == MX_LOADER_MAGIC) {
     by_mxload = 1;
     a = copy_mxload_args(&l->args);
-  } else if (a->argc == 0 && loader_args_ok(l) && l->args.argc != 0)
+  } else if ((a->argc == 0 || mx__kthreads) && loader_args_ok(l) && l->args.argc != 0)
+    /* on the kernel's threads SetupThread answers for the BIOS thread they
+       all run on, the kernel's own: its arguments are not the program's */
     a = &l->args;
 
 #ifndef MX_KERNEL

@@ -12,12 +12,13 @@
 #include <mx/debug.h>
 #include <mx/mem.h>
 #include <mx/sif.h>
+#include <mx/bios.h>
 #include <mx/types.h>
 #include <mx/video.h>
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 9
+#define MX_KERNEL_VERSION 10
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -180,6 +181,10 @@ struct mxk_services {
   /* version 8: a program ends without a restart (docs/mx-os-plan.md, 2a):
      the kernel is told where its interrupt slots are */
   void (*irq_tables)(const struct mxk_irq_tables *t);
+  /* version 10: the kernel's threads, semaphores and interrupt handlers
+     (docs/mx-os-plan.md, step 2d): maxsdk's mx_bios_* calls for them go
+     there (src/base/ksys.c) */
+  const struct mx_kthreads *kthreads;
 };
 /* the size of a table of version MX_KERNEL_MIN */
 #define MXK_MIN_SIZE __builtin_offsetof(struct mxk_services, pad_init)

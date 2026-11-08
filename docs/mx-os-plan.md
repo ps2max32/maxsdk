@@ -198,6 +198,18 @@ address space, or as events (the frame pipeline waits for its vblank).
     threads stay for the kernel's own start and for programs not on `libmxk`; a `libmxk`
     program's threads are the kernel's (`mx_thread_*`, `<mx/sched.h>`, and the semaphores
     maxsdk uses: SIF waits, the VM lock, `mx_sleep_us`).
+    Done 2026-11-08 (kernel version 10; `kernel.md`, Interrupts and threads): the threads,
+    semaphores and interrupt handlers of the kernel and of `libmxk` programs of version 10 are
+    the kernel's (`tools/mxlink/ee/ksched.c`, `ksched.S`), on one BIOS thread; the kernel owns
+    both interrupt lines and goes into the BIOS's handler no more; other programs run after a
+    restart with the BIOS's threads. On the PS2 the VM tests (vm11-vm30), k29 with vm26 and
+    with Quake as the other, and Quake itself. Learned: `mx_di` clears EIE, not IE (a context's
+    interrupt state is both); the BIOS's `EnableIntc`/`EnableDmac` leave a cause off that has
+    no BIOS handler; the handlers' order is the BIOS's (`next` 0 first: the kernel's screen
+    acknowledges the GS's FINISH before a program's handler saw it, and the frame pipeline
+    stopped); `SetupThread` gives the carrier's arguments. Open: the first program after a
+    restart into the kernel's threads ends with five semaphores counted as left (the kernel's,
+    made while it ran: 2d-3's processes tell them apart).
   - *2d-3, processes.* A process is its threads, ASID and core run: the switch sets the ASID and
     VU0's registers when the next thread is another process's; a process is suspended and
     resumed whole (2c's `exec_park` on it), and its end is its list, not a search of the
