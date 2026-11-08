@@ -235,6 +235,14 @@ static void key_put(const u8 *addr, const u8 *key, int kind) {
 
 void bt_known(const u8 addr[6], int kind) { key_put(addr, 0, kind); }
 
+void bt_kind(const u8 addr[6], int kind) {
+  int i = key_find(addr);
+  if (i >= 0 && keys[i].kind != kind) {
+    keys[i].kind = (u8)kind;
+    keys_dirty = 1;
+  }
+}
+
 /* ---- the pairings on the memory card ----
    mc0:/MXOS/BTPADS.DAT: "MXBT", a version, the count, then per pad its
    address (HCI byte order), kind, whether it has a key, and the key. Read

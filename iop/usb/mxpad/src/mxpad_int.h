@@ -24,6 +24,8 @@ void mxpad_close(int slot);
 void mxpad_slot_rgb(int slot, u8 rgb[3]);
 /* bt.c: a pad that will connect without a link key (the DS3), paired over USB */
 void bt_known(const u8 addr[6], int kind);
+/* bt.c: the kind of a pad with a key (bt_new_key keeps a DS4's) */
+void bt_kind(const u8 addr[6], int kind);
 /* bt.c: the pad at addr came on USB: its Bluetooth link goes (its slot is
    freed at once); 1 if it had one */
 int bt_drop(const u8 addr[6]);

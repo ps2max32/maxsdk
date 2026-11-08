@@ -371,8 +371,20 @@ static void pair(struct pad *p) {
     r = control(p, 0x21, 0x09, 0x03f5, 8, b);
     if (!r)
       bt_known(me, MXPAD_DS3);
+  } else if (p->kind == MXPAD_DS5) {
+    /* feature 0x0A (26 bytes, its report descriptor says): the host's
+       address and the link key as the DS4's 0x13, then 4 bytes left 0. Not in
+       Linux; feature 0x09 read back shows the host it took */
+    memset(b, 0, 27);
+    b[0] = 0x0a;
+    memcpy(b + 1, host, 6);
+    bt_new_key(me, b + 7);
+    bt_kind(me, MXPAD_DS5);
+    r = control(p, 0x21, 0x09, 0x030a, 27, b);
+    if (!r && !control(p, 0xa1, 0x01, 0x0309, 20, b) && p->bytes >= 16)
+      addr_print("mxpad: DualSense: feature 0x09 now says host", b + 10), printf("\n");
   } else {
-    return; /* the DualSense pairs over Bluetooth (step 3) */
+    return;
   }
   printf("mxpad: slot %d: ", p->slot);
   if (r) {
@@ -422,6 +434,49 @@ static void open_pipes(struct pad *p) {
     p->in_size = sizeof p->rep;
 }
 
+/* the feature reports in the pad's HID report descriptor: id and bytes (a
+   look at what a pad offers; only shown) */
+static u8 rdesc[512] __attribute__((aligned(16)));
+
+static void show_features(struct pad *p) {
+  int len = 0;
+  UsbConfigDescriptor *c = sceUsbdScanStaticDescriptor(p->id, sceUsbdScanStaticDescriptor(p->id, 0, USB_DT_DEVICE),
+                                                       USB_DT_CONFIG);
+  u8 *q = (u8 *)c, *end = q + c->wTotalLength;
+  int here = 0;
+  for (; q < end && q[0] >= 2; q += q[0]) {
+    if (q[1] == USB_DT_INTERFACE)
+      here = q[2] == p->intf;
+    else if (here && q[1] == 0x21 && q[0] >= 9)
+      len = q[7] | q[8] << 8;
+  }
+  if (len <= 0 || len > (int)sizeof rdesc ||
+      control(p, 0x81, 0x06, 0x2200, len, rdesc) || p->bytes != len) {
+    printf("mxpad: report descriptor (%d bytes): not read\n", len);
+    return;
+  }
+  u32 id = 0, size = 0, count = 0, bits[256] = {0};
+  for (int i = 0; i < len;) {
+    u8 b = rdesc[i];
+    int n = (b & 3) == 3 ? 4 : (b & 3);
+    u32 v = 0;
+    for (int k = 0; k < n && i + 1 + k < len; k++)
+      v |= (u32)rdesc[i + 1 + k] << (8 * k);
+    switch (b & 0xfc) {
+    case 0x84: id = v & 0xff; break;   /* Report ID */
+    case 0x74: size = v; break;        /* Report Size */
+    case 0x94: count = v; break;       /* Report Count */
+    case 0xb0: bits[id] += size * count; break; /* Feature */
+    }
+    i += 1 + n;
+  }
+  printf("mxpad: feature reports (id: bytes after the id):");
+  for (int i = 0; i < 256; i++)
+    if (bits[i])
+      printf(" %02x:%u", i, bits[i] / 8);
+  printf("\n");
+}
+
 /* the pad's Bluetooth address (HCI byte order), from its feature reports */
 static void read_addr(struct pad *p) {
   u8 *b = p->buf;
@@ -453,6 +508,8 @@ static void pad_thread(void *arg) {
     }
   }
   if (!r) {
+    if (p->kind == MXPAD_DS5)
+      show_features(p);
     read_addr(p);
     /* plugged in while its Bluetooth link is up: that link goes, its slot is this one's */
     int had = p->has_addr ? slot_of_addr(p->addr) : -1;

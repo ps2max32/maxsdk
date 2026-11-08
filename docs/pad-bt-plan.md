@@ -116,8 +116,8 @@ not the pads).
 - DS4: paired over USB (feature report `0x13`: host BD_ADDR and link key) or over Bluetooth
   (Share + PS, SSP). It starts with the short report `0x01`; reading feature report `0x02`
   switches it to the full `0x11`. Output `0x11` carries a CRC32.
-- DS5: paired over Bluetooth (Create + PS, SSP); whether it can be paired over USB is to be
-  checked. Full input report `0x31`; output `0x31` with a CRC32.
+- DS5: paired over Bluetooth (Create + PS, SSP), or over USB (feature `0x0A`, see the state
+  below). Full input report `0x31`; output `0x31` with a CRC32.
 - Link keys and pad addresses in `mc0:/MXOS/BT.CFG` (through mxio).
 - Reconnect: a paired pad connects to the host when its PS button is pressed.
 
@@ -154,6 +154,11 @@ feature `0x05` (Linux reads the calibration so): `0x31`, a sequence byte, then t
 bytes after its id. Its light: output report `0x31` (sequence in the high nibble, tag `0x10`,
 then the USB report 2's bytes from its flags, CRC32). Its battery byte (53) read 0 over USB and
 Bluetooth: by Linux's layout the lowest level, the pad nearly empty (its link timed out once).
+The DualSense can be paired over USB too (2026-11-08; not in Linux): its report descriptor has
+feature `0x0A` of 26 bytes besides `0x09` (19: its address, its class `002508`, the host's
+address, as the DS4's `0x12`). Written as the DS4's `0x13` (the host's address, the link key,
+then 4 bytes left 0), `0x09` read back gives the dongle as its host, and on battery it connects
+with that key when its PS button is pressed.
 The pairings are kept in `mc0:/MXOS/BTPADS.DAT` (address, kind, key; up to 8), read when a
 dongle comes up and written by mxpad's Bluetooth thread after a new key: after an IOP reset the
 DS4 connects with its key without the cable first. On the PS2 the DS4's light over Bluetooth
