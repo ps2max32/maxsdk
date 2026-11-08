@@ -207,13 +207,15 @@ address space, or as events (the frame pipeline waits for its vblank).
     interrupt state is both); the BIOS's `EnableIntc`/`EnableDmac` leave a cause off that has
     no BIOS handler; the handlers' order is the BIOS's (`next` 0 first: the kernel's screen
     acknowledges the GS's FINISH before a program's handler saw it, and the frame pipeline
-    stopped); `SetupThread` gives the carrier's arguments. Open: the first program after a
-    restart into the kernel's threads ends with five semaphores counted as left (the kernel's,
-    made while it ran: 2d-3's processes tell them apart).
+    stopped); `SetupThread` gives the carrier's arguments.
   - *2d-3, processes.* A process is its threads, ASID and core run: the switch sets the ASID and
     VU0's registers when the next thread is another process's; a process is suspended and
     resumed whole (2c's `exec_park` on it), and its end is its list, not a search of the
     BIOS's ids.
+    First part done 2026-11-08: every thread and semaphore has a process (the maker's; a
+    program's first thread a new one, 0 the kernel's), and a program's end takes its process's
+    instead of what was not there at its start. Before, the first program after a restart into
+    the kernel's threads took a semaphore the kernel made while it ran, and left five.
   - *2d-4, interrupts per process.* The INTC and DMAC handlers of a process run under its ASID
     when it is the current one, else its event is counted and seen when it runs again; the
     kernel's own (SIF, VM, home menu) always run.

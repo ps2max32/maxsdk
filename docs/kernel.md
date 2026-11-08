@@ -123,8 +123,10 @@ version 10, the launch's arguments, swap file and the shell kept over the restar
 A `libmxk` program (one that called the kernel's `program` service) ends **without a restart**
 (version 8, `tools/mxlink/ee/end.c`): its way back (`mx_exit`, a crash, BIOS `Exit`) wakes the
 command thread and sleeps; the command thread then does what ExecPS2 did:
-- the threads and semaphores (the kernel's, or the BIOS's for a program on them) that were not
-  there just before the program started are terminated and deleted (the program's, the VM's pager and writer, its clients' semaphores);
+- the program's threads and semaphores are terminated and deleted: on the kernel's threads those
+  of its process (a thread or semaphore is the process's of the thread that made it; a program's
+  first thread gets a process of its own, `tools/mxlink/ee/ksched.c`), on the BIOS's those that
+  were not there just before the program started (the program's, the VM's pager and writer, its clients' semaphores);
 - the program's interrupt handlers are removed: its `libmxk` told the kernel where its slots
   are (`irq_tables`), the kernel reads their BIOS ids and runs none of the program's code; a
   cause or channel without a handler of the kernel's own is disabled;
