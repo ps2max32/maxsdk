@@ -80,6 +80,16 @@ takes all memory: the waiting program is given up and ends with it (its threads 
 go with the other's), and mxlink goes on as before (the shell starts again). The kernel's VM state is cleared by the
 restart after each program.
 
+## Interrupts
+
+The kernel is first at every INTC and DMAC interrupt (`tools/mxlink/ee/kirq.S`, `kirq.c`;
+`docs/bios.md`): the BIOS's interrupt table at 0x8001_5380 points its entries 2 and 3 at the
+kernel's entry, through kseg0, which saves the registers C may change, runs `kirq()` on a
+stack of its own and goes on into the BIOS's handler (the step towards the kernel's own
+dispatch and thread switch, `docs/mx-os-plan.md` 2d). Only while the kernel or a program with
+its note runs: before a program without it or a loader (ExecPS2) the table is the BIOS's
+again, so one that loads another loader over the kernel finds the BIOS as it was.
+
 ## The end of a program
 
 A `libmxk` program (one that called the kernel's `program` service) ends **without a restart**

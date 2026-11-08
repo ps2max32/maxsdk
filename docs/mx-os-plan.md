@@ -166,7 +166,12 @@ address space, or as events (the frame pipeline waits for its vblank).
     that the kernel is first. Measured: the cost per interrupt.
     Probed 2026-11-08 (`probe/p37_irqhook.c`, `bios.md`): the vector takes its handler from a
     table in RAM (0x8001_5380: INTC index 2, DMAC 3), so the kernel only writes two words; a
-    stub there saw every vblank, at no measurable cost. Next: the kernel's own entry there.
+    stub there saw every vblank, at no measurable cost. In the kernel the same day
+    (`tools/mxlink/ee/kirq.S`, `kirq.c`): its entry saves the registers C may change, runs
+    `kirq()` on a stack of its own and goes on into the BIOS's handler; on while the kernel or
+    a program built for it runs, the BIOS's table again before a program without the note or a
+    loader. On the PS2 the VM tests, Quake, k29 and mxloader's paths as before, the entry
+    counting every INTC and DMAC interrupt.
   - *2d-2, the kernel's threads.* A thread record per thread (all registers, 128-bit GPRs, HI/LO,
     SA, the FPU; VU0's per process), ready queues by priority as the BIOS's, the switch at the
     return from an interrupt and in the kernel's calls (sleep, wake, wait, signal). The BIOS's
