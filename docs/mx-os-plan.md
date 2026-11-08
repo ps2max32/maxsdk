@@ -159,10 +159,38 @@ it takes over the interrupt dispatch and the return from an interrupt, where a s
 semaphores and sleep with it. Interrupts become the kernel's: a process's handlers run in its
 address space, or as events (the frame pipeline waits for its vblank).
 
-**2e. Both run.** mxloader draws while a game is paused (its threads suspended, its GS memory
+  The way there, each on the PS2 on its own:
+  - *2d-1, the interrupt entry.* A probe puts the kernel's code at the interrupt vector
+    (0x8000_0200, written from a `SetSyscall` handler, which runs in kernel mode), which saves
+    what the BIOS's own entry saves, counts, and goes on into the BIOS's: nothing changes but
+    that the kernel is first. Measured: the cost per interrupt.
+    Probed 2026-11-08 (`probe/p37_irqhook.c`, `bios.md`): the vector takes its handler from a
+    table in RAM (0x8001_5380: INTC index 2, DMAC 3), so the kernel only writes two words; a
+    stub there saw every vblank, at no measurable cost. Next: the kernel's own entry there.
+  - *2d-2, the kernel's threads.* A thread record per thread (all registers, 128-bit GPRs, HI/LO,
+    SA, the FPU; VU0's per process), ready queues by priority as the BIOS's, the switch at the
+    return from an interrupt and in the kernel's calls (sleep, wake, wait, signal). The BIOS's
+    threads stay for the kernel's own start and for programs not on `libmxk`; a `libmxk`
+    program's threads are the kernel's (`mx_thread_*`, `<mx/sched.h>`, and the semaphores
+    maxsdk uses: SIF waits, the VM lock, `mx_sleep_us`).
+  - *2d-3, processes.* A process is its threads, ASID and core run: the switch sets the ASID and
+    VU0's registers when the next thread is another process's; a process is suspended and
+    resumed whole (2c's `exec_park` on it), and its end is its list, not a search of the
+    BIOS's ids.
+  - *2d-4, interrupts per process.* The INTC and DMAC handlers of a process run under its ASID
+    when it is the current one, else its event is counted and seen when it runs again; the
+    kernel's own (SIF, VM, home menu) always run.
+
+**2e. mxlink a program.** `MXLINK.ELF` is the kernel and the host link in one. Split: the
+kernel (`MXOS.ELF`: the boot, its services, processes, the scheduler, the home menu) and mxlink,
+a `libmxk` program started at the boot beside mxloader: ps2link's protocol with ps2client,
+`host:` files, the console and its screen. With 2d's threads it answers the host while a game
+runs (now it cannot), and in step 3 it is a window like the others.
+
+**2f. Both run.** mxloader draws while a game is paused (its threads suspended, its GS memory
 kept), and the game goes on when mxloader gives it back: the base of step 3's windows.
 
-**2f. The BIOS only at the boot.** After 2d what the kernel still asks of the BIOS is its own
+**2g. The BIOS only at the boot.** After 2d what the kernel still asks of the BIOS is its own
 too: the SIF DMA queue (SifSetDma), the video mode (SetGsCrt), the caches, the program's start
 (SetupThread, SetupHeap). Then the BIOS's memory (0x0 - 0x7_FFFF, its code and tables) is the
 kernel's, all of the first MiB: room the kernel needs (mxlink's area 0x8_8000 - 0xF_F800 is
