@@ -172,6 +172,26 @@ address space, or as events (the frame pipeline waits for its vblank).
     a program built for it runs, the BIOS's table again before a program without the note or a
     loader. On the PS2 the VM tests, Quake, k29 and mxloader's paths as before, the entry
     counting every INTC and DMAC interrupt.
+  - *How (chosen 2026-11-08: all threads the kernel's).* The BIOS's INTC handler
+    (0x8000_0380, dumped) handles one cause per interrupt: it clears EXL, IE and KSU, saves the
+    thread's context through BIOS routines, acknowledges the cause in I_STAT, clears a
+    "reschedule" flag (0x8001_55B4) that the `i…` calls set, runs the cause's handlers and then
+    switches BIOS threads if the flag is set. A kernel dispatch that only took the handlers over
+    would still need that switch, at BIOS addresses of one version. So dispatch, threads and
+    semaphores become the kernel's together: every thread of the kernel and of `libmxk`
+    programs is a kernel thread, run on one BIOS thread (the carrier: the BIOS sees one thread
+    and never switches); the kernel's interrupt entry dispatches the causes it owns itself (EPC
+    and Status saved, EXL cleared as the BIOS does, so a TLB refill in a handler works), its
+    handlers wake and signal with plain functions (no syscalls), and at the end of the entry, if
+    a thread of higher priority is ready, it saves the interrupted thread's whole context, sets
+    the next one's ASID and VU0 registers and returns into it by ERET. Causes it does not own go
+    on into the BIOS's handler. A thread that waits switches in its own call (user mode). With
+    nothing ready, an idle thread. maxsdk's `mx_bios_*` thread and semaphore calls are weak, the
+    kernel's own replace them in the kernel; `libmxk` gets them as kernel services. Programs not
+    on `libmxk` keep the BIOS's threads: they run alone, the carrier asleep meanwhile.
+    Probed 2026-11-08 (`probe/p38_ksched.c`): the kernel's own switch at the return from an
+    interrupt, two threads on one BIOS thread switched at each vblank by ERET into the other's
+    saved context, works on the PS2.
   - *2d-2, the kernel's threads.* A thread record per thread (all registers, 128-bit GPRs, HI/LO,
     SA, the FPU; VU0's per process), ready queues by priority as the BIOS's, the switch at the
     return from an interrupt and in the kernel's calls (sleep, wake, wait, signal). The BIOS's
