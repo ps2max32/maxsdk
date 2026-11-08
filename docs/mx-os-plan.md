@@ -216,9 +216,14 @@ address space, or as events (the frame pipeline waits for its vblank).
     program's first thread a new one, 0 the kernel's), and a program's end takes its process's
     instead of what was not there at its start. Before, the first program after a restart into
     the kernel's threads took a semaphore the kernel made while it ran, and left five.
+    A parked process (2c) is suspended whole by the same lists. The switch itself (the ASID,
+    the core's TLB slots, VU0's registers at a change of process) moves to 2f: until then one
+    process runs and the other is parked with all its threads, so no switch goes from one to
+    the other and the code could not be tried.
   - *2d-4, interrupts per process.* The INTC and DMAC handlers of a process run under its ASID
     when it is the current one, else its event is counted and seen when it runs again; the
-    kernel's own (SIF, VM, home menu) always run.
+    kernel's own (SIF, VM, home menu) always run. Moved to 2f with the switch, for the same
+    reason: today the parked process's handlers are removed with it.
 
 **2e. mxlink a program.** `MXLINK.ELF` is the kernel and the host link in one. Split: the
 kernel (`MXOS.ELF`: the boot, its services, processes, the scheduler, the home menu) and mxlink,
@@ -228,6 +233,8 @@ runs (now it cannot), and in step 3 it is a window like the others.
 
 **2f. Both run.** mxloader draws while a game is paused (its threads suspended, its GS memory
 kept), and the game goes on when mxloader gives it back: the base of step 3's windows.
+Here two processes first run side by side, so 2d-3's switch (ASID, core TLB slots, VU0) and
+2d-4's interrupts per process come with it.
 
 **2g. The BIOS only at the boot.** After 2d what the kernel still asks of the BIOS is its own
 too: the SIF DMA queue (SifSetDma), the video mode (SetGsCrt), the caches, the program's start
