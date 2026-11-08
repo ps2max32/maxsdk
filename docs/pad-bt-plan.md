@@ -183,6 +183,14 @@ the ports for a pad that was there before (it keeps port 0 from the start).
 
 ### 4. Kernel and home menu
 
+State (2026-11-08): the home button is `MX_PAD_HOME` (step 1b); the menu itself is parked. It
+does not open over `tests/ps2/vm24_home.c` on a PAL PS2, and never did: `mx_gs_init_mode(640,
+512)` takes front, back and Z24 buffers of 160 CT32 pages each, 480 of the 512, and the menu's
+panel (320 x 224 CT32) needs 35; `mx_frame_sync` succeeds, `mx_vram_find(35)` finds nothing,
+and the program has no texture cache to drop (Quake has one, so the menu worked there). The way
+to go when it is picked up: a CT16 panel (5 x 4 pages of 64 x 64: 20), which fits beside any
+full-screen PAL picture with Z.
+
 - The PS button opens the home menu (beside Select + Start + L1 + R1).
 - A "Controllers" page: pair a new pad, the list (type, connection, battery), forget a pad,
   swap players.
