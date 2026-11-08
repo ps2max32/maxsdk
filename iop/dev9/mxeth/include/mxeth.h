@@ -83,14 +83,4 @@ int mxeth_link(void);
 u32 mxeth_free_frames(void);
 void mxeth_stats(u32 *out);
 
-#define mxeth_IMPORTS_start DECLARE_IMPORT_TABLE(mxeth, 1, 1)
-#define mxeth_IMPORTS_end END_IMPORT_TABLE
-#define I_mxeth_attach DECLARE_IMPORT(4, mxeth_attach)
-#define I_mxeth_free DECLARE_IMPORT(5, mxeth_free)
-#define I_mxeth_send DECLARE_IMPORT(6, mxeth_send)
-#define I_mxeth_mac DECLARE_IMPORT(7, mxeth_mac)
-#define I_mxeth_link DECLARE_IMPORT(8, mxeth_link)
-#define I_mxeth_free_frames DECLARE_IMPORT(9, mxeth_free_frames)
-#define I_mxeth_stats DECLARE_IMPORT(10, mxeth_stats)
-
 #endif

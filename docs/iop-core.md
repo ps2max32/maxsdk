@@ -293,6 +293,16 @@ no abicalls, no gp-relative data, no unwind tables, `_IOP`). Every module of max
 mxboot's SECRMAN came out the same as with iopfixup in what the loader reads (`.iopmod`, the loaded image,
 the relocations in the same order); `r3000a.irx` from lld ran on the SCPH-70004 (84 checks, 0 failed).
 
+lld also makes the import and export tables (`iop/iop.mk`): a module calls what other modules export as
+their headers declare it, and lld writes an import table per library for the names it uses, from ILB files
+(Sony's import library format): maxsdk's modules' `src/exports.ilb`, then those made from ps2sdk's IOP headers
+(`iop/mkilb.py`). `--irx-export=src/exports.ilb` writes the module's export table. No `imports.lst`,
+`irx_imports.h`, `exports.tab` or `irx_clang.h` any more; the tables mean the same as before (each import:
+library, version, index; each export slot), less the imports a module never called. compiler-rt's builtins for
+`mipsel-none-irx` (64-bit division, soft float) are linked when needed; `IOP_LTO=1` builds with LTO (mxnet
+-16%). On the PS2: modules loaded by path (LOADFILE) and from EE memory, with and without LTO
+(`tests/ps2/irx.c`).
+
 ## Open: to run on a real R3000A
 
 - `mtc0` side effects: when an interrupt enable or a CU bit takes effect. Other COP0 registers.

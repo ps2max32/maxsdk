@@ -8,7 +8,15 @@
    ready interrupt): the thread sleeps until the command ends. The register
    sequences follow ps2sdk's atad (iop/dev9/atad, Academic Free License 2.0:
    ../LICENSE). */
-#include "irx_imports.h"
+#include <irx.h>
+#include <bdm.h>
+#include <intrman.h>
+#include <loadcore.h>
+#include <mxdev9.h>
+#include <stdio.h>
+#include <sysclib.h>
+#include <thbase.h>
+#include <thsemap.h>
 #include <atahw.h>
 #include <errno.h>
 #include <speedregs.h>

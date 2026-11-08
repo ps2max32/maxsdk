@@ -1,0 +1,14 @@
+#IOP-ILB#
+# mxeth's exports: its export table (ld.lld --irx-export) and what
+# other modules import from it. The entries left out only return.
+L mxeth
+V 0101
+F 0000
+E 000 _start
+E 004 mxeth_attach
+E 005 mxeth_free
+E 006 mxeth_send
+E 007 mxeth_mac
+E 008 mxeth_link
+E 009 mxeth_free_frames
+E 010 mxeth_stats

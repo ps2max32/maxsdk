@@ -1,0 +1,14 @@
+#IOP-ILB#
+# mxfast's exports: its export table (ld.lld --irx-export) and what
+# other modules import from it. The entries left out only return.
+L mxfast
+V 0100
+F 0000
+E 000 _start
+E 004 mxfast_open
+E 005 mxfast_close
+E 006 mxfast_read
+E 007 mxfast_write
+E 008 mxfast_size
+E 009 mxfast_log
+E 010 mxfast_stats

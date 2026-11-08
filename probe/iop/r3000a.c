@@ -10,7 +10,12 @@
    the module stops if it finds one. Times are in ticks of the 36.864 MHz
    system clock (RTC3, 32 bits, no prescaler), the IOP's own clock. */
 
-#include "irx_imports.h"
+#include <irx.h>
+#include <intrman.h>
+#include <loadcore.h>
+#include <stdio.h>
+#include <thbase.h>
+#include <timrman.h>
 
 IRX_ID("r3000a", 1, 0);
 

@@ -15,7 +15,17 @@
      socket (looked up when needed: the console works without lwIP too), for
      any host. At the start this waits HOLD_US for a host to say HELLO, so the
      IOP's start-up messages reach it. */
-#include "irx_imports.h"
+#include <irx.h>
+#include <intrman.h>
+#include <ioman.h>
+#include <loadcore.h>
+#include <mxeth.h>
+#include <sifman.h>
+#include <stdio.h>
+#include <sysclib.h>
+#include <sysmem.h>
+#include <thbase.h>
+#include <thsemap.h>
 #include <mxfast.h>
 #include "mxfast_int.h"
 

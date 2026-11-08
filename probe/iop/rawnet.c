@@ -18,11 +18,28 @@
    commands, so both drivers are measured alike. */
 
 #ifdef RAWNET_MXETH
-#include "rawnet_mx_imports.h"
+#include <irx.h>
+#include <intrman.h>
+#include <loadcore.h>
+#include <stdio.h>
+#include <thbase.h>
+#include <timrman.h>
+#include <mxdev9.h>
+#include <mxeth.h>
+#include <sifman.h>
+#include <sysclib.h>
 static void kick_tx(void);
 #define XMIT() kick_tx()
 #else
-#include "rawnet_imports.h"
+#include <irx.h>
+#include <intrman.h>
+#include <loadcore.h>
+#include <stdio.h>
+#include <thbase.h>
+#include <timrman.h>
+#include <netman.h>
+#include <sifman.h>
+#include <sysclib.h>
 #define XMIT() NetManNetIFXmit()
 #endif
 

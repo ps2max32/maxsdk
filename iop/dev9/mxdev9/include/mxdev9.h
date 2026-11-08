@@ -58,19 +58,4 @@ void mxdev9_off(void);
    mxdev9_dma_end while the transfer still ran */
 void mxdev9_stats(u32 *out6);
 
-#define mxdev9_IMPORTS_start DECLARE_IMPORT_TABLE(mxdev9, 1, 1)
-#define mxdev9_IMPORTS_end END_IMPORT_TABLE
-#define I_mxdev9_caps DECLARE_IMPORT(4, mxdev9_caps)
-#define I_mxdev9_mac DECLARE_IMPORT(5, mxdev9_mac)
-#define I_mxdev9_intr DECLARE_IMPORT(6, mxdev9_intr)
-#define I_mxdev9_intr_on DECLARE_IMPORT(7, mxdev9_intr_on)
-#define I_mxdev9_intr_off DECLARE_IMPORT(8, mxdev9_intr_off)
-#define I_mxdev9_dma DECLARE_IMPORT(9, mxdev9_dma)
-#define I_mxdev9_led DECLARE_IMPORT(10, mxdev9_led)
-#define I_mxdev9_on_off DECLARE_IMPORT(11, mxdev9_on_off)
-#define I_mxdev9_off DECLARE_IMPORT(12, mxdev9_off)
-#define I_mxdev9_stats DECLARE_IMPORT(13, mxdev9_stats)
-#define I_mxdev9_dma_begin DECLARE_IMPORT(14, mxdev9_dma_begin)
-#define I_mxdev9_dma_end DECLARE_IMPORT(15, mxdev9_dma_end)
-
 #endif

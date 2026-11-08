@@ -19,7 +19,16 @@
    The module stays resident (usbd keeps its functions); the program's end
    resets the IOP. */
 
-#include "usbraw_imports.h"
+#include <irx.h>
+#include <intrman.h>
+#include <loadcore.h>
+#include <stdio.h>
+#include <thbase.h>
+#include <timrman.h>
+#include <sysclib.h>
+#include <sysmem.h>
+#include <thsemap.h>
+#include <usbd.h>
 #include "usbd_macro.h"
 
 IRX_ID("usbraw_probe", 1, 0);

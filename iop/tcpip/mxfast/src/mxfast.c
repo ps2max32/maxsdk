@@ -10,7 +10,17 @@
    runs rx to its end, the caller only reads what rx writes. The caller sleeps
    on one semaphore, given by rx (an answer, a whole read), by a sent frame's
    done, or by an alarm (a timeout); every wake checks why. */
-#include "irx_imports.h"
+#include <irx.h>
+#include <intrman.h>
+#include <ioman.h>
+#include <loadcore.h>
+#include <mxeth.h>
+#include <sifman.h>
+#include <stdio.h>
+#include <sysclib.h>
+#include <sysmem.h>
+#include <thbase.h>
+#include <thsemap.h>
 #include <mxfast.h>
 #include "mxfast_int.h"
 

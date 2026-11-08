@@ -7,7 +7,16 @@
    and a thread switch per frame cost the IOP more than the rest of a frame's
    DMA (docs/iop-drivers.md). The link thread watches the PHY. The register sequences follow ps2sdk's smap driver
    (iop/network/smap, Academic Free License 2.0: ../LICENSE). */
-#include "irx_imports.h"
+#include <irx.h>
+#include <intrman.h>
+#include <loadcore.h>
+#include <mxdev9.h>
+#include <stdio.h>
+#include <sysclib.h>
+#include <sysmem.h>
+#include <thbase.h>
+#include <thevent.h>
+#include <timrman.h>
 #include <speedregs.h>
 #include <smapregs.h>
 #include <mxdev9.h>

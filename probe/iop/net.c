@@ -11,7 +11,14 @@
    deadline. The module then stays (its thread may still be in the stack) and
    ends in failure, so the EE goes on and the IOP's reset removes it. */
 
-#include "net_imports.h"
+#include <irx.h>
+#include <intrman.h>
+#include <loadcore.h>
+#include <stdio.h>
+#include <thbase.h>
+#include <timrman.h>
+#include <ps2ip.h>
+#include <sysclib.h>
 
 IRX_ID("net_probe", 1, 0);
 

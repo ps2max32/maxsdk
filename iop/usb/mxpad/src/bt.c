@@ -12,7 +12,18 @@
    (written at pairing over USB: mxpad.c) or new ones kept (SSP's "just
    works"). ACL data is only shown yet: L2CAP and HID are step 3. */
 
-#include "irx_imports.h"
+#include <irx.h>
+#include <intrman.h>
+#include <ioman.h>
+#include <sys/fcntl.h>
+#include <loadcore.h>
+#include <sifcmd.h>
+#include <sifman.h>
+#include <stdio.h>
+#include <sysclib.h>
+#include <thbase.h>
+#include <thsemap.h>
+#include <usbd.h>
 #include "usbd_macro.h"
 
 #include "mxpad_int.h"

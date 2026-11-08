@@ -12,7 +12,18 @@
    the slot's two records in the EE's area. The report layouts are the ones
    measured in docs/pad-bt-plan.md (probe/iop/hidprobe.c). */
 
-#include "irx_imports.h"
+#include <irx.h>
+#include <intrman.h>
+#include <ioman.h>
+#include <sys/fcntl.h>
+#include <loadcore.h>
+#include <sifcmd.h>
+#include <sifman.h>
+#include <stdio.h>
+#include <sysclib.h>
+#include <thbase.h>
+#include <thsemap.h>
+#include <usbd.h>
 #include "usbd_macro.h"
 
 #include <mxpad.h>

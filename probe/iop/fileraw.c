@@ -3,7 +3,15 @@
    ioman, as mxio's reads do. Reads only. Run by probe/p31_usbfile.c, as the
    last module. */
 
-#include "fileraw_imports.h"
+#include <irx.h>
+#include <intrman.h>
+#include <loadcore.h>
+#include <stdio.h>
+#include <thbase.h>
+#include <timrman.h>
+#include <ioman.h>
+#include <sysmem.h>
+#include <thsemap.h>
 
 IRX_ID("fileraw_probe", 1, 0);
 

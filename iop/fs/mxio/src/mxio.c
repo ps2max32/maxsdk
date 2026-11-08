@@ -1,5 +1,12 @@
 /* mxio: the file service (common/include/mxio.h). */
-#include "irx_imports.h"
+#include <irx.h>
+#include <intrman.h>
+#include <ioman.h>
+#include <loadcore.h>
+#include <sifcmd.h>
+#include <sifman.h>
+#include <sysclib.h>
+#include <thbase.h>
 #include <mxfast.h>
 #include <mxio.h>
 #include <io_common.h>

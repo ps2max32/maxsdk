@@ -1,6 +1,11 @@
 /* mxsock: sockets for the EE (common/include/mxsock.h). Before each call select
    says whether it can go on, so that nothing here waits. */
-#include "irx_imports.h"
+#include <irx.h>
+#include <loadcore.h>
+#include <ps2ip.h>
+#include <sifcmd.h>
+#include <sysclib.h>
+#include <thbase.h>
 #include <mxsock.h>
 #include <sifrpc.h>
 

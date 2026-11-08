@@ -17,7 +17,15 @@
    seconds, default 30) it prints a summary and IOP idle time, and returns.
    Run by probe/p35_hid.c; output on the IOP's console. */
 
-#include "hidprobe_imports.h"
+#include <irx.h>
+#include <intrman.h>
+#include <loadcore.h>
+#include <stdio.h>
+#include <thbase.h>
+#include <timrman.h>
+#include <sysclib.h>
+#include <thsemap.h>
+#include <usbd.h>
 #include "usbd_macro.h"
 
 IRX_ID("hidprobe", 1, 0);

@@ -5,7 +5,12 @@
    thread waits for a transfer and nothing spins. The register sequences
    follow ps2sdk's dev9 driver (iop/dev9/dev9, Academic Free License 2.0:
    ../LICENSE). */
-#include "irx_imports.h"
+#include <irx.h>
+#include <dmacman.h>
+#include <intrman.h>
+#include <loadcore.h>
+#include <stdio.h>
+#include <thbase.h>
 #include <dev9regs.h>
 #include <speedregs.h>
 #include <mxdev9.h>

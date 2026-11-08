@@ -1,0 +1,62 @@
+#IOP-ILB#
+# mxnet's exports: its export table (ld.lld --irx-export) and what
+# other modules import from it. The entries left out only return.
+L ps2ip
+V 0206
+F 0000
+E 000 _start
+E 002 _exit
+E 004 lwip_accept
+E 005 lwip_bind
+E 006 lwip_close
+E 007 lwip_connect
+E 008 lwip_listen
+E 009 lwip_recv
+E 010 lwip_recvfrom
+E 011 lwip_send
+E 012 lwip_sendto
+E 013 lwip_socket
+E 014 lwip_select
+E 015 lwip_ioctl
+E 016 lwip_getpeername
+E 017 lwip_getsockname
+E 018 lwip_getsockopt
+E 019 lwip_setsockopt
+E 020 ps2ip_setconfig
+E 021 ps2ip_getconfig
+E 022 ps2ip_input
+E 023 etharp_output
+E 024 ipaddr_addr
+E 025 tcpip_input
+E 026 netif_add
+E 027 netif_find
+E 028 netif_set_default
+E 029 netif_set_ipaddr
+E 030 netif_set_netmask
+E 031 netif_set_gw
+E 032 netif_set_up
+E 033 netif_set_down
+E 034 pbuf_alloc
+E 035 pbuf_realloc
+E 036 pbuf_header
+E 037 pbuf_ref
+E 038 pbuf_free
+E 039 pbuf_clen
+E 040 pbuf_chain
+E 041 pbuf_dechain
+E 042 pbuf_take
+E 043 ip4addr_aton
+E 044 ip4addr_ntoa
+E 045 ip4addr_ntoa_r
+E 046 lwip_shutdown
+E 047 lwip_fcntl
+E 048 lwip_gethostbyname
+E 049 lwip_gethostbyname_r
+E 050 lwip_freeaddrinfo
+E 051 lwip_getaddrinfo
+E 052 dns_setserver
+E 053 dns_getserver
+E 054 netif_set_link_up
+E 055 netif_set_link_down
+E 056 tcpip_callback
+E 057 pbuf_coalesce

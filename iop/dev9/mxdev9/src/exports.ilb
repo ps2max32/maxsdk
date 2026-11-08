@@ -1,0 +1,19 @@
+#IOP-ILB#
+# mxdev9's exports: its export table (ld.lld --irx-export) and what
+# other modules import from it. The entries left out only return.
+L mxdev9
+V 0101
+F 0000
+E 000 _start
+E 004 mxdev9_caps
+E 005 mxdev9_mac
+E 006 mxdev9_intr
+E 007 mxdev9_intr_on
+E 008 mxdev9_intr_off
+E 009 mxdev9_dma
+E 010 mxdev9_led
+E 011 mxdev9_on_off
+E 012 mxdev9_off
+E 013 mxdev9_stats
+E 014 mxdev9_dma_begin
+E 015 mxdev9_dma_end
