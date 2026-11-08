@@ -17,7 +17,8 @@ memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-
   `host:` files is its own module beside mxnet (mxfast, which is the console too: to the
   ps2client that serves the fast path, without loss, else by broadcast as udptty sent it).
   Between programs mxlink closes files, pad ports and sound, and
-  keeps the IOP and the network. The internal HDD (`mxata`, `docs/iop-drivers.md`) is a FAT32 or exFAT
+  keeps the IOP and the network. USB pads (DualShock 3, DualShock 4, DualSense) run on usbd and
+  maxsdk's `mxpad`, loaded at the boot (`docs/pad-bt-plan.md`). The internal HDD (`mxata`, `docs/iop-drivers.md`) is a FAT32 or exFAT
   disk like a USB stick: `ata0:`, with `PS2MAX/` as on the other devices. The shell's fourth
   device is `host:`: the directory of a `ps2client listen` on the PC.
 - Boot: the memory card's system update is mxboot (`tools/mxboot`): its phase 1 starts
@@ -98,9 +99,17 @@ Waiting: sleep, do not spin. `mx_sleep_us` (`<mx/thread.h>`) lets the other thre
 timer 0 once a thread has slept; `mx_delay_us` keeps the CPU. Leave timer 0 to it; timer 1 is the
 profiler's.
 
-Provided for every program: Select + Start + L1 + R1 open the kernel's home menu (resume, the pad's
-settings, quit) for a `libmxk` program on maxsdk's frame pipeline, else they end it (`mx_pad`); L3 + R3 toggles libgl's
-counters, off by default. Do not bind these combinations.
+Provided for every program: the home button (`MX_PAD_HOME`: a USB pad's PS button; on a SIO2 pad
+Select + Start + L1 + R1 held together, which the program then gets as the home button, not as
+those four) opens the kernel's home menu (resume, the pad's settings, quit) for a `libmxk`
+program on maxsdk's frame pipeline, else it ends it (`mx_pad`). It is the system's: any pad's
+home button reaches whichever port a program reads. L3 + R3 toggles libgl's counters, off by
+default. Do not bind these.
+
+The pads a program reads (`mx_pad_*`): first the SIO2 pads that are there, in port order, then
+the USB pads in the order they came; a pad plugged into a SIO2 port moves the USB pads up a port.
+A USB pad's Share (Create) is Select, Options is Start; its sticks and buttons are the SIO2 pad's
+(`<mx/pad.h>`).
 
 ## Packaging
 

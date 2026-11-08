@@ -108,6 +108,9 @@ int mx__pad_read(int port, struct mx_pad_state *s, int sticks) {
   if (!connected(n))
     return 0;
   s->buttons = ~(u32)(n->data[2] | n->data[3] << 8) & 0xFFFF;
+  /* no home button on this pad: the combination is it */
+  if ((s->buttons & MX_PAD_QUIT) == MX_PAD_QUIT)
+    s->buttons = (s->buttons & ~MX_PAD_QUIT) | MX_PAD_HOME;
   if (!sticks)
     return 1;
   want_analog(port, n);
@@ -138,8 +141,9 @@ int mx_pad_connected(int port) {
 u32 mx_pad_buttons(int port) {
   struct mx_pad_state s;
   pad_get(port, &s, 0);
-  /* the way out of any program: back to the loader */
-  if ((s.buttons & MX_PAD_QUIT) == MX_PAD_QUIT)
+  /* the way out of any program: back to the loader (the combination itself
+     from a kernel before the home button) */
+  if ((s.buttons & MX_PAD_HOME) || (s.buttons & MX_PAD_QUIT) == MX_PAD_QUIT)
     mx_exit(0);
   return s.buttons;
 }

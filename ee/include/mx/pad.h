@@ -25,15 +25,21 @@
 #define MX_PAD_CROSS 0x4000
 #define MX_PAD_SQUARE 0x8000
 
-/* Held together, these end the program (mx_exit(0)) when the pad is read: a
+/* The home button: the PS button of a DualShock 3, DualShock 4 or DualSense
+   (on USB); a pad without one gives it for this combination held together,
+   in place of the combination's four buttons. Under mx-kernel it opens the
+   kernel's home menu (a program on maxsdk's frame pipeline) or ends the
+   program; elsewhere it ends the program (mx_exit(0)) when the pad is read: a
    way back to the loader from any program, whatever its menus offer. */
+#define MX_PAD_HOME 0x10000
 #define MX_PAD_QUIT (MX_PAD_SELECT | MX_PAD_START | MX_PAD_L1 | MX_PAD_R1)
 
 /* Open port 0 and 1 (slot 0). Returns < 0 if the pad driver is not there. */
 int mx_pad_init(void);
 /* 1 if a pad on port (0/1) is connected and its state is being read. */
 int mx_pad_connected(int port);
-/* The buttons held on port (0/1), MX_PAD_* bits; 0 if no pad is connected. */
+/* The buttons held on port (0/1), MX_PAD_* bits (MX_PAD_HOME included); 0 if no
+   pad is connected. */
 u32 mx_pad_buttons(int port);
 /* Buttons pressed since the previous call for this port. */
 u32 mx_pad_pressed(int port);

@@ -82,9 +82,19 @@ buttons, d-pad (diagonals as two bits), sticks, battery, rumble, and unplugged a
 again, back in slot 0 each time. Lessons: a record must be a multiple of 16 bytes (SIF DMA
 writes 16 at a time: a 36-byte record wrote over the next); usbd does not call back a pad's
 pending transfers after it is unplugged, so a slot is freed at once and callbacks carry the
-connection's generation. Next, **1b**: the kernel (mxlink loads usbd and mxpad at boot,
-`pad_read` takes ports 0 and 1 from a USB pad when no SIO2 pad is there), `mx-os.md`,
-`kernel.md`.
+connection's generation.
+
+**1b done** (2026-11-08): mxlink loads usbd and mxpad at the boot (optional: a card without
+them boots as before) and gives mxpad its area above the code (`.padarea`: the upper half of
+its TLB entry is read-only, so it is written by DMA and through the uncached alias only). A
+program's ports: the SIO2 pads first, then the USB pads in the order they came. The home button
+`MX_PAD_HOME` (`<mx/pad.h>`): a USB pad's PS button, and a SIO2 pad's Select + Start + L1 + R1
+(translated in `mx__pad_read`), from any pad to every port. On the PS2 with `tests/ps2/vm27_pads.c`:
+a DS4 and a SIO2 pad, the DS4 moves up when the SIO2 pad comes; Share and Options as Select and
+Start; PS ends a program without the menu. Open: a SIO2 pad is found a moment after a program
+opens the ports, so a USB pad is port 0 until then, and a SIO2 port that is plugged in flickers
+for a moment; the home menu itself fails on kernel version 10 (the program lends no GS memory:
+not the pads).
 
 ### 2. Bluetooth transport (HCI)
 
