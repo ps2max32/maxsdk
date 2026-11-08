@@ -110,7 +110,8 @@ default. Do not bind these.
 The pads a program reads (`mx_pad_*`): first the SIO2 pads that are there, in port order, then
 the USB pads in the order they came; a pad plugged into a SIO2 port moves the USB pads up a port.
 A USB pad's Share (Create) is Select, Options is Start; its sticks and buttons are the SIO2 pad's
-(`<mx/pad.h>`).
+(`<mx/pad.h>`). `mx_pad_rumble` runs a USB or Bluetooth pad's motors until the next call; the
+kernel stops them when the program ends.
 
 ## Packaging
 

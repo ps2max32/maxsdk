@@ -329,7 +329,11 @@ static struct conn {
   int kind, slot;
   u16 ctrl, intr;   /* the pad's channel ids, 0: not open */
   u8 ctrl_cfg, intr_cfg, started, id;
-  u8 led_wanted; /* the DS3's light, after the pad answered its start (HID handshake) */
+  /* output: rumble and light. On a DS3 a SET_REPORT on the control channel,
+     one at a time (Linux's hidp waits for each handshake): out_busy until
+     the pad answers, out_wanted for what came meanwhile */
+  u8 out_busy, out_wanted;
+  u8 small, big, rgb[3];
   u8 pairing;    /* ours, to pair it: name, authentication, encryption, then the channels */
   u8 out_seq;    /* the DualSense's output reports are numbered */
   u8 shown;      /* input reports not taken, shown (a few) */
@@ -545,76 +549,112 @@ static u32 crc32(u32 crc, const u8 *p, u32 n) {
   return ~crc;
 }
 
-/* the DualSense's output report 0x31 (Linux's hid-playstation): id, a
-   sequence number in the high nibble, the tag 0x10, then the USB report 2's
-   bytes from its flags on; the CRC over the transaction header and report */
-static void ds5_light(struct conn *c, const u8 rgb[3]) {
+/* the CRC of an output report over Bluetooth, in its last 4 bytes */
+static void with_crc(u8 *o, u32 n) {
+  u32 crc = crc32(0, o, n - 4);
+  o[n - 4] = (u8)crc, o[n - 3] = (u8)(crc >> 8), o[n - 2] = (u8)(crc >> 16), o[n - 1] = (u8)(crc >> 24);
+}
+
+/* the pad's rumble and light as they are wanted now */
+static void output(struct conn *c) {
   static const u8 player[4] = {0x04, 0x0a, 0x15, 0x1b};
-  u8 o[79] = {0xa2, 0x31};
-  o[2] = (u8)(c->out_seq++ << 4), o[3] = 0x10;
-  u8 *b = o + 3; /* b[k]: the USB report's byte k (b[0] its id) */
-  b[1] = 0x03;        /* compatible vibration, haptics select */
-  b[2] = 0x04 | 0x10; /* light bar, player lights */
-  b[39] = 0x02;       /* light bar setup control */
-  b[42] = 0x02;       /* light bar setup: light out (ends the start-up animation) */
-  b[44] = player[c->slot & 3];
-  b[45] = rgb[0], b[46] = rgb[1], b[47] = rgb[2];
-  u32 crc = crc32(0, o, 75);
-  o[75] = (u8)crc, o[76] = (u8)(crc >> 8), o[77] = (u8)(crc >> 16), o[78] = (u8)(crc >> 24);
-  l2cap_send(c, c->intr, o, sizeof o);
+  if (c->slot < 0)
+    return;
+  if (c->kind == MXPAD_DS3) {
+    if (c->out_busy) {
+      c->out_wanted = 1; /* after the pad's answer */
+      return;
+    }
+    /* SET_REPORT output 1, 36 bytes with the id as Linux's hid-sony sends it
+       (48, the USB length, made a DS3 hang); o[2 + k]: byte k after the id */
+    u8 o[1 + 36] = {0x52, 0x01};
+    o[2 + 1] = c->small ? 0xff : 0, o[2 + 2] = c->small ? 1 : 0; /* right (small): duration, on */
+    o[2 + 3] = c->big ? 0xff : 0, o[2 + 4] = c->big;             /* left (big): duration, force */
+    o[2 + 9] = (u8)(0x02 << c->slot);
+    for (int i = 0; i < 4; i++) {
+      u8 *l = o + 2 + 10 + 5 * i;
+      l[0] = 0xff, l[1] = 0x27, l[2] = 0x10, l[3] = 0, l[4] = 0x32;
+    }
+    c->out_busy = 1, c->out_wanted = 0;
+    l2cap_send(c, c->ctrl, o, sizeof o);
+  } else if (c->kind == MXPAD_DS4) {
+    /* output report 0x11 on the interrupt channel (Linux's hid-playstation):
+       id, hardware control (HID, CRC), audio control, then the USB report 5's
+       bytes from its flags on: flags (motor, light), -, -, right (small), left
+       (big), red, green, blue; o[] has the transaction header first */
+    u8 o[79] = {0xa2, 0x11, 0xc0, 0x00, 0x03};
+    o[7] = c->small, o[8] = c->big;
+    o[9] = c->rgb[0], o[10] = c->rgb[1], o[11] = c->rgb[2];
+    with_crc(o, sizeof o);
+    l2cap_send(c, c->intr, o, sizeof o);
+  } else if (c->kind == MXPAD_DS5) {
+    /* output report 0x31: id, a sequence number in the high nibble, the tag
+       0x10, then the USB report 2's bytes from its flags on */
+    u8 o[79] = {0xa2, 0x31};
+    o[2] = (u8)(c->out_seq++ << 4), o[3] = 0x10;
+    u8 *b = o + 3; /* b[k]: the USB report's byte k (b[0] its id) */
+    b[1] = 0x03;        /* compatible vibration, haptics select */
+    b[2] = 0x04 | 0x10; /* light bar, player lights */
+    b[3] = c->small, b[4] = c->big;
+    b[39] = 0x02;       /* light bar setup control */
+    b[42] = 0x02;       /* light bar setup: light out (ends the start-up animation) */
+    b[44] = player[c->slot & 3];
+    b[45] = c->rgb[0], b[46] = c->rgb[1], b[47] = c->rgb[2];
+    with_crc(o, sizeof o);
+    l2cap_send(c, c->intr, o, sizeof o);
+  }
+}
+
+/* MXPAD_OUTPUT for a Bluetooth pad (mxpad.c): kept, and sent by the thread */
+static volatile int output_kick;
+
+void bt_output(int slot, u8 small, u8 big, const u8 rgb[3]) {
+  for (int i = 0; i < CONNS; i++) {
+    struct conn *c = &conns[i];
+    if (!c->used || c->slot != slot)
+      continue;
+    c->small = small, c->big = big;
+    if (rgb[0] | rgb[1] | rgb[2])
+      memcpy(c->rgb, rgb, 3);
+    else
+      mxpad_slot_rgb(slot, c->rgb);
+    c->out_wanted = 1;
+    output_kick = 1;
+    SignalSema(bt.sema);
+  }
 }
 
 /* both channels open and configured: the pad's input, and its light */
 static void hid_start(struct conn *c) {
-  u8 rgb[3];
   c->started = 1;
   c->slot = mxpad_open(c->kind, c->addr);
   if (c->slot < 0) {
     LOG("no slot free\n");
     return;
   }
-  mxpad_slot_rgb(c->slot, rgb);
+  mxpad_slot_rgb(c->slot, c->rgb);
+  c->small = c->big = 0;
   if (c->kind == MXPAD_DS3) {
-    /* SET_REPORT feature 0xF4 over Bluetooth: 42 03 */
+    /* SET_REPORT feature 0xF4 over Bluetooth: 42 03; the light after the
+       pad's answer (output() waits for it) */
     static const u8 start[6] = {0x53, 0xf4, 0x42, 0x03, 0x00, 0x00};
+    c->out_busy = 1;
     l2cap_send(c, c->ctrl, start, 6);
-    /* the light once the pad answered: one transaction at a time on the
-       control channel, as Linux's hidp waits for each handshake */
-    c->led_wanted = 1;
+    c->out_wanted = 1;
   } else if (c->kind == MXPAD_DS4) {
     /* GET_REPORT feature 0x02: the DS4 sends its full report 0x11 from then on */
     static const u8 get2[2] = {0x43, 0x02};
     l2cap_send(c, c->ctrl, get2, 2);
-    /* output report 0x11 on the interrupt channel (Linux's hid-playstation):
-       id, hardware control (HID, CRC), audio control, then the USB report 5's
-       bytes from its flags on: motors at 6, 7, the light at 8-10 (o[] has the
-       transaction header first); the CRC over header and report */
-    u8 o[79] = {0xa2, 0x11, 0xc0, 0x00, 0x07};
-    o[9] = rgb[0], o[10] = rgb[1], o[11] = rgb[2];
-    u32 crc = crc32(0, o, 75);
-    o[75] = (u8)crc, o[76] = (u8)(crc >> 8), o[77] = (u8)(crc >> 16), o[78] = (u8)(crc >> 24);
-    l2cap_send(c, c->intr, o, sizeof o);
+    output(c);
   } else if (c->kind == MXPAD_DS5) {
     /* GET_REPORT feature 0x05 (the calibration, as Linux reads it): the
        DualSense sends its full report 0x31 from then on */
     static const u8 get5[2] = {0x43, 0x05};
     l2cap_send(c, c->ctrl, get5, 2);
-    ds5_light(c, rgb);
+    output(c);
   }
   LOG("slot %d: %s over Bluetooth\n", c->slot,
       c->kind == MXPAD_DS3 ? "DualShock 3" : c->kind == MXPAD_DS4 ? "DualShock 4" : "DualSense");
-}
-
-/* the DS3's light: SET_REPORT output 1, 36 bytes with the id, as Linux's
-   hid-sony sends it (48, the USB length, made a DS3 hang over Bluetooth) */
-static void ds3_led(struct conn *c) {
-  u8 o[1 + 36] = {0x52, 0x01};
-  o[2 + 9] = (u8)(0x02 << c->slot);
-  for (int i = 0; i < 4; i++) {
-    u8 *l = o + 2 + 10 + 5 * i;
-    l[0] = 0xff, l[1] = 0x27, l[2] = 0x10, l[3] = 0, l[4] = 0x32;
-  }
-  l2cap_send(c, c->ctrl, o, sizeof o);
 }
 
 static void check_ready(struct conn *c) {
@@ -960,10 +1000,9 @@ static void acl(const u8 *d, u32 n) {
     /* a HID handshake: the answer to our last SET_REPORT */
     if (d[8] != 0x00)
       LOG("handshake %02x\n", d[8]);
-    if (c->led_wanted) {
-      c->led_wanted = 0;
-      ds3_led(c);
-    }
+    c->out_busy = 0;
+    if (c->out_wanted)
+      output(c);
   }
   /* other answers on the control channel (GET_REPORT's data): not needed */
 }
@@ -981,6 +1020,14 @@ static void bt_thread(void *arg) {
     if (pair_kick) {
       pair_kick = 0;
       inquiry_next();
+    }
+    if (output_kick) {
+      output_kick = 0;
+      for (int i = 0; i < CONNS; i++)
+        if (conns[i].used && conns[i].out_wanted && (!conns[i].out_busy || conns[i].kind != MXPAD_DS3)) {
+          conns[i].out_wanted = 0;
+          output(&conns[i]);
+        }
     }
     while (rx_tail != rx_head && !bt.gone) {
       u32 i = rx_tail % RX_SLOTS;

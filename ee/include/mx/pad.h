@@ -50,4 +50,11 @@ u32 mx_pad_pressed(int port);
    after it is connected. */
 int mx_pad_sticks(int port, u8 st[4]);
 
+/* The motors of the pad on port (0..): small (the right, light one: 0 off,
+   else on; a DS3's is on or off only), big (the left, heavy one: 0..255).
+   They run until the next call; the kernel stops them when the program ends.
+   Returns 0, or < 0 when the pad there has no rumble this can drive (a
+   SIO2 pad, for now) or there is none. Under mx-kernel (version 11) only. */
+int mx_pad_rumble(int port, u32 small, u32 big);
+
 #endif

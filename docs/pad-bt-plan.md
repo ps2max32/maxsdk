@@ -167,6 +167,14 @@ Linux (`hid-playstation`, `hid-sony`; BlueZ's input profile, `sixaxis` plugin an
 is the reference from here on, for the facts: BlueZ answers the SDP request and the pad opens
 the channels itself, likely what the DualSense needs.
 
+**Rumble** (2026-11-08, kernel table version 11): `mx_pad_rumble(port, small, big)`; the kernel
+maps the port to its pad and calls `MXPAD_OUTPUT` on a change only, and stops every motor a
+program left running when it ends. Over Bluetooth mxpad sends the pad's output report from its
+thread (DS3: SET_REPORT on the control channel, one at a time after each handshake; DS4 and
+DualSense: report `0x11` / `0x31` on the interrupt channel with the CRC). On the PS2 with
+`tests/ps2/vm31_rumble.c`: a DualSense on USB, a DS4 and a DS3 over Bluetooth, a DS3 on USB.
+A SIO2 pad's motors (PADMAN's actuators) are not done yet.
+
 ### 4. Kernel and home menu
 
 - The PS button opens the home menu (beside Select + Start + L1 + R1).

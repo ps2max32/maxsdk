@@ -133,6 +133,12 @@ static int pad_get(int port, struct mx_pad_state *s, int sticks) {
 
 int mx_pad_init(void) { return kpad() ? mx__kernel->pad_init() : mx__pad_init(); }
 
+int mx_pad_rumble(int port, u32 small, u32 big) {
+  if (!mx__kernel || mx__kernel->version < 11)
+    return -1;
+  return mx__kernel->pad_rumble(port, small, big);
+}
+
 int mx_pad_connected(int port) {
   struct mx_pad_state s;
   return pad_get(port, &s, 0);

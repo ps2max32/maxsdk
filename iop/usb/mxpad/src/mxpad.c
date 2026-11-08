@@ -628,7 +628,8 @@ static void *rpc(int fn, void *data, int size) {
       break;
     }
     p->small = o[0], p->big = o[1], p->r = o[2], p->g = o[3], p->b = o[4];
-    if (p->bt) { /* not yet over Bluetooth */
+    if (p->bt) {
+      bt_output((int)slot, o[0], o[1], o + 2);
       a[0] = 0;
       break;
     }

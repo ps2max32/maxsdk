@@ -18,7 +18,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 10
+#define MX_KERNEL_VERSION 11
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -185,6 +185,9 @@ struct mxk_services {
      (docs/mx-os-plan.md, step 2d): maxsdk's mx_bios_* calls for them go
      there (src/base/ksys.c) */
   const struct mx_kthreads *kthreads;
+  /* version 11: a pad's rumble (mx_pad_rumble): 0, or < 0 for a port with no
+     pad that rumbles there */
+  int (*pad_rumble)(int port, u32 small, u32 big);
 };
 /* the size of a table of version MX_KERNEL_MIN */
 #define MXK_MIN_SIZE __builtin_offsetof(struct mxk_services, pad_init)
