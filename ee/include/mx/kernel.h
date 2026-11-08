@@ -21,6 +21,9 @@
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
+/* a second note of that name: the core heap the program asks for (u32
+   bytes), MX_CORE_HEAP in <mx/loader.h> */
+#define MXK_NOTE_HEAP 2
 /* The oldest table libmxk runs on: what came later it uses only when the
    table's version has it (the pad from version 6), else its own code. */
 #define MX_KERNEL_MIN 5
@@ -92,6 +95,7 @@ struct mx_pad_state {
    combination: libmx's, and the kernel's. read: 1 with a pad connected;
    sticks: read them (and ask for analog mode) too. */
 int mx__pad_init(void);
+void mx__pad_forget(void);
 int mx__pad_read(int port, struct mx_pad_state *s, int sticks);
 
 /* A program's interrupt slots (ee/src/irq/irq.c), for the kernel at its end:
@@ -99,6 +103,10 @@ int mx__pad_read(int port, struct mx_pad_state *s, int sticks);
 struct mxk_irq_tables {
   const void *intc, *dmac;
   u32 nintc, ndmac, slot_size, id_offset;
+  /* version 9: the functions the slots are registered with (AddIntcHandler,
+     AddDmacHandler), so the kernel can take them away while the program
+     waits for one it started and add them again (docs/mx-os-plan.md, 2c) */
+  const void *intc_entry, *dmac_entry;
 };
 
 struct mxk_services {
@@ -109,8 +117,8 @@ struct mxk_services {
   /* program: the end of this one, the start of the next with the IOP kept,
      the swap file all programs share (0: none) */
   void (*exit)(int status) __attribute__((noreturn));
-  void (*launch)(int argc, const char *args, u32 args_len, const char *swap)
-      __attribute__((noreturn));
+  /* returns the other program's status when the caller stays (version 9) */
+  int (*launch)(int argc, const char *args, u32 args_len, const char *swap);
   const char *(*swap)(void);
 
   /* SIF, as <mx/sif.h> (version 2): the kernel's one client of the IOP's SIF.

@@ -16,8 +16,7 @@ static struct mx_args mxload_args;
 static int by_mxload;
 /* mxlink's way back (<mx/loader.h>), 0 for the BIOS's Exit */
 static void (*loader_ret)(int status) __attribute__((noreturn));
-static void (*loader_launch)(int argc, const char *args, u32 args_len, const char *swap)
-    __attribute__((noreturn));
+static int (*loader_launch)(int argc, const char *args, u32 args_len, const char *swap);
 const char *mx__loader_swap; /* the swap file mxlink gave, or 0 */
 
 const struct mxk_services *mx__kernel;
@@ -154,7 +153,7 @@ int mx_loader_launch(int argc, const char *args, u32 args_len, const char *swap)
   mx_debug_flush();
   mx__vm_shutdown();
   mx__vm_swap_close();
-  loader_launch(argc, args_copy, args_len, swap ? swap_copy : 0);
+  return loader_launch(argc, args_copy, args_len, swap ? swap_copy : 0);
 }
 
 void mx__fio_base(const char *argv0);

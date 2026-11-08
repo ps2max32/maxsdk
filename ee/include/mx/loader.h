@@ -29,10 +29,11 @@ struct mx_loader_args {
   /* mxlink only, launch_magic being MX_LOADER_LAUNCH: end this program and
      start another with the IOP as it is (its modules and open devices stay).
      mx_loader_launch calls it. swap: the system's swap file, used in place of
-     the program's own, or 0. */
+     the program's own, or 0. From kernel version 9 a program whose core is at
+     a run of its own and without VM stays: the call returns the other's exit
+     status when it ends (docs/mx-os-plan.md, step 2c). */
   u32 launch_magic;
-  void (*launch)(int argc, const char *args, u32 args_len, const char *swap)
-      __attribute__((noreturn));
+  int (*launch)(int argc, const char *args, u32 args_len, const char *swap);
   const char *swap;
   /* mx-kernel (<mx/kernel.h>): the table of its services for libmxk, and
      kernel_magic MX_KERNEL_MAGIC. The fields above stay for libmx and older
@@ -48,11 +49,29 @@ struct mx_loader_args {
    of its ELF), 0 if not. */
 int mx_loader_mxload(void);
 
-/* End this program and have mxlink start another, the IOP kept: args is
-   argc strings one after the other, the first the path of its ELF; swap (or
-   0) is the swap file all programs share, used in place of the one they ask
-   for. Returns -1 if the program was not started by an mxlink that can do
-   this. */
+/* Have mxlink start another program, the IOP kept: args is argc strings
+   one after the other, the first the path of its ELF; swap (or 0) is the
+   swap file all programs share, used in place of the one they ask for.
+   This program ends, or, under a kernel of version 9 with its core at a run
+   of its own (MX_CORE_HEAP) and without VM, stays: the call returns the other
+   program's exit status (0-255) when it has ended; GS memory, the display,
+   the pad's ports and open files are to be set up again then. Returns -1 if
+   the program was not started by an mxlink that can do this, or the other
+   could not be started (this one staying). */
 int mx_loader_launch(int argc, const char *args, u32 args_len, const char *swap);
+
+/* A program without VM asks for its core at a physical run of its own (a
+   kernel of version 9), with this core heap after its end (bytes): what
+   mx_sbrk, malloc and the heaps (<mx/mem.h>) have, the rest of memory being
+   for others. Without it such a program has all memory, at its own
+   addresses. At file scope, once: MX_CORE_HEAP(512 << 10); */
+struct mx__core_heap_note {
+  u32 namesz, descsz, type;
+  char name[4];
+  u32 bytes;
+};
+#define MX_CORE_HEAP(n)                                                                    \
+  __attribute__((section(".note.mxk.heap"), used, aligned(4))) static const struct          \
+      mx__core_heap_note mx__core_heap_note = {4, 4, 2, "MXK", (n)}
 
 #endif

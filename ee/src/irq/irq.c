@@ -97,7 +97,8 @@ void mx__irq_tell_kernel(void) {
     return;
   static const struct mxk_irq_tables t = {
       .intc = intc, .dmac = dmac, .nintc = 15, .ndmac = 10, .slot_size = sizeof(struct slot),
-      .id_offset = __builtin_offsetof(struct slot, bios_id)};
+      .id_offset = __builtin_offsetof(struct slot, bios_id),
+      .intc_entry = (const void *)intc_entry, .dmac_entry = (const void *)dmac_entry};
   mx__kernel->irq_tables(&t);
 }
 

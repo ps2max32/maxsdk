@@ -62,7 +62,22 @@ the program runs, so `mx_paddr_of` and `MX_UNCACHED` / `MX_UCAB` translate the p
 pointers in both. The VM's frames are the memory below the run (`mx__vm_frames`), the core heap
 ends with it. The main stack of a program linked into VM is in its core (`.stack`, 128 KiB, in
 `ee/ld/maxsdk-vm*.ld`), not at the top of memory, so it moves with it. A program without VM, of
-an older version, or too large stays at its own addresses. The kernel's VM state is cleared by the
+an older version, or too large stays at its own addresses. A program without VM gets a run only
+when it asks for one with `MX_CORE_HEAP(bytes)` (`<mx/loader.h>`, a second note): its core heap
+is then that much and no more.
+
+A program with its core at a run of its own and without VM that calls `mx_loader_launch` stays
+(`exec_park`, `tools/mxlink/ee/exec.c`; `docs/mx-os-plan.md`, step 2c): the kernel keeps its own
+state of it (the `.data` and `.bss` of `ee/resident.ld`'s program part) in the program's core
+heap, takes its interrupt handlers from the BIOS (the slots' entry functions are in
+`irq_tables`, version 9), closes the pad's ports, suspends its other threads and starts the
+other with the kernel's state as linked, its run below the waiting one's. At the other's end
+(or when it could not start) the waiting program is mapped again under its ASID, its kernel
+state put back (the pad's state forgotten: its next `mx_pad_init` opens the ports), its
+handlers added again with their new ids in its slots, its threads resumed, and its call
+returns the other's exit status (-1: not started). An other that cannot have a run of its own
+takes all memory: the waiting program is given up and ends with it (its threads and semaphores
+go with the other's), and mxlink goes on as before (the shell starts again). The kernel's VM state is cleared by the
 restart after each program.
 
 ## The end of a program

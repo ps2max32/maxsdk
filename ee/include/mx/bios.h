@@ -38,6 +38,8 @@ int mx_bios_terminate_thread(int id);
 int mx_bios_change_thread_priority(int id, int priority);
 int mx_bios_rotate_thread_ready_queue(int priority);
 int mx_bios_get_thread_id(void);
+int mx_bios_suspend_thread(int id);
+int mx_bios_resume_thread(int id);
 int mx_bios_refer_thread_status(int id, void *status);
 int mx_bios_sleep_thread(void);
 int mx_bios_wakeup_thread(int id);

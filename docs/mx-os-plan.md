@@ -129,6 +129,18 @@ A program whose run starts at its own addresses is as now.
   the CPU's ASID and its own code is then not mapped. Still open: a store past the core's end
   faults only above the run's 1 MiB rounding.
 
+  2c-1 and 2c-2 (2026-11-08): a program without VM asks for a run with `MX_CORE_HEAP` (a second
+  note); `mx_loader_launch` from such a program keeps it (`exec_park`): its kernel state saved
+  in its core heap, its interrupt handlers taken from the BIOS and added again after (the slots'
+  entry functions in `irq_tables`), its pad's ports closed, its other threads suspended; the
+  other's run goes below it, and the call returns the other's exit status. mxloader asks for
+  512 KiB and sets the GS, its font and covers and the pad up again after a game. On the PS2:
+  `tests/ps2/k29_stay.c` with `vm26_launch` and Quake as the other (its memory, core offset and
+  ASID as before), a missing program (-1), mxloader from `host:` starting Quake (back at once,
+  its picture whole) and a program without a run (`vm5_tlb`: mxloader given up, as before), no
+  thread or semaphore left (`vm25_ids`). mxloader's VM pages giving way to the game's (one frame
+  pool for all) is not done: mxloader has no VM yet.
+
 **2c. Processes side by side.** No program is limited to a share: mxloader (the shell,
 `MXSHELL.ELF`) may grow as large as a game. Only the cores take fixed memory (mxloader's about
 1.5 MiB, Quake's 1.7 MiB, each with its pinned memory); everything else is VM, paged from one

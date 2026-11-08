@@ -70,6 +70,11 @@ Retail PS2s have 32 MiB; never count on more.
    `MX_UCAB`: a program's core need not be at its own addresses (`mx__core_off`), so never mask a
    pointer (`& 0x0FFFFFFF`) or OR in `0x20000000` yourself. Nor read the TLB (`tlbr` changes the
    CPU's ASID while your own code is under it).
+11. **Starting another program.** `mx_loader_launch` ends a program, or, with its core at a run
+    of its own and without VM (`MX_CORE_HEAP`, as mxloader), returns the other's exit status when
+    that ends: then set up again what the other had (the GS and the display, the pad's ports:
+    `mx_pad_init`, files). The main stack is in the core after `.bss` (128 KiB), not at the top
+    of memory.
 8. **Graphics are yours**: full control of GS, VIF, VU and DMA, but the display registers (PMODE,
    DISPFB, DISPLAY, BGCOLOR) only through maxsdk (`<mx/display.h>`, `mx_gs_*`): under `libmxk` the
    kernel writes them (`kernel.md`). Prefer beam racing for memory

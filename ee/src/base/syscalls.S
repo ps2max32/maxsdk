@@ -267,6 +267,28 @@ mx_bios_exit_delete_thread:
 	.end mx_bios_exit_delete_thread
 	.size mx_bios_exit_delete_thread, .-mx_bios_exit_delete_thread
 
+	.globl mx_bios_suspend_thread
+	.type mx_bios_suspend_thread, @function
+	.ent mx_bios_suspend_thread
+mx_bios_suspend_thread:
+	li $3, 55
+	syscall
+	jr $31
+	nop
+	.end mx_bios_suspend_thread
+	.size mx_bios_suspend_thread, .-mx_bios_suspend_thread
+
+	.globl mx_bios_resume_thread
+	.type mx_bios_resume_thread, @function
+	.ent mx_bios_resume_thread
+mx_bios_resume_thread:
+	li $3, 57
+	syscall
+	jr $31
+	nop
+	.end mx_bios_resume_thread
+	.size mx_bios_resume_thread, .-mx_bios_resume_thread
+
 	.globl mx_bios_terminate_thread
 	.type mx_bios_terminate_thread, @function
 	.ent mx_bios_terminate_thread

@@ -43,7 +43,7 @@ SECTIONS {
 
   /* libmxk's note for the kernel (src/base/kstubs.c): in the text segment
      and a PT_NOTE of its own */
-  .note.mxk : ALIGN(4) { KEEP(*(.note.mxk)) } >ram :text :note
+  .note.mxk : ALIGN(4) { KEEP(*(.note.mxk .note.mxk.*)) } >ram :text :note
 
   .vutext : ALIGN(16) { *(.vutext .vutext.*) } >ram :text
 

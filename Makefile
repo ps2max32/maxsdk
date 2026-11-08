@@ -107,6 +107,11 @@ VM_TESTS = vm11_vmlink vm12_elfpage vm13_guards vm16_lock vm21_crash vm22_net vm
 $(VM_TESTS:%=$(OUT)/tests/%.elf): MX_MEMORY = vm
 $(VM_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
 
+# tests on libmxk without VM, started by mxlink
+K_TESTS = k29_stay
+$(K_TESTS:%=$(OUT)/tests/%.elf): LIB = $(LIBK)
+$(K_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
+
 # tests of the VM's inside: the VM in the program, on a bare PS2 or PCSX2
 VM_INSIDE = $(filter-out $(VM_TESTS:%=$(OUT)/tests/%.elf),$(patsubst $(HERE)/tests/ps2/%.c,$(OUT)/tests/%.elf,\
               $(shell grep -lE 'mx_vm_|mx__vm_|mx_mem_|mx_heap_' $(HERE)/tests/ps2/*.c))) \

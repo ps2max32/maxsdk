@@ -34,6 +34,11 @@ static int ready;
 static u32 prev[2];
 static u32 analog_polls[2];
 
+/* The kernel, when a program that waited for another goes on (step 2c): its
+   ports were closed at the other's end, so its next mx_pad_init opens them
+   again. */
+void mx__pad_forget(void) { ready = 0; }
+
 int mx__pad_init(void) {
   if (ready)
     return 0;

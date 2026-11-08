@@ -4,8 +4,8 @@ OUTPUT_ARCH(mips)
 ENTRY(__start)
 
 /* EE main memory below 0x100000 is the kernel's and the loader's (ps2link
-   at 0x88000 - 0x100000); the kernel puts the stack at the top of memory
-   (__stack -1), the heap is from _end up to it. A program linked with
+   at 0x88000 - 0x100000); the stack is after the program (.stack), the heap
+   from _end to the top of memory. A program linked with
    --defsym=__mx_base=<address> starts there instead. One linked with --defsym=__mx_top=<address> also
    ends there, its stack just below it: a resident program that leaves the
    memory above to others (mxlink has a script of its own). The stack's size
@@ -33,7 +33,7 @@ SECTIONS {
 
   /* libmxk's note for the kernel (src/base/kstubs.c): in the text segment
      and a PT_NOTE of its own */
-  .note.mxk : ALIGN(4) { KEEP(*(.note.mxk)) } >ram :text :note
+  .note.mxk : ALIGN(4) { KEEP(*(.note.mxk .note.mxk.*)) } >ram :text :note
 
   /* VU microcode, kept 16-byte aligned so it can be sent with MPG. */
   .vutext : ALIGN(16) { *(.vutext .vutext.*) } >ram :text
@@ -67,6 +67,14 @@ SECTIONS {
     . = ALIGN(16);
     __bss_end = .;
   } >ram
+  /* The main stack (crt0's SetupThread), in the core after the program and
+     not at the top of memory, so that it moves with the core when the kernel
+     puts that at a physical run of its own (docs/mx-os-plan.md, step 2b). A
+     program with __mx_top has it below that instead. */
+  .stack (NOLOAD) : ALIGN(64) {
+    __mx_main_stack = .;
+    . += DEFINED(__mx_top) ? 0 : (DEFINED(__mx_stack_size) ? __mx_stack_size : 128 * 1024);
+  } >ram
   _end = .;
 
   /* Scratchpad: 16 KiB at 0x7000_0000, not loaded, not cleared. */
@@ -74,10 +82,9 @@ SECTIONS {
 
   /DISCARD/ : { *(.MIPS.abiflags) *(.reginfo) *(.gnu.attributes) *(.comment) *(.pdr) }
 
-  /* The kernel picks the stack at the top of memory when __stack is -1. */
   PROVIDE(__stack_size = DEFINED(__mx_stack_size) ? __mx_stack_size : 128 * 1024);
-  PROVIDE(__stack = DEFINED(__mx_top) ? __mx_top - __stack_size : -1);
+  PROVIDE(__stack = DEFINED(__mx_top) ? __mx_top - __stack_size : __mx_main_stack);
 }
 
-ASSERT(_end <= ORIGIN(ram) + LENGTH(ram) - __stack_size,
-       "the program leaves no room for the stack at the top of memory")
+ASSERT(_end <= ORIGIN(ram) + LENGTH(ram),
+       "the program and its stack do not fit")
