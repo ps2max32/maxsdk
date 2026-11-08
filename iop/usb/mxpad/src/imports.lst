@@ -34,6 +34,7 @@ I_StartThread
 I_SetAlarm
 I_CancelAlarm
 I_USec2SysClock
+I_GetSystemTime
 thbase_IMPORTS_end
 
 thsemap_IMPORTS_start

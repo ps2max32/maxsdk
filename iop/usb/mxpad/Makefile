@@ -2,6 +2,6 @@
 # (common/include/mxpad.h), on ps2sdk's usbd.
 
 MODULE = mxpad
-SRCS   = mxpad.c
+SRCS   = mxpad.c bt.c
 
 include ../../Rules.mk

@@ -3,6 +3,7 @@
    each slot's state whenever it changes; a pad that comes rumbles briefly.
 
      p36_mxpad host:mxpad.irx [seconds [usbd path]]
+     p36_mxpad - [seconds]     (mxpad already runs: mxlink loads it from mc0:/MXOS)
 
    Loading the modules makes mxlink reset the IOP when the program ends. */
 
@@ -93,7 +94,8 @@ int main(int argc, char **argv) {
     secs = secs * 10 + (*c - '0');
   const char *usbd = argc > 3 ? argv[3] : "mc0:/MXOS/usbd.irx";
   mx_printf("p36: %s: %d (an error is fine when usbd already runs)\n", usbd, load(usbd, 0));
-  int r = load(argv[1], 0);
+  /* "-": mxpad already runs (mxlink loads it at the boot) */
+  int r = argv[1][0] == '-' && !argv[1][1] ? 0 : load(argv[1], 0);
   mx_printf("p36: %s: %d\n", argv[1], r);
   if (r < 0 || (r & 3) == 1 || mx_sif_bind(&rpc, MXPAD_SID) < 0) {
     MX_TEST_END(2);

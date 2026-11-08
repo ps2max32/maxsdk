@@ -14,6 +14,8 @@
 
 #include <mxpad.h>
 
+#include "mxpad_int.h"
+
 IRX_ID("mxpad", 1, 0);
 
 /* <mx/pad.h>'s bits */
@@ -36,6 +38,7 @@ IRX_ID("mxpad", 1, 0);
 
 struct pad {
   int id, used, gone;
+  int bt; /* a Bluetooth pad (bt.c): no USB, no thread here */
   u32 gen; /* this connection's: usbd's callbacks of an earlier one are dropped */
   int op_sema;   /* the thread's own transfers */
   int work_sema; /* output wanted, or the pad gone */
@@ -46,8 +49,8 @@ struct pad {
   volatile int done, timeout, result, bytes;
   volatile int streaming;
   u32 connected;
-  /* output the EE wants */
-  volatile int want;
+  /* output the EE wants; pairing with a dongle that came */
+  volatile int want, want_pair;
   u8 small, big, r, g, b;
   struct mxpad_record now; /* the state as last decoded (seq unused) */
   struct mxpad_record sent;
@@ -269,6 +272,65 @@ static int output(struct pad *p) {
   return -1;
 }
 
+/* ---- pairing over USB with the dongle (bt.c), as a PS3 or PS4 does ---- */
+
+static void addr_print(const char *what, const u8 *a) {
+  printf("%s %02x:%02x:%02x:%02x:%02x:%02x", what, a[5], a[4], a[3], a[2], a[1], a[0]);
+}
+
+/* the pad connects to the dongle from now on, when its PS button is pressed
+   on battery (it forgets the host it had) */
+static void pair(struct pad *p) {
+  u8 host[6], me[6];
+  int slot = (int)(p - pads), r = -1;
+  if (!bt_host(host))
+    return;
+  u8 *b = p->buf;
+  if (p->kind == MXPAD_DS4) {
+    /* feature 0x12: its address at 1..6 (least significant byte first) */
+    if (control(p, 0xa1, 0x01, 0x0312, 16, b) || p->bytes < 7)
+      goto out;
+    memcpy(me, b + 1, 6);
+    /* feature 0x13: the host's address and the link key */
+    b[0] = 0x13;
+    memcpy(b + 1, host, 6);
+    bt_new_key(me, b + 7);
+    r = control(p, 0x21, 0x09, 0x0313, 23, b);
+  } else if (p->kind == MXPAD_DS3) {
+    /* feature 0xF2: its address at 4..9, most significant byte first */
+    if (control(p, 0xa1, 0x01, 0x03f2, 17, b) || p->bytes < 10)
+      goto out;
+    for (int i = 0; i < 6; i++)
+      me[i] = b[9 - i];
+    /* feature 0xF5: the host's, most significant byte first */
+    b[0] = 0x01, b[1] = 0x00;
+    for (int i = 0; i < 6; i++)
+      b[2 + i] = host[5 - i];
+    r = control(p, 0x21, 0x09, 0x03f5, 8, b);
+    if (!r)
+      bt_known(me, MXPAD_DS3);
+  } else {
+    return; /* the DualSense pairs over Bluetooth (step 3) */
+  }
+out:
+  printf("mxpad: slot %d: ", slot);
+  if (r) {
+    printf("pairing failed (%d)\n", r);
+    return;
+  }
+  addr_print("paired", me);
+  addr_print(" with", host);
+  printf("\n");
+}
+
+static void pair_all(void) {
+  for (int i = 0; i < MXPAD_PADS; i++)
+    if (pads[i].used && !pads[i].gone && !pads[i].bt) {
+      pads[i].want_pair = 1;
+      SignalSema(pads[i].work_sema);
+    }
+}
+
 /* ---- a pad's life ---- */
 
 static void open_pipes(struct pad *p) {
@@ -314,6 +376,7 @@ static void pad_thread(void *arg) {
          r ? "set-up failed" : "ready");
   if (!r) {
     output(p);
+    pair(p);
     p->streaming = 1;
     report_next(p);
     while (!p->gone && p->streaming) {
@@ -321,6 +384,10 @@ static void pad_thread(void *arg) {
       if (p->want && !p->gone) {
         p->want = 0;
         output(p);
+      }
+      if (p->want_pair && !p->gone) {
+        p->want_pair = 0;
+        pair(p);
       }
     }
   }
@@ -409,6 +476,10 @@ static void *rpc(int fn, void *data, int size) {
       break;
     }
     p->small = o[0], p->big = o[1], p->r = o[2], p->g = o[3], p->b = o[4];
+    if (p->bt) { /* not yet over Bluetooth */
+      a[0] = 0;
+      break;
+    }
     p->want = 1;
     SignalSema(p->work_sema);
     a[0] = 0;
@@ -442,5 +513,45 @@ int _start(int argc, char **argv) {
     printf("mxpad: usbd is not there\n");
     return MODULE_NO_RESIDENT_END;
   }
+  bt_init(pair_all);
   return MODULE_RESIDENT_END;
 }
+
+/* ---- the slots of Bluetooth pads (bt.c) ----
+   After _start on purpose: clang emits a file's static functions where they
+   are first used, so the first function of .text is the file's first one
+   that is not static, and iopfixup takes only _start at 0. */
+
+int mxpad_open(int kind) {
+  for (int i = 0; i < MXPAD_PADS; i++) {
+    struct pad *p = &pads[i];
+    if (p->used)
+      continue;
+    memset(p, 0, sizeof *p);
+    p->used = 1, p->bt = 1, p->kind = kind, p->gen = ++generation & 0x0fffffff;
+    p->now.kind = (u8)kind;
+    p->now.battery = 255;
+    p->now.lx = p->now.ly = p->now.rx = p->now.ry = 128;
+    p->now.connected = ++connections;
+    send(p);
+    return i;
+  }
+  return -1;
+}
+
+void mxpad_input(int slot, const u8 *r, u32 n) {
+  struct pad *p = &pads[slot];
+  if (p->used && p->bt && !decode(p, r, n) && !same(&p->now, &p->sent))
+    send(p);
+}
+
+void mxpad_close(int slot) {
+  struct pad *p = &pads[slot];
+  if (!p->used || !p->bt)
+    return;
+  memset(&p->now, 0, sizeof p->now);
+  send(p);
+  p->used = 0;
+}
+
+void mxpad_slot_rgb(int slot, u8 rgb[3]) { memcpy(rgb, slot_rgb[slot], 3); }
