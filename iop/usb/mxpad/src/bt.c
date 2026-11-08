@@ -400,9 +400,12 @@ static void hid_start(struct conn *c) {
     /* GET_REPORT feature 0x02: the DS4 sends its full report 0x11 from then on */
     static const u8 get2[2] = {0x43, 0x02};
     l2cap_send(c, c->ctrl, get2, 2);
-    /* output report 0x11 on the interrupt channel: the slot's light, with a CRC */
-    u8 o[79] = {0xa2, 0x11, 0xc0, 0x20, 0x07};
-    o[10] = rgb[0], o[11] = rgb[1], o[12] = rgb[2];
+    /* output report 0x11 on the interrupt channel (Linux's hid-playstation):
+       id, hardware control (HID, CRC), audio control, then the USB report 5's
+       bytes from its flags on: motors at 6, 7, the light at 8-10 (o[] has the
+       transaction header first); the CRC over header and report */
+    u8 o[79] = {0xa2, 0x11, 0xc0, 0x00, 0x07};
+    o[9] = rgb[0], o[10] = rgb[1], o[11] = rgb[2];
     u32 crc = crc32(0, o, 75);
     o[75] = (u8)crc, o[76] = (u8)(crc >> 8), o[77] = (u8)(crc >> 16), o[78] = (u8)(crc >> 24);
     l2cap_send(c, c->intr, o, sizeof o);
