@@ -2,7 +2,8 @@
 # ../../iop/irx.ld, llvm-objcopy; then ps2sdk's iopfixup.
 #
 #   make [OUT=<dir>]    <dir>/r3000a.irx, <dir>/net.irx, <dir>/rawnet.irx, <dir>/usbraw.irx, <dir>/fileraw.irx,
-#                       <dir>/rawnet_mx.irx (rawnet.c on mxeth)
+#                       <dir>/rawnet_mx.irx (rawnet.c on mxeth),
+#                       <dir>/hidprobe.irx (pads and Bluetooth dongles on USB, probe/p35_hid.c)
 #
 # Run with the EE side, probe/p25_iop.c (see docs/iop-core.md).
 
@@ -20,7 +21,7 @@ CFLAGS  = -std=gnu23 -D_IOP -fno-builtin -ffreestanding -G0 -O2 -Wall -Werror -W
           -I../../iop/dev9/mxeth/include -I../../iop/dev9/mxdev9/include
 OBJS    = $(OUT)/r3000a.o $(OUT)/r3000a_asm.o $(OUT)/imports.o
 
-all: $(OUT)/r3000a.irx $(OUT)/net.irx $(OUT)/rawnet.irx $(OUT)/usbraw.irx $(OUT)/fileraw.irx $(OUT)/rawnet_mx.irx
+all: $(OUT)/r3000a.irx $(OUT)/net.irx $(OUT)/rawnet.irx $(OUT)/usbraw.irx $(OUT)/fileraw.irx $(OUT)/rawnet_mx.irx $(OUT)/hidprobe.irx
 
 $(OUT)/%.o: %.c irx_imports.h
 	@mkdir -p $(OUT)
@@ -41,6 +42,7 @@ $(OUT)/rawnet_mx.o: rawnet.c rawnet_mx_imports.h ../../iop/dev9/mxeth/include/mx
                       ../../iop/dev9/mxdev9/include/mxdev9.h
 $(OUT)/usbraw.o: usbraw_imports.h
 $(OUT)/fileraw.o: fileraw_imports.h
+$(OUT)/hidprobe.o: hidprobe_imports.h
 
 $(OUT)/%_imports.o: %_imports.lst %_imports.h irx_imports.h
 	@mkdir -p $(OUT)
@@ -63,6 +65,9 @@ $(OUT)/usbraw.elf: $(OUT)/usbraw.o $(OUT)/usbraw_imports.o
 	$(LD) -o $@ $^
 
 $(OUT)/fileraw.elf: $(OUT)/fileraw.o $(OUT)/fileraw_imports.o
+	$(LD) -o $@ $^
+
+$(OUT)/hidprobe.elf: $(OUT)/hidprobe.o $(OUT)/hidprobe_imports.o
 	$(LD) -o $@ $^
 
 $(OUT)/%.irx: $(OUT)/%.elf

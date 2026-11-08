@@ -16,6 +16,7 @@ decision in maxsdk and in the compiler.
 | [vm.md](vm.md) | Virtual memory: the TLB, the kernel's exception paths, paging, DMA from VM |
 | [mx-os.md](mx-os.md) | mx OS: the design, rules for porting games and apps |
 | [mx-os-plan.md](mx-os-plan.md) | mx OS: the steps towards programs in windows (address spaces, the GUI owning the GS) |
+| [pad-bt-plan.md](pad-bt-plan.md) | Pads over USB and Bluetooth: DS3/DS4/DS5, our own Bluetooth host stack, the steps |
 | [kernel.md](kernel.md) | mx-kernel and the two libraries, `libmx` and `libmxk` |
 | [iop-drivers.md](iop-drivers.md) | maxsdk's IOP drivers for DEV9: mxdev9, mxeth (design, measurements, steps) |
 | [vif.md](vif.md) | VIF codes: costs and behaviour |
