@@ -392,6 +392,9 @@ static u32 ent_lo(u32 i) {
   return bios_tlb[i].hi & ~(pair - 1);
 }
 static u32 ent_hi(u32 i) { return ent_lo(i) + (bios_tlb[i].pm | 0x1FFFu); }
+/* the physical memory it maps (EntryLo0's frame, both halves): a program's
+   core may be elsewhere than its addresses (mx__core_off) */
+static u32 ent_phys(u32 i) { return bios_tlb[i].lo0 >> 6 << 12; }
 
 /* The VM's TLB: the BIOS's entries are read and saved; what the program,
    ps2link and the kernel use stays where it is (the scratchpad, kseg3,
@@ -425,7 +428,7 @@ static void tlb_init(u32 flo, u32 fhi) {
     } else if (lo >= 0x30000000u && hi <= 0x31FFFFFFu) {
       tlb_clear(i);
       ucab = ucab < 0 ? (int)i : ucab;
-    } else if (hi < 0x02000000u && lo >= flo && hi < fhi) {
+    } else if (hi < 0x02000000u && ent_phys(i) >= flo && ent_phys(i) + (hi - lo) < fhi) {
       tlb_clear(i); /* only frames: reached through MX_PHYS_WIN */
     } else
       tlb_fixed[i] = 1;
@@ -1805,6 +1808,14 @@ static void undo_init(void) {
   mx__heap_untake();
 }
 
+/* The kernel, for a program whose core is at a run of its own: the frames
+   are this physical memory, not the heap's top (step 2b). */
+static u32 frames_lo, frames_hi;
+void mx__vm_frames(u32 phys_lo, u32 phys_hi) {
+  frames_lo = (phys_lo + PAGE - 1) & ~(PAGE - 1);
+  frames_hi = phys_hi & ~(PAGE - 1);
+}
+
 int mx_vm_init(const struct mx_vm_config *cfg) {
   if (vm.active || mx_bios_get_memory_size() != 32 * 1024 * 1024)
     return -1;
@@ -1857,10 +1868,17 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
     }
   }
   /* everything above the break is frames but what the VM's last tables
-     and the physical allocator's little use after it need */
+     and the physical allocator's little use after it need; or, the core at
+     a run of its own (the kernel, mx__vm_frames), the physical memory the
+     kernel gives */
   u32 keep = 64u << 10;
   u32 bytes;
-  u8 *mem = mx__heap_take(keep, PAGE, &bytes);
+  u8 *mem;
+  if (frames_hi > frames_lo) {
+    mem = (u8 *)(uintptr_t)(MX_PHYS_WIN + frames_lo);
+    bytes = frames_hi - frames_lo;
+  } else
+    mem = mx__heap_take(keep, PAGE, &bytes);
   if (cfg->frames && cfg->frames < bytes)
     bytes = cfg->frames & ~(PAGE - 1);
   u32 nf = bytes / PAGE;

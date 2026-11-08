@@ -26,6 +26,7 @@ MEMORY {
 
 PHDRS {
   text PT_LOAD;
+  note PT_NOTE;
   vmtext PT_LOAD;
   vmdata PT_LOAD;
 }
@@ -44,7 +45,11 @@ SECTIONS {
     __text_end = .;
   } >ram :text
 
-  .vutext : ALIGN(16) { *(.vutext .vutext.*) } >ram
+  /* libmxk's note for the kernel (src/base/kstubs.c): in the text segment
+     and a PT_NOTE of its own */
+  .note.mxk : ALIGN(4) { KEEP(*(.note.mxk)) } >ram :text :note
+
+  .vutext : ALIGN(16) { *(.vutext .vutext.*) } >ram :text
 
   .rodata : ALIGN(128) {
     *crt0.o(.rodata .rodata.* .rdata)
@@ -89,6 +94,10 @@ SECTIONS {
     . = ALIGN(16);
     __bss_end = .;
   } >ram
+  /* The main stack (crt0's SetupThread): in the core after the program, not
+     at the top of memory, so that it moves with the core when the kernel puts
+     that at a physical run of its own (docs/mx-os-plan.md, step 2b) */
+  .stack (NOLOAD) : ALIGN(64) { __mx_main_stack = .; . += 128 * 1024; } >ram
   _end = .;
 
   /* VM: the program's own objects */
@@ -104,7 +113,7 @@ SECTIONS {
 
   /DISCARD/ : { *(.MIPS.abiflags) *(.reginfo) *(.gnu.attributes) *(.comment) *(.pdr) }
 
-  PROVIDE(__stack = -1);
+  PROVIDE(__stack = __mx_main_stack);
   PROVIDE(__stack_size = 128 * 1024);
 }
 

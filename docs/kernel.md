@@ -49,7 +49,20 @@ the heaps and the program break work in those. It also gives the program an ASID
 (1-255 in turn; `mx__asid_set`, `tools/mxlink/ee/exec.c`): the VM's entries are written under
 it and not global, so they match only that program's address space (`docs/mx-os-plan.md`,
 step 2b). The kernel is at ASID 0 again at the program's end (`tlb_restore`). Programs not on
-`libmxk` stay at ASID 0. The kernel's VM state is cleared by the
+`libmxk` stay at ASID 0.
+
+From version 9 a `libmxk` program carries a note (`PT_NOTE`, name "MXK", `src/base/kstubs.c`):
+the version it was built for and the address of its `mx__core_off`. One linked into VM gets
+its core at a physical run of its own before its load (`core_place`, `tools/mxlink/ee/exec.c`):
+[0x10_0000, its end + 256 KiB of core heap) rounded to 1 MiB, at the top of main memory, mapped
+by entries of its ASID in the slots of the BIOS's cached entries from 0x10_0000
+(`tlb_core_map`, `tools/mxlink/ee/tlb.c`; 4 MiB, 1 MiB or 256 KiB pages, at most 8). The kernel
+writes the offset into the program's `mx__core_off` after the load and keeps it in its own while
+the program runs, so `mx_paddr_of` and `MX_UNCACHED` / `MX_UCAB` translate the program's
+pointers in both. The VM's frames are the memory below the run (`mx__vm_frames`), the core heap
+ends with it. The main stack of a program linked into VM is in its core (`.stack`, 128 KiB, in
+`ee/ld/maxsdk-vm*.ld`), not at the top of memory, so it moves with it. A program without VM, of
+an older version, or too large stays at its own addresses. The kernel's VM state is cleared by the
 restart after each program.
 
 ## The end of a program

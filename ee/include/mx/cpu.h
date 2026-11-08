@@ -12,9 +12,27 @@
    uncached accelerated (UCAB, 0x3...). The scratchpad is at 0x7000_0000. DMA
    needs the physical address (docs/dma.md: an uncached alias crashed the
    PS2). */
-#define MX_UNCACHED(p) ((__typeof__(&(p)[0]))(((uintptr_t)(p) & 0x0FFFFFFFu) | 0x20000000u))
-#define MX_UCAB(p) ((__typeof__(&(p)[0]))(((uintptr_t)(p) & 0x0FFFFFFFu) | 0x30000000u))
-#define MX_CACHED(p) ((__typeof__(&(p)[0]))((uintptr_t)(p) & 0x0FFFFFFFu))
+/* A program's core (0x10_0000 - 0x1FF_FFFF) may be at another physical
+   address, under its own ASID (docs/mx-os-plan.md, step 2b): physical =
+   virtual + mx__core_off there (src/base/core.c), virtual = physical
+   elsewhere (the kernel below 1 MiB, the uncached and UCAB views and
+   MX_PHYS_WIN). The uncached and UCAB views are of physical memory. */
+extern u32 mx__core_off;
+#define MX_CORE_LO 0x00100000u
+#define MX_CORE_HI 0x02000000u
+MX_INLINE u32 mx__phys(uintptr_t a) {
+  return a - MX_CORE_LO < MX_CORE_HI - MX_CORE_LO ? (u32)a + mx__core_off : (u32)(a & 0x0FFFFFFFu);
+}
+#define MX_UNCACHED(p) ((__typeof__(&(p)[0]))(uintptr_t)(mx__phys((uintptr_t)(p)) | 0x20000000u))
+#define MX_UCAB(p) ((__typeof__(&(p)[0]))(uintptr_t)(mx__phys((uintptr_t)(p)) | 0x30000000u))
+/* the cached view of an uncached or UCAB pointer into the kernel's memory or
+   the program's core */
+#define MX_CACHED(p)                                                                       \
+  ((__typeof__(&(p)[0]))(uintptr_t)(((uintptr_t)(p) & 0x0FFFFFFFu) - mx__core_off -        \
+                                            MX_CORE_LO <                                   \
+                                        MX_CORE_HI - MX_CORE_LO                            \
+                                    ? ((uintptr_t)(p) & 0x0FFFFFFFu) - mx__core_off        \
+                                    : ((uintptr_t)(p) & 0x0FFFFFFFu)))
 
 MX_INLINE int mx_is_spr(const void *p) { return ((uintptr_t)p & 0xF0000000u) == 0x70000000u; }
 
@@ -83,7 +101,7 @@ MX_INLINE mx_paddr mx_paddr_of(const void *p) {
     return mx__vm_paddr(p, 1);
   if (mx_is_spr(p))
     return (mx_paddr){(u32)((a & 0x3FFFu) | 0x80000000u)};
-  return (mx_paddr){(u32)(a & 0x0FFFFFFFu)};
+  return (mx_paddr){mx__phys(a)};
 }
 
 /* [p, p + bytes): core memory, the scratchpad, or VM pinned in one

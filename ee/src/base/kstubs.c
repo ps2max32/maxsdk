@@ -8,6 +8,19 @@
   ret name params { return mx__kernel->name args; }
 MXK_CALLS(MXK_STUB)
 
+/* The note that tells the kernel, before the program runs, that it is on
+   libmxk and which kernel version it was built for: a kernel of version 9
+   may then put its core at a physical run of its own and writes the offset
+   into mx__core_off (docs/mx-os-plan.md, step 2b). A PT_NOTE (the linker scripts in ee/ld). */
+struct mxk_note {
+  u32 namesz, descsz, type;
+  char name[4];
+  u32 version;
+  u32 *core_off;
+};
+__attribute__((section(".note.mxk"), used, aligned(4))) static const struct mxk_note mxk_note = {
+    4, 8, MXK_NOTE_TYPE, "MXK", MX_KERNEL_VERSION, &mx__core_off};
+
 /* <mx/mem.h>'s default heaps: const for programs, set here at the start */
 struct mx_heap *heap_pinned __asm__("mx_heap_pinned");
 struct mx_heap *heap_stream __asm__("mx_heap_stream");

@@ -117,8 +117,17 @@ A program whose run starts at its own addresses is as now.
   Started 2026-11-08: the ASID (2b-1). The kernel gives each `libmxk` program an ASID (1-255
   in turn) at its first call, and the VM's entries are written under it, not global
   (`tests/ps2/vm28_asid.c`: two runs in a row get 1 and 2, their VM entries carry them). On the
-  PS2 the VM tests, the VM-inside tests (ASID 0) and Quake as before. Next: the core at a
-  physical run of its own (2b-2).
+  PS2 the VM tests, the VM-inside tests (ASID 0) and Quake as before.
+
+  2b-2, the core at a physical run of its own (kernel table version 9, 2026-11-08): a note in
+  `libmxk` tells the kernel before the load, the kernel maps the core at the top of memory under
+  the program's ASID and writes the offset into it; `mx_paddr_of`, `MX_UNCACHED` and `MX_UCAB`
+  add it; the VM's frames are below the run; the main stack moved into the core (at the top of
+  memory it was outside). On the PS2 the VM tests, `vm24_home auto` (the frame pipeline's DMA)
+  and Quake (core at 0x1D0_0000) with moved cores, `tests/ps2/vm28_asid.c` (a DMA through the
+  scratchpad finds the core's data). Found: a program cannot read the TLB itself, `tlbr` sets
+  the CPU's ASID and its own code is then not mapped. Still open: a store past the core's end
+  faults only above the run's 1 MiB rounding.
 
 **2c. Processes side by side.** No program is limited to a share: mxloader (the shell,
 `MXSHELL.ELF`) may grow as large as a game. Only the cores take fixed memory (mxloader's about
@@ -128,13 +137,25 @@ kernel suspends its threads (and saves VU0's registers), runs the game under the
 and at its end sets mxloader's ASID again and resumes it, back at once and as it was. While
 the game runs mxloader's VM pages give way to the game's (LRU over all processes).
 
-**2d. Interrupts as events.** The vblank, the GS's and DMAC's interrupts and the timers are
-the kernel's: a process's handlers run only while it is the current one, or get a count of
-what happened meanwhile (the frame pipeline waits for its own vblank). Needed before two
-processes run at once.
+**2d. The kernel's own scheduler.** The BIOS's threads know no processes: switching from one
+process's thread to another's it keeps the ASID (the CPU's) and no VU0 register (`bios.md`), so
+two processes cannot both have threads that run. The kernel schedules the threads of `libmxk`
+programs itself: a thread list per process, the ASID and VU0's registers set at each switch, a
+whole process suspended or resumed at once, its end without searching the BIOS's ids. For that
+it takes over the interrupt dispatch and the return from an interrupt, where a switch happens
+(the BIOS's level-1 vectors are in RAM; a `SetSyscall` handler runs in kernel mode). Its own
+semaphores and sleep with it. Interrupts become the kernel's: a process's handlers run in its
+address space, or as events (the frame pipeline waits for its vblank).
 
 **2e. Both run.** mxloader draws while a game is paused (its threads suspended, its GS memory
-kept), and the game goes on when the shell gives it back: the base of step 3's windows.
+kept), and the game goes on when mxloader gives it back: the base of step 3's windows.
+
+**2f. The BIOS only at the boot.** After 2d what the kernel still asks of the BIOS is its own
+too: the SIF DMA queue (SifSetDma), the video mode (SetGsCrt), the caches, the program's start
+(SetupThread, SetupHeap). Then the BIOS's memory (0x0 - 0x7_FFFF, its code and tables) is the
+kernel's, all of the first MiB: room the kernel needs (mxlink's area 0x8_8000 - 0xF_F800 is
+full). Programs on ps2sdk and `libmx`, which call the BIOS themselves, then run only after a
+restart into the BIOS (ExecPS2 from the boot ROM again), or not.
 
 - The kernel no longer restarts (ExecPS2) after each program: it cleans up per process
   (threads, files, sockets, pad, sound, GS memory, interrupt handlers, VM frames).

@@ -17,7 +17,10 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 8
+#define MX_KERNEL_VERSION 9
+/* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
+   the version, the address of its mx__core_off */
+#define MXK_NOTE_TYPE 1
 /* The oldest table libmxk runs on: what came later it uses only when the
    table's version has it (the pad from version 6), else its own code. */
 #define MX_KERNEL_MIN 5
@@ -185,6 +188,8 @@ int mx__sif_calls_finish(void);
 /* the running process's ASID (src/vm/vm.c; docs/mx-os-plan.md, step 2b) */
 extern u32 mx__asid;
 void mx__asid_set(u32 asid);
+/* the VM's frames: this physical memory (a program's core at a run of its own) */
+void mx__vm_frames(u32 phys_lo, u32 phys_hi);
 void mx__sif_program_end(void);
 struct mx_sif_client;
 void mx__sif_client_check(struct mx_sif_client *c);

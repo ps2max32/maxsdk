@@ -6,11 +6,11 @@ memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-
 
 ## Model
 
-- One foreground program at a time. No process isolation yet: its core memory is at the BIOS's
-  mappings, and the DMAC uses physical addresses, so a program can always write anywhere.
-  Protection is against accidents only: the kernel's code is read-only for user mode. A
-  `libmxk` program runs under an ASID of its own, its VM entries only its own (on the way to
-  address spaces of their own: `mx-os-plan.md`, step 2b).
+- One foreground program at a time. A `libmxk` program runs under an ASID of its own, its VM
+  entries only its own; one linked into VM (`MX_MEMORY=vm`) and built for kernel version 9 also
+  has its core at a physical run of its own (the top of memory: `mx-os-plan.md`, step 2b). The
+  DMAC uses physical addresses, so a program can still write anywhere: protection is against
+  accidents only, and the kernel's code is read-only for user mode.
 - The IOP boots once. Its modules live in `mc0:/MXOS/`; storage drivers are loaded for the
   device in use by the shell. The network runs on maxsdk's drivers (mxdev9, mxeth, mxnet:
   `docs/iop-drivers.md`), and only on them: none on a PCMCIA PS2 (SCPH-1xxxx). The fast path for
@@ -43,7 +43,7 @@ memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-
 | `0x88000-0xBFFFF` | kernel data and stack |
 | `0xC0000-0xFF7FF` | kernel code, read-only for programs |
 | `0xFF800-0xFFFFF` | host commands |
-| `0x100000-0x1FFFFFF` | program (core memory) and VM frames |
+| `0x100000-0x1FFFFFF` | program (core memory) and VM frames; a moved core (above) is at the top, the frames below it |
 | `0x08000000-` | VM window, `MX_MEMORY=vm` |
 
 Retail PS2s have 32 MiB; never count on more.
@@ -65,7 +65,11 @@ Retail PS2s have 32 MiB; never count on more.
 6. **Swap.** Set `mx_vm_config.swap` to a relative name; the shell's shared
    `<device>/PS2MAX/swap.bin` replaces it. Never truncate or assume its size.
 7. **DMA.** Tags, chains, DMA buffers, thread stacks and interrupt handler data must be core or
-   pinned (`mx_vm_lock`, `mx_vm_pin`, `MX_CORE_FN`, `MX_CORE_DATA`), never plain VM.
+   pinned (`mx_vm_lock`, `mx_vm_pin`, `MX_CORE_FN`, `MX_CORE_DATA`), never plain VM. A physical
+   address only from `mx_paddr_of` / `mx_paddr_range`, an uncached view only from `MX_UNCACHED` /
+   `MX_UCAB`: a program's core need not be at its own addresses (`mx__core_off`), so never mask a
+   pointer (`& 0x0FFFFFFF`) or OR in `0x20000000` yourself. Nor read the TLB (`tlbr` changes the
+   CPU's ASID while your own code is under it).
 8. **Graphics are yours**: full control of GS, VIF, VU and DMA, but the display registers (PMODE,
    DISPFB, DISPLAY, BGCOLOR) only through maxsdk (`<mx/display.h>`, `mx_gs_*`): under `libmxk` the
    kernel writes them (`kernel.md`). Prefer beam racing for memory

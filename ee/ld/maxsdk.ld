@@ -20,6 +20,7 @@ MEMORY {
 
 PHDRS {
   text PT_LOAD;
+  note PT_NOTE;
 }
 
 SECTIONS {
@@ -30,8 +31,12 @@ SECTIONS {
     __text_end = .;
   } >ram :text
 
+  /* libmxk's note for the kernel (src/base/kstubs.c): in the text segment
+     and a PT_NOTE of its own */
+  .note.mxk : ALIGN(4) { KEEP(*(.note.mxk)) } >ram :text :note
+
   /* VU microcode, kept 16-byte aligned so it can be sent with MPG. */
-  .vutext : ALIGN(16) { *(.vutext .vutext.*) } >ram
+  .vutext : ALIGN(16) { *(.vutext .vutext.*) } >ram :text
 
   .rodata : ALIGN(128) { *(.rodata .rodata.*) *(.rdata) } >ram
 
