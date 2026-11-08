@@ -580,6 +580,10 @@ static void *rpc(int fn, void *data, int size) {
     a[0] = 0;
     break;
   }
+  case MXPAD_PAIR:
+    bt_pair(a[0]);
+    a[0] = 0;
+    break;
   default:
     a[0] = (u32)-1;
   }

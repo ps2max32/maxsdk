@@ -4,6 +4,7 @@
 
      p36_mxpad host:mxpad.irx [seconds [usbd path]]
      p36_mxpad - [seconds]     (mxpad already runs: mxlink loads it from mc0:/MXOS)
+     p36_mxpad - seconds pair  (and pairs a new pad over Bluetooth: MXPAD_PAIR)
 
    Loading the modules makes mxlink reset the IOP when the program ends. */
 
@@ -93,7 +94,8 @@ int main(int argc, char **argv) {
   int secs = 0;
   for (const char *c = argc > 2 ? argv[2] : "30"; *c >= '0' && *c <= '9'; c++)
     secs = secs * 10 + (*c - '0');
-  const char *usbd = argc > 3 ? argv[3] : "mc0:/MXOS/usbd.irx";
+  int pair = argc > 3 && argv[3][0] == 'p';
+  const char *usbd = argc > 3 && !pair ? argv[3] : "mc0:/MXOS/usbd.irx";
   mx_printf("p36: %s: %d (an error is fine when usbd already runs)\n", usbd, load(usbd, 0));
   /* "-": mxpad already runs (mxlink loads it at the boot) */
   int r = argv[1][0] == '-' && !argv[1][1] ? 0 : load(argv[1], 0);
@@ -111,6 +113,11 @@ int main(int argc, char **argv) {
   mx_printf("p36: area at %08x (paddr %08x), %u bytes\n", (u32)&area, mx_paddr_of(&area).v, (u32)sizeof area);
   mx_printf("p36: mxpad version %u, %u slots, %d s; plug pads in and out, press buttons\n",
             MX_UNCACHED(io + 8)[0], MX_UNCACHED(io + 8)[1], secs);
+  if (pair) {
+    a[0] = (u32)(secs > 10 ? secs - 10 : secs);
+    mx_sif_call(&rpc, MXPAD_PAIR, (void *)a, 16, (void *)MX_UNCACHED(io + 8), 16);
+    mx_printf("p36: pairing for %u s: put a pad in pairing mode (DualSense: Create + PS)\n", a[0]);
+  }
 
   struct mxpad_record last[MXPAD_PADS] = {0};
   int rumble_off[MXPAD_PADS] = {0};

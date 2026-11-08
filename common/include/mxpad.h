@@ -20,6 +20,11 @@
    with no pad in the slot */
 #define MXPAD_OUTPUT 2
 
+/* in: u32 seconds: for that long a pad in pairing mode (DualSense: Create +
+   PS, DS4: Share + PS) that is not paired yet is looked for over Bluetooth,
+   paired and connected; out: s32 0 */
+#define MXPAD_PAIR 3
+
 /* the pad's kind, 0: no pad in the slot */
 #define MXPAD_NONE 0
 #define MXPAD_DS3 1

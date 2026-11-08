@@ -142,6 +142,18 @@ times out only after seconds) has that link hung up and takes its slot. On the P
 Bluetooth slot 0, cable slot 0, Bluetooth slot 0. A DS3 plugged in while its link is up did not
 answer USB for a while, once until it was reset: its set-up is tried four times, half a second
 apart (not yet seen working: it did not happen again).
+The **DualSense** over Bluetooth (2026-11-08), paired over Bluetooth as BlueZ does it (`MXPAD_PAIR`
+for some seconds; `probe/p36_mxpad.c - <s> pair`): an inquiry, Create Connection to the first
+gamepad (class major `05`, minor `08`) that has no key yet, Remote Name Request ("DualSense
+Wireless Controller", or "Wireless Controller" for a DS4) for its kind, Authentication
+Requested, SSP's "just works" (IO capability NoInputNoOutput, general bonding; the CSR8510
+gives link key type 4), Set Connection Encryption, then the host opens the HID channels. It
+connects again when its PS button is pressed, with the key from the card, as the DS4 does.
+It sends the short report `0x01` (10 bytes) first and report `0x31` a moment after GET_REPORT
+feature `0x05` (Linux reads the calibration so): `0x31`, a sequence byte, then the USB report's
+bytes after its id. Its light: output report `0x31` (sequence in the high nibble, tag `0x10`,
+then the USB report 2's bytes from its flags, CRC32). Its battery byte (53) read 0 over USB and
+Bluetooth: by Linux's layout the lowest level, the pad nearly empty (its link timed out once).
 The pairings are kept in `mc0:/MXOS/BTPADS.DAT` (address, kind, key; up to 8), read when a
 dongle comes up and written by mxpad's Bluetooth thread after a new key: after an IOP reset the
 DS4 connects with its key without the cable first. On the PS2 the DS4's light over Bluetooth
@@ -200,7 +212,7 @@ Feature `0x09` gives the pad's address (1-6, reversed), `0x20` the firmware (Jul
 d-pad and face buttons as the DS4's byte 5, byte 9 L1 R1 L2 R2 Create Options L3 R3, byte 10 PS
 (bit 0), touchpad click (bit 1), mute (bit 2), first finger at 33-36 as the DS4's at 35-38.
 Byte 53 read as battery level gave 0 on the cable (its high nibble, the charge state, non-zero):
-to be checked against the raw byte. Output report `0x02` (63 bytes, interrupt out): light bar,
+by Linux's layout the lowest level, charging. Output report `0x02` (63 bytes, interrupt out): light bar,
 player light and rumble accepted. 45 s: 10865 reports, no errors, IOP idle 90%.
 
 Bluetooth dongle 1, `0A12:0001` (CSR, bcdDevice 3164), 2026-11-08: class E0/01/01, events on

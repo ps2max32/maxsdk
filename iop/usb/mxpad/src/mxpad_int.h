@@ -27,5 +27,8 @@ void bt_known(const u8 addr[6], int kind);
 /* bt.c: the pad at addr came on USB: its Bluetooth link goes (its slot is
    freed at once); 1 if it had one */
 int bt_drop(const u8 addr[6]);
+/* bt.c: for the given seconds, a pad in pairing mode that is not paired yet
+   is looked for, paired and connected (MXPAD_PAIR) */
+void bt_pair(u32 seconds);
 
 #endif

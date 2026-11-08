@@ -158,7 +158,13 @@ static void cmd(u16 op, const void *par, u8 len) {
 }
 
 /* opcodes */
+#define OP_INQUIRY 0x0401
+#define OP_INQUIRY_CANCEL 0x0402
+#define OP_CREATE_CONN 0x0405
 #define OP_ACCEPT_CONN 0x0409
+#define OP_AUTH_REQUESTED 0x0411
+#define OP_SET_ENCRYPTION 0x0413
+#define OP_REMOTE_NAME 0x0419
 #define OP_LINK_KEY_REPLY 0x040B
 #define OP_LINK_KEY_NEG 0x040C
 #define OP_PIN_NEG 0x040E
@@ -316,7 +322,62 @@ static struct conn {
   u16 ctrl, intr;   /* the pad's channel ids, 0: not open */
   u8 ctrl_cfg, intr_cfg, started, id;
   u8 led_wanted; /* the DS3's light, after the pad answered its start (HID handshake) */
+  u8 pairing;    /* ours, to pair it: name, authentication, encryption, then the channels */
+  u8 out_seq;    /* the DualSense's output reports are numbered */
+  u8 shown;      /* input reports not taken, shown (a few) */
 } conns[CONNS];
+
+/* ---- pairing over Bluetooth (MXPAD_PAIR): the DualSense, or any pad in
+   pairing mode. As BlueZ: an inquiry, a connection to the first gamepad
+   that is not paired yet, its name (DualSense or DS4), authentication (SSP's
+   "just works"), encryption, the key kept with its kind; then the host opens
+   the HID channels. ---- */
+
+static void addr_str(const u8 *a, char *s);
+static volatile u32 pair_rounds; /* inquiries (5 s each) still to make */
+static volatile int pair_kick;
+static int inquiring, pair_connecting;
+static u8 pair_addr[6];
+
+void bt_pair(u32 seconds) {
+  pair_rounds = (seconds + 4) / 5;
+  pair_kick = 1;
+  if (bt.used && !bt.gone)
+    SignalSema(bt.sema);
+}
+
+static void inquiry_next(void) {
+  if (!pair_rounds || inquiring || pair_connecting || !bt.ready)
+    return;
+  static const u8 inq[5] = {0x33, 0x8b, 0x9e, 0x04, 0x00}; /* GIAC, 4 x 1.28 s, no limit */
+  pair_rounds--;
+  inquiring = 1;
+  LOG("looking for a pad in pairing mode (%u more after this)\n", pair_rounds);
+  cmd(OP_INQUIRY, inq, 5);
+}
+
+/* an inquiry's answer: address, page scan repetition mode, class, clock offset */
+static void found(const u8 *addr, u8 psrm, u32 cls, u16 clock) {
+  if (pair_connecting || (cls & 0x1f00) != 0x0500 || (cls & 0xfc) != 0x08)
+    return; /* a peripheral that is a gamepad only */
+  int k = key_find(addr);
+  if (k >= 0 && keys[k].has_key)
+    return; /* paired already: it connects itself */
+  char a[18];
+  addr_str(addr, a);
+  LOG("pad in pairing mode: %s: connecting\n", a);
+  pair_connecting = 1;
+  memcpy(pair_addr, addr, 6);
+  if (inquiring)
+    cmd(OP_INQUIRY_CANCEL, 0, 0);
+  u8 par[13];
+  memcpy(par, addr, 6);
+  par[6] = 0x18, par[7] = 0xcc; /* DM1 DH1 DM3 DH3 DM5 DH5 */
+  par[8] = psrm, par[9] = 0;
+  par[10] = (u8)clock, par[11] = (u8)(clock >> 8 | 0x80); /* valid */
+  par[12] = 0x01; /* role switch allowed */
+  cmd(OP_CREATE_CONN, par, 13);
+}
 
 static void open_channel(struct conn *c, u16 psm, u16 ours);
 
@@ -334,8 +395,24 @@ static void conn_open(u16 handle, const u8 *addr) {
   memcpy(c->addr, addr, 6);
   int k = key_find(addr);
   c->kind = k < 0 ? 0 : keys[k].kind;
-  if (c->kind == MXPAD_DS4)
-    open_channel(c, PSM_CTRL, CID_CTRL); /* the DS4 waits for the host to open them */
+  if (pair_connecting && !memcmp(addr, pair_addr, 6)) {
+    /* ours, to pair: its name tells its kind */
+    u8 par[10];
+    memcpy(par, addr, 6);
+    par[6] = 0x01, par[7] = 0, par[8] = 0, par[9] = 0;
+    c->pairing = 1;
+    cmd(OP_REMOTE_NAME, par, 10);
+    return;
+  }
+  if (c->kind == MXPAD_DS4 || c->kind == MXPAD_DS5)
+    open_channel(c, PSM_CTRL, CID_CTRL); /* they wait for the host to open them */
+}
+
+static struct conn *conn_of_addr(const u8 *addr) {
+  for (int i = 0; i < CONNS; i++)
+    if (conns[i].used && !memcmp(conns[i].addr, addr, 6))
+      return &conns[i];
+  return 0;
 }
 
 static struct conn *conn_of(u16 handle) {
@@ -460,6 +537,25 @@ static u32 crc32(u32 crc, const u8 *p, u32 n) {
   return ~crc;
 }
 
+/* the DualSense's output report 0x31 (Linux's hid-playstation): id, a
+   sequence number in the high nibble, the tag 0x10, then the USB report 2's
+   bytes from its flags on; the CRC over the transaction header and report */
+static void ds5_light(struct conn *c, const u8 rgb[3]) {
+  static const u8 player[4] = {0x04, 0x0a, 0x15, 0x1b};
+  u8 o[79] = {0xa2, 0x31};
+  o[2] = (u8)(c->out_seq++ << 4), o[3] = 0x10;
+  u8 *b = o + 3; /* b[k]: the USB report's byte k (b[0] its id) */
+  b[1] = 0x03;        /* compatible vibration, haptics select */
+  b[2] = 0x04 | 0x10; /* light bar, player lights */
+  b[39] = 0x02;       /* light bar setup control */
+  b[42] = 0x02;       /* light bar setup: light out (ends the start-up animation) */
+  b[44] = player[c->slot & 3];
+  b[45] = rgb[0], b[46] = rgb[1], b[47] = rgb[2];
+  u32 crc = crc32(0, o, 75);
+  o[75] = (u8)crc, o[76] = (u8)(crc >> 8), o[77] = (u8)(crc >> 16), o[78] = (u8)(crc >> 24);
+  l2cap_send(c, c->intr, o, sizeof o);
+}
+
 /* both channels open and configured: the pad's input, and its light */
 static void hid_start(struct conn *c) {
   u8 rgb[3];
@@ -490,8 +586,15 @@ static void hid_start(struct conn *c) {
     u32 crc = crc32(0, o, 75);
     o[75] = (u8)crc, o[76] = (u8)(crc >> 8), o[77] = (u8)(crc >> 16), o[78] = (u8)(crc >> 24);
     l2cap_send(c, c->intr, o, sizeof o);
+  } else if (c->kind == MXPAD_DS5) {
+    /* GET_REPORT feature 0x05 (the calibration, as Linux reads it): the
+       DualSense sends its full report 0x31 from then on */
+    static const u8 get5[2] = {0x43, 0x05};
+    l2cap_send(c, c->ctrl, get5, 2);
+    ds5_light(c, rgb);
   }
-  LOG("slot %d: %s over Bluetooth\n", c->slot, c->kind == MXPAD_DS3 ? "DualShock 3" : "DualShock 4");
+  LOG("slot %d: %s over Bluetooth\n", c->slot,
+      c->kind == MXPAD_DS3 ? "DualShock 3" : c->kind == MXPAD_DS4 ? "DualShock 4" : "DualSense");
 }
 
 /* the DS3's light: SET_REPORT output 1, 36 bytes with the id, as Linux's
@@ -509,8 +612,8 @@ static void ds3_led(struct conn *c) {
 static void check_ready(struct conn *c) {
   if (c->started || !c->kind)
     return;
-  if (c->ctrl_cfg == (CFG_OUT | CFG_IN) && !c->intr && c->kind == MXPAD_DS4)
-    open_channel(c, PSM_INTR, CID_INTR); /* the DS4 waits for the host to open it */
+  if (c->ctrl_cfg == (CFG_OUT | CFG_IN) && !c->intr && (c->kind == MXPAD_DS4 || c->kind == MXPAD_DS5))
+    open_channel(c, PSM_INTR, CID_INTR); /* they wait for the host to open it */
   if (c->ctrl_cfg == (CFG_OUT | CFG_IN) && c->intr_cfg == (CFG_OUT | CFG_IN))
     hid_start(c);
 }
@@ -617,12 +720,26 @@ static u8 report[64];
 static void hid_input(struct conn *c, const u8 *d, u32 n) {
   if (c->slot < 0 || n < 2 || d[0] != 0xa1)
     return;
+  int taken = (c->kind == MXPAD_DS3 && d[1] == 0x01) || (c->kind == MXPAD_DS4 && d[1] == 0x11 && n >= 67) ||
+              (c->kind == MXPAD_DS5 && d[1] == 0x31 && n >= 66);
+  if (!taken && c->shown < 6) {
+    c->shown++;
+    LOG("slot %d: report %02x, %u bytes, not taken:", c->slot, d[1], n);
+    for (u32 i = 0; i < n && i < 16; i++)
+      printf(" %02x", d[i]);
+    printf("\n");
+  }
   if (c->kind == MXPAD_DS3 && d[1] == 0x01) {
     mxpad_input(c->slot, d + 1, n - 1); /* as over USB */
   } else if (c->kind == MXPAD_DS4 && d[1] == 0x11 && n >= 4 + 63) {
     /* report 0x11: id, two bytes, then report 0x01's bytes after its id */
     report[0] = 0x01;
     memcpy(report + 1, d + 4, 63);
+    mxpad_input(c->slot, report, 64);
+  } else if (c->kind == MXPAD_DS5 && d[1] == 0x31 && n >= 3 + 63) {
+    /* report 0x31: id, a sequence byte, then report 0x01's bytes after its id */
+    report[0] = 0x01;
+    memcpy(report + 1, d + 3, 63);
     mxpad_input(c->slot, report, 64);
   }
 }
@@ -676,6 +793,10 @@ static void event(const u8 *e, u32 n) {
     credits = p[1];
     if (p[0])
       LOG("command %04x: status %02x\n", p[2] | p[3] << 8, p[0]);
+    if (p[0] && (p[2] | p[3] << 8) == OP_INQUIRY)
+      inquiring = 0;
+    if (p[0] && (p[2] | p[3] << 8) == OP_CREATE_CONN)
+      pair_connecting = 0;
     break;
   case 0x04: { /* Connection Request: accept, we become master */
     addr_str(p, a);
@@ -689,6 +810,10 @@ static void event(const u8 *e, u32 n) {
   case 0x03: /* Connection Complete */
     addr_str(p + 3, a);
     LOG("connected %s: status %02x, handle %03x, encryption %u\n", a, p[0], (p[1] | p[2] << 8) & 0xfff, p[10]);
+    if (p[0] && pair_connecting && !memcmp(p + 3, pair_addr, 6)) {
+      pair_connecting = 0; /* failed: look again */
+      inquiry_next();
+    }
     if (!p[0])
       conn_open((u16)((p[1] | p[2] << 8) & 0xfff), p + 3);
     break;
@@ -710,11 +835,45 @@ static void event(const u8 *e, u32 n) {
     }
     break;
   }
-  case 0x18: /* Link Key Notification: keep it */
+  case 0x18: { /* Link Key Notification: keep it, with the kind its name told */
     addr_str(p, a);
+    struct conn *c = conn_of_addr(p);
     LOG("new link key for %s, type %u\n", a, p[22]);
-    key_put(p, p + 6, 0);
+    key_put(p, p + 6, c ? c->kind : 0);
     break;
+  }
+  case 0x01: /* Inquiry Complete */
+    inquiring = 0;
+    inquiry_next();
+    break;
+  case 0x02: /* Inquiry Result: address, psrm, 2 reserved, class, clock offset */
+    for (u32 i = 0; i < p[0]; i++) {
+      const u8 *r = p + 1 + i * 14;
+      found(r, r[6], (u32)(r[9] | r[10] << 8 | r[11] << 16), (u16)(r[12] | r[13] << 8));
+    }
+    break;
+  case 0x22: /* Inquiry Result with RSSI: address, psrm, 1 reserved, class, clock offset, rssi */
+    for (u32 i = 0; i < p[0]; i++) {
+      const u8 *r = p + 1 + i * 14;
+      found(r, r[6], (u32)(r[8] | r[9] << 8 | r[10] << 16), (u16)(r[11] | r[12] << 8));
+    }
+    break;
+  case 0x07: { /* Remote Name Request Complete: status, address, name */
+    struct conn *c = conn_of_addr(p + 1);
+    const char *name = (const char *)p + 7;
+    LOG("name: '%.40s' (status %02x)\n", p[0] ? "" : name, p[0]);
+    if (!c || !c->pairing)
+      break;
+    c->kind = !p[0] && !memcmp(name, "DualSense", 9) ? MXPAD_DS5
+              : !p[0] && !memcmp(name, "Wireless Controller", 19) ? MXPAD_DS4 : 0;
+    if (!c->kind) {
+      LOG("not a pad this knows\n");
+      break;
+    }
+    u8 h[2] = {(u8)c->handle, (u8)(c->handle >> 8)};
+    cmd(OP_AUTH_REQUESTED, h, 2);
+    break;
+  }
   case 0x16: /* PIN Code Request: pads use none */
     addr_str(p, a);
     LOG("PIN request from %s: refused\n", a);
@@ -734,12 +893,27 @@ static void event(const u8 *e, u32 n) {
     addr_str(p + 1, a);
     LOG("pairing with %s: status %02x\n", a, p[0]);
     break;
-  case 0x06: /* Authentication Complete */
-    LOG("authentication: handle %03x, status %02x\n", (p[1] | p[2] << 8) & 0xfff, p[0]);
+  case 0x06: { /* Authentication Complete */
+    u16 h = (u16)((p[1] | p[2] << 8) & 0xfff);
+    struct conn *c = conn_of(h);
+    LOG("authentication: handle %03x, status %02x\n", h, p[0]);
+    if (c && c->pairing && !p[0]) {
+      u8 par[3] = {(u8)h, (u8)(h >> 8), 0x01};
+      cmd(OP_SET_ENCRYPTION, par, 3);
+    }
     break;
-  case 0x08: /* Encryption Change */
-    LOG("encryption: handle %03x, status %02x, on %u\n", (p[1] | p[2] << 8) & 0xfff, p[0], p[3]);
+  }
+  case 0x08: { /* Encryption Change */
+    u16 h = (u16)((p[1] | p[2] << 8) & 0xfff);
+    struct conn *c = conn_of(h);
+    LOG("encryption: handle %03x, status %02x, on %u\n", h, p[0], p[3]);
+    if (c && c->pairing && !p[0] && p[3]) {
+      c->pairing = 0, pair_connecting = 0, pair_rounds = 0;
+      LOG("paired: opening its channels\n");
+      open_channel(c, PSM_CTRL, CID_CTRL);
+    }
     break;
+  }
   case 0x13: /* Number Of Completed Packets */
     for (u32 i = 0; i < p[0]; i++)
       bt.acl_free += (u16)(p[3 + i * 4] | p[4 + i * 4] << 8);
@@ -796,6 +970,10 @@ static void bt_thread(void *arg) {
       keys_save();
     if (drop_wanted)
       drop();
+    if (pair_kick) {
+      pair_kick = 0;
+      inquiry_next();
+    }
     while (rx_tail != rx_head && !bt.gone) {
       u32 i = rx_tail % RX_SLOTS;
       if (rx[i].type == PKT_EVENT)
