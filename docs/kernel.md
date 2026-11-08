@@ -45,7 +45,11 @@ else its own code (the pad: version 6), so a new program still runs on an older 
 | Network | `<mx/net.h>` | a service on the IOP, `iop/tcpip/mxsock`, loaded by mxlink when it is on the card, on lwIP over maxsdk's drivers (mxdev9, mxeth, mxnet); closed when a program ends. `mx_net_wait` sleeps at one of its four wait services (at most 100 ms a call); with an older mxsock it asks every millisecond |
 
 The program's first call gives the kernel its core memory after `_end` and its VM part;
-the heaps and the program break work in those. The kernel's VM state is cleared by the
+the heaps and the program break work in those. It also gives the program an ASID of its own
+(1-255 in turn; `mx__asid_set`, `tools/mxlink/ee/exec.c`): the VM's entries are written under
+it and not global, so they match only that program's address space (`docs/mx-os-plan.md`,
+step 2b). The kernel is at ASID 0 again at the program's end (`tlb_restore`). Programs not on
+`libmxk` stay at ASID 0. The kernel's VM state is cleared by the
 restart after each program.
 
 ## The end of a program

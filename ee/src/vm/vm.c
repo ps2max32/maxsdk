@@ -170,19 +170,31 @@ static u8 *frame_ptr(u32 f) { return vm.frames + f * PAGE; }
 
 /* ---- the TLB -------------------------------------------------------------- */
 
+/* The running process's address space (docs/mx-os-plan.md, step 2b): EntryHi's
+   ASID. The VM's entries are its (G = 0); the kernel sets it for a libmxk
+   program (mx__asid_set), 0 otherwise. EntryHi is also the CPU's ASID: tlbwi
+   and tlbr change it, so both set it back. */
+u32 mx__asid;
+
+void mx__asid_set(u32 asid) {
+  mx__asid = asid & 0xFFu;
+  __asm__ volatile("mtc0 %0, $10\n\tsync.p" : : "r"(mx__asid) : "memory");
+}
+
 static void tlb_write(u32 i, u32 pm, u32 hi, u32 lo0, u32 lo1) {
   __asm__ volatile("mtc0 %0, $0\n\tmtc0 %1, $5\n\tmtc0 %2, $10\n\tmtc0 %3, $2\n\tmtc0 %4, $3\n\t"
-                   "sync.p\n\ttlbwi\n\tsync.p"
+                   "sync.p\n\ttlbwi\n\tsync.p\n\tmtc0 %5, $10\n\tsync.p"
                    :
-                   : "r"(i), "r"(pm), "r"(hi), "r"(lo0), "r"(lo1)
+                   : "r"(i), "r"(pm), "r"(hi), "r"(lo0), "r"(lo1), "r"(mx__asid)
                    : "memory");
 }
 
 static void tlb_read(u32 i, u32 *pm, u32 *hi, u32 *lo0, u32 *lo1) {
   __asm__ volatile("mtc0 %4, $0\n\tsync.p\n\ttlbr\n\tsync.p\n\t"
-                   "mfc0 %0, $5\n\tmfc0 %1, $10\n\tmfc0 %2, $2\n\tmfc0 %3, $3"
+                   "mfc0 %0, $5\n\tmfc0 %1, $10\n\tmfc0 %2, $2\n\tmfc0 %3, $3\n\t"
+                   "mtc0 %5, $10\n\tsync.p"
                    : "=r"(*pm), "=r"(*hi), "=r"(*lo0), "=r"(*lo1)
-                   : "r"(i));
+                   : "r"(i), "r"(mx__asid));
 }
 
 /* A TLB entry for something new: the next one in turn, freed of what it
@@ -214,7 +226,7 @@ static void blk_write(u32 s, u32 pg, u32 b) {
   u32 lo = vm.lo[pg] + (b * BLK >> 12 << 6);
   if (vm.dbit && !(tr_seen(pg * BPP + b) & 2))
     lo &= ~LO_D;
-  tlb_write(s, PM4K, page_va(pg) + b * BLK, lo, lo + (4096 >> 12 << 6));
+  tlb_write(s, PM4K, (page_va(pg) + b * BLK) | mx__asid, lo, lo + (4096 >> 12 << 6));
 }
 
 /* Page pg's entry as lo[] says: written (a new one if it has none) when
@@ -240,7 +252,7 @@ static void tlb_sync(u32 pg) {
         vm.page_slot[bi] = (u8)s;
         F.slot_page[s] = (u16)(bi + 1);
       }
-      tlb_write(s, PM16K, page_va(pg), lo, lo + (HALF >> 12 << 6));
+      tlb_write(s, PM16K, page_va(pg) | mx__asid, lo, lo + (HALF >> 12 << 6));
     }
   }
 }
@@ -504,7 +516,8 @@ static void map(u32 pg, int write) {
   if ((write || !vm.dbit) && !is_mapped(pg)) /* mapped files: never D */
     vm.flags[pg] |= PG_DIRTY;
   u32 f = vm.frame_of[pg] - 1u;
-  vm.lo[pg] = mx_paddr_of(frame_ptr(f)).v >> 12 << 6 | LO_CACHED | LO_V | LO_G |
+  /* not global (no LO_G): the process's, under its ASID */
+  vm.lo[pg] = mx_paddr_of(frame_ptr(f)).v >> 12 << 6 | LO_CACHED | LO_V |
               (vm.flags[pg] & PG_DIRTY ? LO_D : 0);
   vm.flags[pg] |= PG_REF;
   F.stamp[pg] = F.refills;

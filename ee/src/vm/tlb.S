@@ -56,10 +56,10 @@ mx__vm_vector:
 	mtc0 $1, $3
 	ori $1, $0, 0x6000	# PageMask 16 KiB
 	mtc0 $1, $5
-	mfc0 $1, $8
-	srl $1, $1, 15
-	sll $1, $1, 15
-	mtc0 $1, $10		# EntryHi: the page's address, ASID 0
+	mfc0 $1, $10		# EntryHi: the refill set its VPN2 from BadVAddr and kept
+	ori $1, $1, 0x6000	# the ASID (the process's): VPN2's low bits cleared for
+	xori $1, $1, 0x6000	# the 32 KiB pair
+	mtc0 $1, $10
 	sync.p
 	tlbwi
 	sync.p

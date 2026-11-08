@@ -6,9 +6,11 @@ memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-
 
 ## Model
 
-- One foreground program at a time. No process isolation: same address space, and the DMAC
-  uses physical addresses, so a program can always write anywhere. Protection is against
-  accidents only: the kernel's code is read-only for user mode.
+- One foreground program at a time. No process isolation yet: its core memory is at the BIOS's
+  mappings, and the DMAC uses physical addresses, so a program can always write anywhere.
+  Protection is against accidents only: the kernel's code is read-only for user mode. A
+  `libmxk` program runs under an ASID of its own, its VM entries only its own (on the way to
+  address spaces of their own: `mx-os-plan.md`, step 2b).
 - The IOP boots once. Its modules live in `mc0:/MXOS/`; storage drivers are loaded for the
   device in use by the shell. The network runs on maxsdk's drivers (mxdev9, mxeth, mxnet:
   `docs/iop-drivers.md`), and only on them: none on a PCMCIA PS2 (SCPH-1xxxx). The fast path for

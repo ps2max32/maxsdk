@@ -182,6 +182,9 @@ void mx__irq_tell_kernel(void);
 /* The kernel at a program's end (2a): what the program left in the SIF
    layer, a client whose semaphore is gone, and the VM's vblank function. */
 int mx__sif_calls_finish(void);
+/* the running process's ASID (src/vm/vm.c; docs/mx-os-plan.md, step 2b) */
+extern u32 mx__asid;
+void mx__asid_set(u32 asid);
 void mx__sif_program_end(void);
 struct mx_sif_client;
 void mx__sif_client_check(struct mx_sif_client *c);
