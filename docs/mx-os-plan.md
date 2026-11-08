@@ -89,8 +89,15 @@ restart, they run alone). What ExecPS2 does now, the kernel does itself:
   Quake 600 frames twice, all without a restart; `tests/ps2/vm25_ids.c` (`probe/p34_ids.c` in
   VM) finds the same threads and as many semaphores after them as before. Interrupt handlers
   are removed from the program's own slots (`irq_tables`) rather than routed through the
-  kernel: that comes with step 2's interrupts as events. Not yet tried without the restart: a
-  program started from the shell, and the shell after it.
+  kernel: that comes with step 2's interrupts as events.
+
+  The shell's game, then the shell, found three more things ExecPS2 did (Quake from USB, its
+  swap on USB, quit from its menu; `tests/ps2/vm26_launch.c` starts programs as the shell does):
+  the data cache held Quake's dirty lines, written back over the shell after its load (the
+  shell ran its font); a `libmxk` from before version 8 does not show its interrupt slots, so
+  its handlers stayed with the BIOS and ran in the shell's memory (such programs take the
+  restart now); and calls to the IOP that the program's threads were waiting for, and their
+  packets, are waited for before the next program is loaded.
 
 - The kernel no longer restarts (ExecPS2) after each program: it cleans up per process
   (threads, files, sockets, pad, sound, GS memory, interrupt handlers, VM frames).

@@ -58,16 +58,23 @@ command thread and sleeps; the command thread then does what ExecPS2 did:
 - the program's interrupt handlers are removed: its `libmxk` told the kernel where its slots
   are (`irq_tables`), the kernel reads their BIOS ids and runs none of the program's code; a
   cause or channel without a handler of the kernel's own is disabled;
+- the calls to the IOP that its threads were waiting for are waited for, and every RPC packet
+  back (`mx__sif_calls_finish`, at most about 2 s): a late answer names a client in the
+  program's memory, where the next program is loaded;
 - what the program left in the kernel's SIF layer goes (`mx__sif_program_end`: sleepers and
-  servers in its memory, descriptor positions, the fio lock); the VM's and the home menu's
-  vblank functions are taken off;
+  servers in its memory, descriptor positions, the fio lock); the kernel's own clients whose
+  semaphore went with the program's make a new one; the VM's and the home menu's vblank
+  functions are taken off;
 - the units: DMA channels but SIF's stopped, VIF0/VIF1, GIF, IPU, VU0/VU1 reset, timers 0 and 1
-  stopped; the TLB written back;
+  stopped; the data cache written back and both caches emptied (else the program's dirty
+  lines land over the next program after its load); the TLB written back;
 - the IOP's cleanup as before (below); then the kernel's state of the program (the `.data` and
   `.bss` of the VM, heaps, exceptions, threads, the pad and the home menu, apart in
   `ee/resident.ld`) is set back as linked, and the screen comes back with its log.
 A program that changed the IOP (loaded modules), an IOP that does not answer, a program not on
-`libmxk` (ps2sdk's, `libmx`), `mx_loader_launch` and the host's reset still take the restart:
+`libmxk` (ps2sdk's, `libmx`), a `libmxk` program from before version 8 (it did not tell the
+kernel its interrupt slots: its handlers would stay with the BIOS, in the next program's
+memory), `mx_loader_launch` and the host's reset still take the restart:
 
 Each such program ends in `ExecPS2`, which starts the kernel again but does not load it: `.bss`
 is cleared by the start-up, and `.data` is restored from a copy by `mxlink_start`

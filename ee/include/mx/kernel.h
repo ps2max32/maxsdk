@@ -181,6 +181,7 @@ void mx__home_poll(void);
 void mx__irq_tell_kernel(void);
 /* The kernel at a program's end (2a): what the program left in the SIF
    layer, a client whose semaphore is gone, and the VM's vblank function. */
+int mx__sif_calls_finish(void);
 void mx__sif_program_end(void);
 struct mx_sif_client;
 void mx__sif_client_check(struct mx_sif_client *c);

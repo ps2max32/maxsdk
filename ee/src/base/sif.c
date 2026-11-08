@@ -428,6 +428,7 @@ int mx__irq_vbon_hook(void (*fn)(void));
    with *r the result (0, or -1: gave up after limit cycles from t0, unless
    limit is 0), or 0 if it cannot sleep here (the caller spins). */
 int mx__sif_spin; /* probes: wait spinning, as before sleeping waits */
+static int sleep_hooked; /* wake_sleepers at each vblank start */
 static int sleep_wait(struct mx_sif_client *c, u32 limit, u32 t0, int *r) {
   u32 st = mx_status();
   if ((st & 0x10003u) != 0x10001u || mx__sif_spin)
@@ -442,9 +443,8 @@ static int sleep_wait(struct mx_sif_client *c, u32 limit, u32 t0, int *r) {
       return 0;
     c->sema = id + 1;
   }
-  static int hooked;
-  if (!hooked) {
-    hooked = 1;
+  if (!sleep_hooked) {
+    sleep_hooked = 1;
     mx__irq_vbon_hook(wake_sleepers);
   }
   int slot = -1, was = mx_di();
@@ -1591,6 +1591,80 @@ void mx__sif_client_check(struct mx_sif_client *c) {
 static int program_memory(const volatile void *p) {
   return ((u32)(uintptr_t)p & 0x1FFFFFFFu) >= 0x00100000u;
 }
+/* The calls that the program's threads (and the kernel's threads for it:
+   the VM's pager and writer) were waiting for when they were ended: the IOP
+   still answers them, and an answer that came later would end the next call
+   on the same client too early and free its packet. So they are waited for
+   here, after the threads are gone and before anything calls again (up to
+   240 wakes, at least 2 s; an RDATA the IOP asks for meanwhile is sent),
+   and their sleeper slots freed; then every RPC packet back. Returns the
+   waiting calls that did not end, plus the packets not back << 8. */
+int mx__sif_calls_finish(void) {
+  int left = 0;
+  for (int i = 0; i < NSLEEP; i++) {
+    struct mx_sif_client *c = sleepers[i];
+    if (!c)
+      continue;
+    /* asleep on its semaphore (not deleted yet): the answer and each
+       vblank start (wake_sleepers) signal it while it is a sleeper */
+    for (int wakes = 0; wakes < 240 && !c->done && c->sema; wakes++) {
+      if (ndeferred)
+        send_deferred();
+      if (!c->done)
+        mx_bios_wait_sema(c->sema - 1);
+    }
+    int was = mx_di();
+    if (c->done) {
+      c->sleeping = 0;
+      sleepers[i] = 0;
+    } else
+      left++;
+    mx_irq_restore(was);
+  }
+  if (ndeferred)
+    send_deferred();
+  /* Calls nobody waited for (the answer of a call sent without waiting
+     still frees its packet): the client of such an answer may be in the
+     program's memory, where the next program is loaded. So all packets
+     back first, asleep, woken at each vblank start as a sleeper. */
+  static struct mx_sif_client drain;
+  struct {
+    s32 count, max_count, init_count, wait_threads;
+    u32 attr, option;
+  } p = {0, 1, 0, 0, 0, 0};
+  int slot = -1, sema = pkt_busy ? mx_bios_create_sema(&p) : -1;
+  if (sema >= 0) {
+    if (!sleep_hooked) {
+      sleep_hooked = 1;
+      mx__irq_vbon_hook(wake_sleepers);
+    }
+    drain.sema = sema + 1;
+    int was = mx_di();
+    for (int i = 0; i < NSLEEP && slot < 0; i++)
+      if (!sleepers[i])
+        sleepers[i] = &drain, slot = i;
+    drain.sleeping = slot >= 0;
+    mx_irq_restore(was);
+    for (int wakes = 0; slot >= 0 && pkt_busy && wakes < 120; wakes++) {
+      if (ndeferred)
+        send_deferred();
+      if (pkt_busy)
+        mx_bios_wait_sema(sema);
+    }
+    was = mx_di();
+    drain.sleeping = 0;
+    if (slot >= 0)
+      sleepers[slot] = 0;
+    mx_irq_restore(was);
+    mx_bios_delete_sema(sema);
+    drain.sema = 0;
+  }
+  /* the rest given up: their answers would land in freed packets */
+  left += __builtin_popcount(pkt_busy) << 8;
+  pkt_busy = 0;
+  return left;
+}
+
 void mx__sif_program_end(void) {
   int was = mx_di();
   for (int i = 0; i < NSLEEP; i++)

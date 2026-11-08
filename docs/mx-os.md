@@ -23,8 +23,9 @@ memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-
   the one-shot: if it hangs, a reset boots the default again.
 - Start: mxlink loads the ELF (from `host:`, `usb0:`, `mx4sio0:`, `ata0:`, ...) and runs it in a thread
   at priority 64. End: back to mxlink, then the shell (`mc0:/MXOS/MXSHELL.ELF`) if it started
-  the program. A `libmxk` program ends without a restart: the kernel removes its threads,
-  semaphores and interrupt handlers and resets the units (`kernel.md`, The end of a program).
+  the program. A `libmxk` program (version 8 on) ends without a restart: the kernel removes its
+  threads, semaphores and interrupt handlers, waits for its IOP calls, resets the units and
+  empties the caches (`kernel.md`, The end of a program).
 
 | Who | Owns |
 |---|---|
