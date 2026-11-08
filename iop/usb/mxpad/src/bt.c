@@ -345,6 +345,37 @@ static struct conn *conn_of(u16 handle) {
   return 0;
 }
 
+/* bt_drop's request, for the thread */
+static u8 drop_addr[6];
+static volatile int drop_wanted;
+
+int bt_drop(const u8 addr[6]) {
+  int had = 0;
+  for (int i = 0; i < CONNS; i++)
+    if (conns[i].used && !memcmp(conns[i].addr, addr, 6))
+      had = 1;
+  if (!had || !bt.used || bt.gone)
+    return 0;
+  memcpy(drop_addr, addr, 6);
+  drop_wanted = 1;
+  SignalSema(bt.sema);
+  return 1;
+}
+
+static void conn_close(u16 handle);
+
+/* from the thread: the link of a pad that came on USB, hung up */
+static void drop(void) {
+  drop_wanted = 0;
+  for (int i = 0; i < CONNS; i++)
+    if (conns[i].used && !memcmp(conns[i].addr, drop_addr, 6)) {
+      u8 par[3] = {(u8)conns[i].handle, (u8)(conns[i].handle >> 8), 0x13}; /* remote user terminated */
+      LOG("slot %d: the pad is on USB now: its link goes\n", conns[i].slot);
+      cmd(0x0406, par, 3); /* Disconnect */
+      conn_close(conns[i].handle);
+    }
+}
+
 static void conn_close(u16 handle) {
   struct conn *c = conn_of(handle);
   if (!c)
@@ -433,7 +464,7 @@ static u32 crc32(u32 crc, const u8 *p, u32 n) {
 static void hid_start(struct conn *c) {
   u8 rgb[3];
   c->started = 1;
-  c->slot = mxpad_open(c->kind);
+  c->slot = mxpad_open(c->kind, c->addr);
   if (c->slot < 0) {
     LOG("no slot free\n");
     return;
@@ -763,6 +794,8 @@ static void bt_thread(void *arg) {
     WaitSema(bt.sema);
     if (keys_dirty)
       keys_save();
+    if (drop_wanted)
+      drop();
     while (rx_tail != rx_head && !bt.gone) {
       u32 i = rx_tail % RX_SLOTS;
       if (rx[i].type == PKT_EVENT)

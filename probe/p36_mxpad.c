@@ -44,9 +44,10 @@ static int load(const char *path, const char *arg) {
 static int output(u32 slot, u8 small, u8 big) {
   volatile u32 *a = MX_UNCACHED(io);
   a[0] = slot, a[1] = (u32)small | (u32)big << 8, a[2] = 0;
-  if (mx_sif_call(&rpc, MXPAD_OUTPUT, (void *)a, 16, (void *)MX_UNCACHED(io + 8), 16) < 0)
-    return -1;
-  return (int)MX_UNCACHED(io + 8)[0];
+  mx_printf("p36: output slot %u %u/%u ...\n", slot, small, big);
+  int r = mx_sif_call(&rpc, MXPAD_OUTPUT, (void *)a, 16, (void *)MX_UNCACHED(io + 8), 16);
+  mx_printf("p36: output slot %u: %d\n", slot, r < 0 ? r : (int)MX_UNCACHED(io + 8)[0]);
+  return r < 0 ? -1 : (int)MX_UNCACHED(io + 8)[0];
 }
 
 /* the newer of the slot's two records */
@@ -117,6 +118,8 @@ int main(int argc, char **argv) {
   u32 updates = 0, seen_seq = 0; /* records seen, the highest seq */
   for (int t = 0; t < secs * 50; t++) {
     mx_sleep_us(20000);
+    if (t % 500 == 0)
+      mx_printf("p36: %d s\n", t / 50);
     for (int s = 0; s < MXPAD_PADS; s++) {
       struct mxpad_record n = newest(s);
       if (n.kind && !n.connected && dumps < 6) { /* not a record mxpad writes: the area as it is */
@@ -146,6 +149,7 @@ int main(int argc, char **argv) {
         rumble_off[s] = 0;
       }
   }
+  mx_printf("p36: the area off ...\n");
   a[0] = 0; /* no more DMA into this program's memory */
   mx_sif_call(&rpc, MXPAD_AREA, (void *)a, 16, (void *)MX_UNCACHED(io + 8), 16);
   mx_printf("p36: end: %u updates seen, last seq %u\n", updates, seen_seq);

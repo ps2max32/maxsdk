@@ -135,6 +135,13 @@ starts its input, all buttons, pressures and sticks as over USB. Its light: SET_
 of 36 bytes with the id (Linux's length; 48 made it hang), sent only after the pad's handshake
 to `F4` (one transaction at a time on the control channel, as Linux's hidp waits; sent at
 once, the DS3 kept all four lights blinking). A DS4 and a DS3 at once on one dongle work.
+A pad keeps its slot (its player number, its light) from USB to Bluetooth and back: a USB
+pad's slot is given once its address is read (DS3 `F2`, DS4 `0x12`, DualSense `0x09`), the one
+the address had last if free; a pad plugged in while its Bluetooth link is still up (the link
+times out only after seconds) has that link hung up and takes its slot. On the PS2 a DS3:
+Bluetooth slot 0, cable slot 0, Bluetooth slot 0. A DS3 plugged in while its link is up did not
+answer USB for a while, once until it was reset: its set-up is tried four times, half a second
+apart (not yet seen working: it did not happen again).
 The pairings are kept in `mc0:/MXOS/BTPADS.DAT` (address, kind, key; up to 8), read when a
 dongle comes up and written by mxpad's Bluetooth thread after a new key: after an IOP reset the
 DS4 connects with its key without the cable first. On the PS2 the DS4's light over Bluetooth

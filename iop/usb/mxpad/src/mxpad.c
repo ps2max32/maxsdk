@@ -1,7 +1,10 @@
 /* mxpad: DualShock 3, DualShock 4 and DualSense pads on USB for the EE
    (common/include/mxpad.h), a class driver of ps2sdk's usbd.
 
-   Each pad gets a slot and a thread. The thread sets the pad up (its
+   Each pad on USB gets an entry and a thread; a pad's slot (its player
+   number for the EE) is given once its address is known, the one it had
+   before if that is free, so a pad keeps its slot from USB to Bluetooth and
+   back. Each pad gets a thread. The thread sets the pad up (its
    configuration, the DS3's start report 0xF4, the slot's light), starts its
    input and then sends output (rumble, light) when the EE asks for it. The
    input reports come in usbd's callbacks: each is decoded into the slot's
@@ -39,6 +42,8 @@ IRX_ID("mxpad", 1, 0);
 struct pad {
   int id, used, gone;
   int bt; /* a Bluetooth pad (bt.c): no USB, no thread here */
+  int slot; /* the EE's slot, -1: none yet */
+  u8 addr[6], has_addr; /* its Bluetooth address (HCI byte order) */
   u32 gen; /* this connection's: usbd's callbacks of an earlier one are dropped */
   int op_sema;   /* the thread's own transfers */
   int work_sema; /* output wanted, or the pad gone */
@@ -54,48 +59,113 @@ struct pad {
   u8 small, big, r, g, b;
   struct mxpad_record now; /* the state as last decoded (seq unused) */
   struct mxpad_record sent;
-  struct mxpad_record dma[2] __attribute__((aligned(16)));
-  int dma_id[2], last; /* last: the record written last */
   u8 rep[64] __attribute__((aligned(16)));
   u8 buf[64] __attribute__((aligned(16)));
 };
 
-static struct pad pads[MXPAD_PADS];
+/* more entries than slots: a pad plugged in while its Bluetooth link is
+   still up has two for a moment */
+#define ENTRIES (MXPAD_PADS + 2)
+static struct pad pads[ENTRIES];
 static u32 generation;
-/* a callback's argument: the slot and the connection's generation, so that a
+/* each slot's owner (an entry + 1, 0: free) and the slot's two records on
+   their way to the EE */
+static int slot_owner[MXPAD_PADS];
+static struct mxpad_record slot_dma[MXPAD_PADS][2] __attribute__((aligned(16)));
+static int slot_dma_id[MXPAD_PADS][2], slot_last[MXPAD_PADS];
+/* the slot each pad had last, by address */
+#define MEMOS 8
+static struct {
+  u8 addr[6], used;
+  int slot;
+} memo[MEMOS];
+static u32 memo_next;
+/* a callback's argument: the entry and the connection's generation, so that a
    transfer that ends after its pad went (usbd does not always call it back)
-   never touches the slot's next pad */
+   never touches the entry's next pad */
 #define TAG(p) ((void *)((u32)((p) - pads) | (p)->gen << 4))
 static volatile u32 area; /* the EE's struct mxpad_area, physical; 0: none */
 static u32 seq, connections;
 
 /* ---- to the EE ---- */
 
-/* the slot's record to the older of its two in the EE's area. From usbd's
-   callbacks and the threads: with interrupts off, so one at a time. */
-static void send(struct pad *p) {
-  int st;
+/* a record to the older of the slot's two in the EE's area: 1 when it went.
+   From usbd's callbacks and the threads: with interrupts off, so one at a time. */
+static int send_slot(int slot, const struct mxpad_record *rec) {
+  int st, sent = 0;
   CpuSuspendIntr(&st);
   u32 ee = area;
-  int slot = (int)(p - pads), i = p->last ^ 1;
+  int i = slot_last[slot] ^ 1;
   /* the older one still on its way (the IOP sends a record in microseconds):
      the next report sends the state */
-  if (ee && !(p->dma_id[i] && sceSifDmaStat(p->dma_id[i]) >= 0)) {
-    struct mxpad_record *r = &p->dma[i];
-    *r = p->now;
+  if (ee && !(slot_dma_id[slot][i] && sceSifDmaStat(slot_dma_id[slot][i]) >= 0)) {
+    struct mxpad_record *r = &slot_dma[slot][i];
+    *r = *rec;
     r->seq = ++seq;
     SifDmaTransfer_t d;
     d.src = r;
     d.dest = (void *)(ee + (u32)(slot * 2 + i) * sizeof *r);
     d.size = sizeof *r;
     d.attr = 0;
-    p->dma_id[i] = (int)sceSifSetDma(&d, 1);
-    if (p->dma_id[i]) {
-      p->last = i;
-      p->sent = p->now;
-    }
+    slot_dma_id[slot][i] = (int)sceSifSetDma(&d, 1);
+    if (slot_dma_id[slot][i])
+      slot_last[slot] = i, sent = 1;
   }
   CpuResumeIntr(st);
+  return sent;
+}
+
+/* the pad's state to its slot */
+static void send(struct pad *p) {
+  if (p->slot >= 0 && send_slot(p->slot, &p->now))
+    p->sent = p->now;
+}
+
+/* a slot for the pad: the one it had before if that is free, else the first
+   free one; -1 when all are taken */
+static int claim_slot(struct pad *p) {
+  int want = -1, m = -1;
+  for (int i = 0; i < MEMOS && p->has_addr; i++)
+    if (memo[i].used && !memcmp(memo[i].addr, p->addr, 6))
+      m = i, want = memo[i].slot;
+  int st;
+  CpuSuspendIntr(&st);
+  if (want < 0 || slot_owner[want])
+    for (want = 0; want < MXPAD_PADS && slot_owner[want]; want++)
+      ;
+  if (want < MXPAD_PADS)
+    slot_owner[want] = (int)(p - pads) + 1;
+  CpuResumeIntr(st);
+  if (want >= MXPAD_PADS)
+    return -1;
+  if (p->has_addr) {
+    if (m < 0)
+      m = (int)(memo_next++ % MEMOS);
+    memcpy(memo[m].addr, p->addr, 6);
+    memo[m].used = 1, memo[m].slot = want;
+  }
+  p->slot = want;
+  p->now.connected = ++connections;
+  send(p);
+  return want;
+}
+
+/* the pad gone: its slot empty for the EE, and free */
+static void release_slot(struct pad *p) {
+  if (p->slot < 0)
+    return;
+  memset(&p->now, 0, sizeof p->now);
+  send_slot(p->slot, &p->now);
+  slot_owner[p->slot] = 0;
+  p->slot = -1;
+}
+
+/* the slot's own: free or not, from its memo */
+static int slot_of_addr(const u8 *addr) {
+  for (int i = 0; i < MEMOS; i++)
+    if (memo[i].used && !memcmp(memo[i].addr, addr, 6))
+      return memo[i].slot;
+  return -1;
 }
 
 static int same(const struct mxpad_record *a, const struct mxpad_record *b) {
@@ -238,7 +308,7 @@ static const u8 slot_rgb[MXPAD_PADS][3] = {{0, 0, 64}, {64, 0, 0}, {0, 64, 0}, {
 static const u8 slot_ds5[MXPAD_PADS] = {0x04, 0x0a, 0x15, 0x1b};
 
 static int output(struct pad *p) {
-  int slot = (int)(p - pads);
+  int slot = p->slot < 0 ? 0 : p->slot;
   u8 *b = p->buf, r = p->r, g = p->g, bl = p->b;
   if (!r && !g && !bl)
     r = slot_rgb[slot][0], g = slot_rgb[slot][1], bl = slot_rgb[slot][2];
@@ -282,26 +352,18 @@ static void addr_print(const char *what, const u8 *a) {
    on battery (it forgets the host it had) */
 static void pair(struct pad *p) {
   u8 host[6], me[6];
-  int slot = (int)(p - pads), r = -1;
-  if (!bt_host(host))
+  int r = -1;
+  if (!bt_host(host) || !p->has_addr)
     return;
   u8 *b = p->buf;
+  memcpy(me, p->addr, 6);
   if (p->kind == MXPAD_DS4) {
-    /* feature 0x12: its address at 1..6 (least significant byte first) */
-    if (control(p, 0xa1, 0x01, 0x0312, 16, b) || p->bytes < 7)
-      goto out;
-    memcpy(me, b + 1, 6);
     /* feature 0x13: the host's address and the link key */
     b[0] = 0x13;
     memcpy(b + 1, host, 6);
     bt_new_key(me, b + 7);
     r = control(p, 0x21, 0x09, 0x0313, 23, b);
   } else if (p->kind == MXPAD_DS3) {
-    /* feature 0xF2: its address at 4..9, most significant byte first */
-    if (control(p, 0xa1, 0x01, 0x03f2, 17, b) || p->bytes < 10)
-      goto out;
-    for (int i = 0; i < 6; i++)
-      me[i] = b[9 - i];
     /* feature 0xF5: the host's, most significant byte first */
     b[0] = 0x01, b[1] = 0x00;
     for (int i = 0; i < 6; i++)
@@ -312,8 +374,7 @@ static void pair(struct pad *p) {
   } else {
     return; /* the DualSense pairs over Bluetooth (step 3) */
   }
-out:
-  printf("mxpad: slot %d: ", slot);
+  printf("mxpad: slot %d: ", p->slot);
   if (r) {
     printf("pairing failed (%d)\n", r);
     return;
@@ -324,7 +385,7 @@ out:
 }
 
 static void pair_all(void) {
-  for (int i = 0; i < MXPAD_PADS; i++)
+  for (int i = 0; i < ENTRIES; i++)
     if (pads[i].used && !pads[i].gone && !pads[i].bt) {
       pads[i].want_pair = 1;
       SignalSema(pads[i].work_sema);
@@ -361,19 +422,49 @@ static void open_pipes(struct pad *p) {
     p->in_size = sizeof p->rep;
 }
 
+/* the pad's Bluetooth address (HCI byte order), from its feature reports */
+static void read_addr(struct pad *p) {
+  u8 *b = p->buf;
+  if (p->kind == MXPAD_DS4 && !control(p, 0xa1, 0x01, 0x0312, 16, b) && p->bytes >= 7) {
+    memcpy(p->addr, b + 1, 6), p->has_addr = 1; /* 0x12: at 1..6, least significant first */
+  } else if (p->kind == MXPAD_DS5 && !control(p, 0xa1, 0x01, 0x0309, 20, b) && p->bytes >= 7) {
+    memcpy(p->addr, b + 1, 6), p->has_addr = 1; /* 0x09: the same */
+  } else if (p->kind == MXPAD_DS3 && !control(p, 0xa1, 0x01, 0x03f2, 17, b) && p->bytes >= 10) {
+    for (int i = 0; i < 6; i++) /* 0xF2: at 4..9, most significant first */
+      p->addr[i] = b[9 - i];
+    p->has_addr = 1;
+  }
+}
+
 static void pad_thread(void *arg) {
   struct pad *p = arg;
-  int slot = (int)(p - pads);
   open_pipes(p);
-  int r = p->in < 0 ? -1 : control(p, 0x00, 0x09, p->config, 0, 0); /* SET_CONFIGURATION */
-  if (!r && p->kind == MXPAD_DS3) {
-    static const u8 start[4] = {0x42, 0x0c, 0x00, 0x00};
-    memcpy(p->buf, start, 4);
-    r = control(p, 0x21, 0x09, 0x03f4, 4, p->buf);
+  /* a DS3 plugged in while its Bluetooth link is up does not answer for a
+     while (it hung once for good, on the PS2): tried again before giving up */
+  int r = -1;
+  for (int tries = 0; tries < 4 && r && !p->gone && p->in >= 0; tries++) {
+    if (tries)
+      DelayThread(500 * 1000);
+    r = control(p, 0x00, 0x09, p->config, 0, 0); /* SET_CONFIGURATION */
+    if (!r && p->kind == MXPAD_DS3) {
+      static const u8 start[4] = {0x42, 0x0c, 0x00, 0x00};
+      memcpy(p->buf, start, 4);
+      r = control(p, 0x21, 0x09, 0x03f4, 4, p->buf);
+    }
   }
-  printf("mxpad: slot %d: %s (usb %d): %s\n", slot,
+  if (!r) {
+    read_addr(p);
+    /* plugged in while its Bluetooth link is up: that link goes, its slot is this one's */
+    int had = p->has_addr ? slot_of_addr(p->addr) : -1;
+    if (had >= 0 && slot_owner[had] && bt_drop(p->addr))
+      for (int i = 0; i < 20 && slot_owner[had]; i++)
+        DelayThread(20 * 1000);
+    if (claim_slot(p) < 0)
+      r = -1;
+  }
+  printf("mxpad: slot %d: %s (usb %d): %s\n", p->slot,
          p->kind == MXPAD_DS3 ? "DualShock 3" : p->kind == MXPAD_DS4 ? "DualShock 4" : "DualSense", p->id,
-         r ? "set-up failed" : "ready");
+         r ? "set-up failed or no slot free" : "ready");
   if (!r) {
     output(p);
     pair(p);
@@ -392,9 +483,8 @@ static void pad_thread(void *arg) {
     }
   }
   /* gone: the EE sees the slot empty */
-  memset(&p->now, 0, sizeof p->now);
-  send(p);
-  printf("mxpad: slot %d: gone\n", slot);
+  printf("mxpad: slot %d: gone\n", p->slot);
+  release_slot(p);
   DeleteSema(p->op_sema);
   DeleteSema(p->work_sema);
   p->used = 0;
@@ -417,7 +507,7 @@ static int probe(int id) { return kind_of(id) != MXPAD_NONE; }
 
 static int connect(int id) {
   struct pad *p = 0;
-  for (int i = 0; i < MXPAD_PADS && !p; i++)
+  for (int i = 0; i < ENTRIES && !p; i++)
     if (!pads[i].used)
       p = &pads[i];
   if (!p)
@@ -426,13 +516,13 @@ static int connect(int id) {
   iop_thread_t t = {TH_C, 0, pad_thread, 0x800, 0x28};
   memset(p, 0, sizeof *p);
   p->used = 1, p->id = id, p->kind = kind_of(id), p->gen = ++generation & 0x0fffffff;
+  p->slot = -1;
   p->op_sema = CreateSema(&s);
   p->work_sema = CreateSema(&s);
   p->ctrl = sceUsbdOpenPipe(id, 0);
   p->now.kind = (u8)p->kind;
   p->now.battery = 255;
   p->now.lx = p->now.ly = p->now.rx = p->now.ry = 128;
-  p->now.connected = ++connections;
   sceUsbdSetPrivateData(id, p);
   int th = CreateThread(&t);
   if (th <= 0 || StartThread(th, p) < 0) {
@@ -461,16 +551,21 @@ static void *rpc(int fn, void *data, int size) {
   u32 *a = data;
   (void)size;
   switch (fn) {
-  case MXPAD_AREA:
+  case MXPAD_AREA: {
+    static const struct mxpad_record none;
     area = a[0] & 0x1fffffff;
     for (int i = 0; i < MXPAD_PADS; i++) /* what the EE missed: every slot once */
-      send(&pads[i]);
+      if (slot_owner[i])
+        send(&pads[slot_owner[i] - 1]);
+      else
+        send_slot(i, &none);
     a[0] = MXPAD_VERSION, a[1] = MXPAD_PADS;
     break;
+  }
   case MXPAD_OUTPUT: {
     u32 slot = a[0];
     const u8 *o = (const u8 *)(a + 1);
-    struct pad *p = slot < MXPAD_PADS ? &pads[slot] : 0;
+    struct pad *p = slot < MXPAD_PADS && slot_owner[slot] ? &pads[slot_owner[slot] - 1] : 0;
     if (!p || !p->used || p->gone) {
       a[0] = (u32)-1;
       break;
@@ -502,8 +597,8 @@ static void rpc_thread(void *arg) {
 
 int _start(int argc, char **argv) {
   (void)argc, (void)argv;
-  for (int i = 0; i < MXPAD_PADS; i++)
-    pads[i].now.lx = pads[i].now.ly = pads[i].now.rx = pads[i].now.ry = 128;
+  for (int i = 0; i < ENTRIES; i++)
+    pads[i].slot = -1;
   sceSifInitRpc(0);
   iop_thread_t t = {TH_C, 0, rpc_thread, 0x800, 0x50};
   int th = CreateThread(&t);
@@ -522,35 +617,43 @@ int _start(int argc, char **argv) {
    are first used, so the first function of .text is the file's first one
    that is not static, and iopfixup takes only _start at 0. */
 
-int mxpad_open(int kind) {
-  for (int i = 0; i < MXPAD_PADS; i++) {
+int mxpad_open(int kind, const u8 addr[6]) {
+  for (int i = 0; i < ENTRIES; i++) {
     struct pad *p = &pads[i];
     if (p->used)
       continue;
     memset(p, 0, sizeof *p);
     p->used = 1, p->bt = 1, p->kind = kind, p->gen = ++generation & 0x0fffffff;
+    p->slot = -1;
+    memcpy(p->addr, addr, 6), p->has_addr = 1;
     p->now.kind = (u8)kind;
     p->now.battery = 255;
     p->now.lx = p->now.ly = p->now.rx = p->now.ry = 128;
-    p->now.connected = ++connections;
-    send(p);
-    return i;
+    if (claim_slot(p) < 0) {
+      p->used = 0;
+      return -1;
+    }
+    return p->slot;
   }
   return -1;
 }
 
+static struct pad *bt_pad(int slot) {
+  struct pad *p = slot >= 0 && slot < MXPAD_PADS && slot_owner[slot] ? &pads[slot_owner[slot] - 1] : 0;
+  return p && p->used && p->bt ? p : 0;
+}
+
 void mxpad_input(int slot, const u8 *r, u32 n) {
-  struct pad *p = &pads[slot];
-  if (p->used && p->bt && !decode(p, r, n) && !same(&p->now, &p->sent))
+  struct pad *p = bt_pad(slot);
+  if (p && !decode(p, r, n) && !same(&p->now, &p->sent))
     send(p);
 }
 
 void mxpad_close(int slot) {
-  struct pad *p = &pads[slot];
-  if (!p->used || !p->bt)
+  struct pad *p = bt_pad(slot);
+  if (!p)
     return;
-  memset(&p->now, 0, sizeof p->now);
-  send(p);
+  release_slot(p);
   p->used = 0;
 }
 
