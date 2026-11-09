@@ -40,7 +40,7 @@ else its own code (the pad: version 6), so a new program still runs on an older 
 | IOP | `<mx/iop.h>`, `<mx/sif.h>` | over the kernel's SIF; `mx_iop_reboot_image` (an IOPRP image in EE memory) is libmx's only: -1 under the kernel, which resets the IOP by a path |
 | Pad | `<mx/pad.h>` | the kernel's (version 6, `ee/src/base/pad.c`'s reading in the kernel's memory): it opens the ports when a program asks, applies the pad's settings (ports swapped, Cross and Circle swapped: `apps/mxos/ee/pad.c`) and closes them when the program ends; on a kernel of version 5 the program's own, over the kernel's SIF. With `mxpad.irx` on the card also the USB pads (`common/include/mxpad.h`: their state written by SIF DMA into an area above the kernel's code), after the SIO2 pads; the home button (`MX_PAD_HOME`) of any pad goes to every port. A program built before `MX_PAD_HOME` ends on the combination only, so on a SIO2 pad it no longer ends by the combination there (rebuild it). Version 11: `mx_pad_rumble` (`pad_rumble`) drives a USB or Bluetooth pad's motors through `mxpad.irx`, a SIO2 DualShock's through PADMAN (`mx__pad_act`: DualShock mode, the motors' alignment once, then their values, each when the pad is done with its last request); the kernel calls the IOP only on a change, and stops every motor a program left running at its end. A SIO2 pad holds its port for half a second after it was last seen, and one that was there before for 1.5 s after a program opens the ports (`pad_init`), so the pads after it keep their ports |
 | Display, home menu | `<mx/display.h>`, `<mx/gs.h>` | the kernel's (version 7): maxsdk's one writer of the display registers (`apply`, `ee/src/gs/gs.c`) hands them to the kernel, which writes and keeps them, and the video mode after SetGsCrt. Select + Start + L1 + R1 ask for the home menu (`apps/mxos/ee/home.c`): the program stops at its next `mx_frame_begin_n` with the GS idle (`mx_frame_sync`), lends 35 pages of GS memory (free, else the texture cache's, dropped: `ee/src/gs/home.c`) and waits in `home_run`. The menu is drawn by the CPU and copied by IMAGE transfers through the GIF FIFO (no drawing register changes), shown on circuit 1 over the program's last picture. Not in hires mode, nor for a program that does not come within 2 s: the combination then ends it |
-| Sound | `<mx/snd.h>` | program's own, over the kernel's SIF |
+| Sound | `<mx/snd.h>` | program's own, over the kernel's SIF: maxsdk's `mxsnd.irx` (`iop/sound/mxsnd`, `common/include/mxsnd.h`) on libsd. The kernel boots mxsnd (with libsd): programs bind to it and load nothing (libmx carries both for a program without the kernel). At a program's end the kernel calls `MXSND_STOP` with its physical range: mxsnd's status writes into the program's memory (every 10.7 ms) stop, and its voices and stream are silenced, only when the status area is in that range (another program's sound, one beside it, goes on). mxsnd serves one program at a time: a second one's `mx_snd_init` takes it over |
 | Threads | `<mx/thread.h>`, `<mx/sched.h>` | the kernel's (version 10, below): threads, semaphores and interrupt handlers; `mx_sleep_us` takes EE timer 0, which `mx_exit` stops |
 | Network | `<mx/net.h>` | a service on the IOP, `iop/tcpip/mxsock`, loaded by mxlink when it is on the card, on lwIP over maxsdk's drivers (mxdev9, mxeth, mxnet); closed when a program ends. `mx_net_wait` sleeps at one of its four wait services (at most 100 ms a call); with an older mxsock it asks every millisecond |
 
@@ -123,6 +123,14 @@ woken. The kernel makes its slots' semaphores and the handler at its start (`mx_
 and, at a program's end, frees its threads' slots and sets the timer again (`mx__sleep_reap`,
 after `units_off` stopped it). A program's arguments are copied into its own memory at its
 start: the kernel's are the next program's once it starts another.
+
+Version 15: `proc_events` (`mx_proc_events`): the kernel's events to a port of the process
+(`kmsg.c`; up to 4 processes have one). An event is a message without a sender (`from` 0):
+the kernel puts it in a free slot without waiting (`kmsg_post`, from the command thread; it
+is dropped when all slots are taken) and the slot is free again once received, no reply
+wanted. The first: `MX_EVENT_END`, a program it started ended (its process and exit status),
+at `exec_unpark`. A process's end takes its registration; a port that goes takes its
+events not yet received.
 
 ## Interrupts and threads
 

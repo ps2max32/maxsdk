@@ -31,9 +31,13 @@ vpath %.vsm $(sort $(dir $(LIB_VSMS)))
 # IOP modules of ps2sdk that libmx loads (the sound driver, ee/src/base/snd.c),
 # as data: #embed <name.irx>, from ps2dev's prebuilt modules.
 PS2MAX_IRX ?= $(PS2MAX)/../ps2dev/install/ps2sdk/iop/irx
-LIB_IRX  := libsd audsrv
-$(OUT)/obj/ee/src/base/snd.c.o: CFLAGS += --embed-dir=$(PS2MAX_IRX)
-$(OUT)/obj/ee/src/base/snd.c.o: $(LIB_IRX:%=$(PS2MAX_IRX)/%.irx)
+# and maxsdk's own mxsnd (iop/sound/mxsnd), built first
+LIB_IRX  := libsd
+IOP_OUT  ?= $(PS2MAX)/build/libs/maxsdk/iop
+$(OUT)/obj/ee/src/base/snd.c.o: CFLAGS += --embed-dir=$(PS2MAX_IRX) --embed-dir=$(IOP_OUT) -I$(HERE)/common/include
+$(OUT)/obj/ee/src/base/snd.c.o: $(LIB_IRX:%=$(PS2MAX_IRX)/%.irx) $(IOP_OUT)/mxsnd.irx $(HERE)/common/include/mxsnd.h
+$(IOP_OUT)/mxsnd.irx: $(wildcard $(HERE)/iop/sound/mxsnd/src/*) $(HERE)/common/include/mxsnd.h
+	$(MAKE) -C $(HERE)/iop/sound/mxsnd OUT=$(IOP_OUT)
 # the VU0 renderer's feeder: its asm statements keep VF registers live
 $(OUT)/obj/ee/src/vu/vu0r.c.o: CFLAGS += -mvu0 $(foreach r,$(shell seq 1 31),-ffixed-vf$(r))
 

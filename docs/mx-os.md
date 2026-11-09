@@ -61,7 +61,8 @@ Retail PS2s have 32 MiB; never count on more.
    from `host:` and `usb0:`. Never write `host:` or a device name in a game; make engine base
    directories `.`.
 3. **No IOP work.** No IOP reset, no module loading, no `rom0:` drivers: `mx_pad_init` and
-   `mx_snd_init` bind to what runs. Loading a module forces a full IOP reset at return.
+   `mx_snd_init` bind to what runs (the kernel boots mxsnd: `kernel.md`, Sound). Loading a
+   module forces a full IOP reset at return.
 4. **No loader calls.** No `ExecPS2`, `LoadExecPS2` or BIOS `Exit`. End with `mx_exit`, `exit()` or
    a return from `main`; to start another program, `mx_loader_launch`. `mx_exit` ends the threads
    of `mx_thread_start`, without a chance to clean up.
@@ -83,7 +84,8 @@ Retail PS2s have 32 MiB; never count on more.
     other threads and interrupt handlers go on while the other runs: they may not end the
     program (`mx_exit`) or use the pad meanwhile, and the other runs in front.
     `mx_proc_spawn` (version 14) starts it without a waiting thread: `mx_proc_wait` for its
-    end and exit status, `mx_proc_kill` to end it.
+    end and exit status, `mx_proc_kill` to end it. `mx_proc_events` (version 15) sends the
+    kernel's events, such as that end, as messages to a port of yours.
 12. **Talking to another program** (kernel version 13): through the kernel, never through
     memory, which is your own (another program's addresses are its own). `<mx/proc.h>` lists
     the processes; `<mx/msg.h>`'s ports: make one by name (`mx_port_create`), receive and
