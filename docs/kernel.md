@@ -174,6 +174,22 @@ BIOS's page, read-only to programs. A process's end takes its timers, sleepers a
 timer now). The old `mx_timer_periodic(t, ...)` is a software timer too. A program of its own
 (`libmx`) has the same calls in `timer.c`, on timer 0, with timer 1 to lend out.
 
+Version 20: the host link is a service (`apps/mxlink/ee`, step 2e-4). ps2link.irx still sends
+ps2client's commands by SIF DMA to `0xFF800` (a SIF command packet is too small for execee's
+arguments, and the DMA arrives whatever program runs); the kernel's command thread passes
+execee and dumpreg (ps2client's ping) on to the port of the process with the IOP channel
+`MX_IOP_CHANNEL_HOST` (18, `<mx/iop.h>`): the packet up to its last string's 0. The kernel keeps
+the reset, dumpmem, writemem, gsexec, the VU commands and the IOP's exception, and serves all of
+them while no process has the channel (no service, a program that took all memory, a program on
+the BIOS's threads, mxlink-high). A service's `mx_proc_kill` or `mx_proc_spawn` of the program in
+front means the host took over: the text screen after it, not the shell, until the next reset,
+and a shell it ended keeps the IOP as the old takeover did (cleaned up, not reset: reading the
+modules again from the card failed after the shell's drivers). A service with nothing in front
+reports ready; one that ends before it calls `mx_proc_service` is not started again until the
+next reset. The kernel's file calls are one at a time for every process's threads (the lock of
+`sif.c`, made by the kernel, given back for a thread that ended in a call): a service's tty
+write and the kernel's own ran into each other and sent a packet twice.
+
 Two things a process beside showed: a program's end waits only for the IOP calls of its own
 threads, those that are gone (`mx__sif_calls_finish` keeps the calls and packets of threads
 still alive: a service's tty write was waited for until it gave up, and its packet was

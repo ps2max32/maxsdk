@@ -21,7 +21,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 19
+#define MX_KERNEL_VERSION 20
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -265,6 +265,11 @@ int mx__sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, 
 void mx__heap_range(void *lo, void *hi);
 void mx__vm_image_range(void *lo, void *hi);
 void mx__fio_crash(void);
+/* the kernel's file lock (sif.c): made; after threads ended (gone: 1 for a
+   thread that ended), given back if one of them had it */
+void mx__fio_lock_init(void);
+int mx__fio_owner(void);
+void mx__fio_release(int (*gone)(int tid));
 extern u32 mx__sif_wait_limit, mx__sif_timeouts;
 void mx__fio_ending(void (*stop)(void));
 

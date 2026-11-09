@@ -170,8 +170,21 @@ mxlink needs something, it is general:
      timers for every process and EE timers lent out (`mx_timer_add`, `mx_timer_claim`); the
      shell's hires claims one. Test `k42_timers` with `vm35_timers`. The shell and its console
      run on PCSX2 now.
-   - Next (needs the PS2: the network): mxlink's EE side (`cmd.c`) out of the kernel into the
-     app; ps2link.irx's commands by SIF command to its IOP channel. `MXOS.ELF` is the kernel
+   - Done 2026-11-09 (kernel version 20, on the PS2): the host link's first commands in the app.
+     The kernel passes ps2client's execee and dumpreg (the ping) to the process with the IOP
+     channel `MX_IOP_CHANNEL_HOST`; the app ends the shell for them and starts the host's
+     program, and prints its end marker. ps2link.irx keeps its DMA to `0xFF800`: a SIF command
+     packet (112 bytes) is too small for execee's 256 bytes of arguments, and the DMA reaches the
+     kernel whatever program runs. The kernel keeps the rest, and serves everything while no
+     service has the channel (a program that takes all memory ends the service; a program on the
+     BIOS's threads restarts the kernel). On the card: `MXLINK-APP.ELF` and `SERVICES.CFG`.
+     Learned: the kernel's file calls had no lock without VM (a service's tty write and the
+     kernel's sent a packet twice); a thread ended while woken for a semaphore took the lock with
+     it; the TLB entries kept for the one beside stayed after a program that takes all memory
+     ended it; reading the modules from the card again after the shell ended failed (its drivers):
+     a shell ended for the host keeps the IOP, as the takeover did.
+   - Next: dumpmem and writemem need the kernel's reading of another process's memory
+     (`proc_read`); then the rest of `cmd.c`, and the kernel without it. `MXOS.ELF` is the kernel
      alone, `MXLINK.ELF` a service on the interface, in `SERVICES.CFG`. At the boot the kernel
      starts mxlink and then the shell. ps2client works as before, and now also while a game
      runs. The skill and the card's install follow.

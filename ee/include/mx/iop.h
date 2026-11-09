@@ -84,4 +84,13 @@ int mx_iop_load_module_buffer(const void *buf, u32 size, const char *args, u32 a
    0, or -1 (taken, not its port, cid out of range). */
 int mx_iop_channel(u32 cid, int port);
 
+/* Kernel version 20: the channel of the host link. ps2client's commands,
+   which ps2link.irx sends by SIF DMA (not as SIF commands), come to the
+   port of this channel's process as messages: the packet as ps2client sent
+   it (big-endian fields), without its trailing zeros, up to MX_MSG_MAX
+   bytes. The kernel keeps the reset, dumpmem, writemem, gsexec, startvu,
+   stopvu and the IOP's exception, and serves all of them while no process
+   has the channel (mxlink's app, apps/mxlink/ee). */
+#define MX_IOP_CHANNEL_HOST 18
+
 #endif

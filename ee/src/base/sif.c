@@ -10,6 +10,7 @@
 #include <mx/hw/regs.h>
 #include <mx/iop.h>
 #include <mx/sif.h>
+#include <mx/thread.h>
 #include <mx/timer.h>
 #include <mx/string.h>
 #include <mx/vm.h>
@@ -817,47 +818,117 @@ static int fio_bind(void) {
 
 /* fio calls from more than one thread (the VM pager uses the file server
    from the faulting thread): one at a time. Not from interrupt handlers or
-   with interrupts off (debug output there), which cannot wait. */
+   with interrupts off (debug output there), which cannot wait. In the
+   kernel (mx-kernel, mx__kernel_self) always: every process's threads use
+   its file server (their tty, the host link's files), beside its own; its
+   lock is made by the kernel (mx__fio_lock_init).
+
+   The lock is fio_owner, the thread in a call; the semaphore only wakes the
+   ones that wait, which look again. A thread can end at any moment (a
+   process ended by another): one woken and gone before it ran took no lock,
+   one gone with it gives it back (mx__fio_release, after its end), and the
+   semaphore wakes the next then. */
 static int fio_sema = -1;
 
 static int fio_nolock;
+static volatile int fio_owner;
 
-static void fio_lock(void) {
-  if (fio_nolock || !mx_vm_active() || !(mx_status() & (1u << 16)))
-    return;
-  if (fio_sema < 0) {
-    struct {
-      s32 count, max_count, init_count, wait_threads;
-      u32 attr, option;
-    } p = {0, 1, 1, 0, 0, 0};
-    fio_sema = mx_bios_create_sema(&p);
-  }
-  mx_bios_wait_sema(fio_sema);
+extern const int mx__kernel_self __attribute__((weak));
+
+static int fio_locks(void) {
+  u32 st = mx_status();
+  if (fio_nolock || !(st & (1u << 16)) || (st & 6))
+    return 0;
+  return mx_vm_active() || (&mx__kernel_self && fio_sema >= 0);
 }
 
+static int fio_new_sema(void) {
+  struct {
+    s32 count, max_count, init_count, wait_threads;
+    u32 attr, option;
+  } p = {0, 1, 0, 0, 0, 0};
+  return mx_bios_create_sema(&p);
+}
+
+/* the lock, if it is free: 1 */
+static int fio_try(int me) {
+  int was = mx_di(), got = !fio_owner;
+  if (got)
+    fio_owner = me;
+  mx_irq_restore(was);
+  return got;
+}
+
+static void fio_lock(void) {
+  if (!fio_locks())
+    return;
+  if (fio_sema < 0)
+    fio_sema = fio_new_sema();
+  int me = mx_bios_get_thread_id();
+  while (!fio_try(me))
+    mx_bios_wait_sema(fio_sema);
+}
+
+static void fio_free(void) {
+  fio_owner = 0;
+  if (fio_sema >= 0)
+    mx_bios_signal_sema(fio_sema); /* at most 1: the next one looks */
+}
+
+/* by the thread that took it (whatever fio_locks says now) */
 static void fio_unlock(void) {
-  if (!fio_nolock && fio_sema >= 0 && mx_vm_active() && (mx_status() & (1u << 16))) {
+  if (fio_owner && fio_owner == mx_bios_get_thread_id())
+    fio_free();
+}
+
+/* the kernel, in one of its own threads: its lock */
+void mx__fio_lock_init(void) {
+  fio_nolock = 0, fio_owner = 0;
+  fio_sema = fio_new_sema();
+}
+/* the thread in a file call (0: none) */
+int mx__fio_owner(void) { return fio_owner; }
+/* after threads ended: the lock of one of them free again, and a waiter
+   woken that one of them may have been woken for */
+void mx__fio_release(int (*gone)(int tid)) {
+  int o = fio_owner;
+  if (o && gone(o))
+    fio_owner = 0;
+  if (fio_sema >= 0)
     mx_bios_signal_sema(fio_sema);
-  }
 }
 
 /* A crash: the report goes through here, and the thread that crashed may hold
-   the lock. Another one gets a moment to finish. */
+   the lock. Another one gets a moment to finish. The kernel's lock stays: a
+   crashed thread's is given back. */
 void mx__fio_crash(void) {
-  if (fio_sema >= 0)
-    for (int i = 0; i < 100 && mx_bios_poll_sema(fio_sema) < 0; i++)
-      mx_delay_us(1000);
+  if (&mx__kernel_self) {
+    if (fio_owner == mx_bios_get_thread_id())
+      fio_free();
+    return;
+  }
+  for (int i = 0; i < 100 && fio_owner; i++)
+    mx_delay_us(1000);
   fio_nolock = 1;
 }
 
 /* mx_exit: stop ends the program's threads. Not one in a file call: it would
    leave the lock taken, and the end of the program writes to the tty. So the
-   lock first, for a moment; after them nobody is left to share it with. */
+   lock first, for a moment; after them nobody is left to share it with. In
+   the kernel the others are: its lock while they end, then free again (one
+   of the program's own that does not finish is given back after its end:
+   mx__fio_release). */
 void mx__fio_ending(void (*stop)(void)) {
-  if (fio_sema >= 0 && !fio_nolock)
-    for (int i = 0; i < 100 && mx_bios_poll_sema(fio_sema) < 0; i++)
-      mx_delay_us(1000);
+  int me = mx_bios_get_thread_id(), got = 0;
+  if (fio_locks())
+    for (int i = 0; i < 200 && !(got = fio_try(me)); i++)
+      mx_sleep_us(1000);
   stop();
+  if (&mx__kernel_self) {
+    if (got)
+      fio_free();
+    return;
+  }
   fio_nolock = 1;
 }
 
@@ -1704,9 +1775,14 @@ void mx__sif_program_end(void) {
   mx_irq_restore(was);
   for (int i = 3; i < NPOS; i++)
     fpos[i] = -1;
-  if (fio_sema >= 0)
-    mx_bios_delete_sema(fio_sema);
-  fio_sema = -1;
+  /* a program's lock (VM) goes with it; the kernel's stays (another
+     process may be in a call: end.c frees it for one of the program's) */
+  if (!&mx__kernel_self) {
+    if (fio_sema >= 0)
+      mx_bios_delete_sema(fio_sema);
+    fio_sema = -1;
+    fio_owner = 0;
+  }
   fio_nolock = 0;
   for (u32 i = 0; i < sizeof fio_pool / sizeof fio_pool[0]; i++)
     mx__sif_client_check(&fio_pool[i]);
