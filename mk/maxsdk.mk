@@ -52,7 +52,7 @@ MX_LD_vm   = $(MAXSDK)/ee/ld/maxsdk-vm$(if $(filter core,$(MX_VM_TEXT)),-coretex
 MX_LD    = $(MX_LD_$(MX_MEMORY))
 # PCSX2: mx-kernel without network, for programs on libmxk. It starts what
 # host:mxload.txt says.
-MX_LOADER = $(abspath $(MAXSDK)/../../build/apps/mxos-emu/mxlink.elf)
+MX_LOADER = $(abspath $(MAXSDK)/../../build/apps/mxos-emu/mxkernel.elf)
 MX_HDRS := $(wildcard $(MAXSDK)/ee/include/mx/*.h $(MAXSDK)/ee/include/mx/hw/*.h)
 # $(call link,out,objs)
 # With MX_MEMORY=vm, the objects of objs also in MX_CORE_OBJS (a library

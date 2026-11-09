@@ -1,6 +1,6 @@
 # mx OS: design, for porting games and apps
 
-mxlink (`apps/mxos`) is growing into a small resident OS for the PS2. A program uses what it
+The kernel (`apps/mxos`, `MXKERNEL.ELF`; mxlink until 2026-11-10) is growing into a small resident OS for the PS2. A program uses what it
 offers and keeps the graphics. Library split and service state: [kernel.md](kernel.md). Virtual
 memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-os-plan.md).
 
@@ -16,35 +16,35 @@ memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-
   `docs/iop-drivers.md`), and only on them: none on a PCMCIA PS2 (SCPH-1xxxx). The fast path for
   `host:` files is its own module beside mxnet (mxfast, which is the console too: to the
   ps2client that serves the fast path, without loss, else by broadcast as udptty sent it).
-  Between programs mxlink closes files, pad ports and sound, and
+  Between programs the kernel closes files, pad ports and sound, and
   keeps the IOP and the network. USB pads (DualShock 3, DualShock 4, DualSense) run on usbd and
   maxsdk's `mxpad`, loaded at the boot (`docs/pad-bt-plan.md`), and with a Bluetooth dongle on USB
   the pads paired with it (over USB, as a PS3 or PS4 pairs them), kept in `mc0:/MXOS/BTPADS.DAT`. The internal HDD (`mxata`, `docs/iop-drivers.md`) is a FAT32 or exFAT
   disk like a USB stick: `ata0:`, with `PS2MAX/` as on the other devices. The shell's fourth
   device is `host:`: the directory of a `ps2client listen` on the PC.
 - Boot: the memory card's system update is mxboot (`apps/mxboot`): its phase 1 starts
-  `mc0:/MXOS/MXBOOT.ELF`, which starts the ELF that `MXOS/BOOTONCE.CFG` names (once: the file is
-  removed first) or `MXOS/BOOT.CFG` (`mc?:/MXOS/MXLINK.ELF`). A new mxlink or program is tried as
-  the one-shot: if it hangs, a reset boots the default again. New IOP modules the same way: an mxlink built
+  `mc0:/MXBOOT/MXBOOT.ELF`, which starts the ELF that `MXBOOT/BOOTONCE.CFG` names (once: the file is
+  removed first) or `MXBOOT/BOOT.CFG` (`mc?:/MXOS/MXKERNEL.ELF`). A new kernel or program is tried as
+  the one-shot: if it hangs, a reset boots the default again. New IOP modules the same way: a kernel built
   with `MODULE_DIR=mc0:/MXOS/NEW/` reads them (and its shell) from that directory.
 - Services: the kernel starts the program `mc0:/MXOS/SERVICES.CFG` names (a path and its
   arguments) at the boot and after a restart; it stays beside every program in front
   (`mx_proc_service`, kernel version 18). The host link is one (kernel version 20):
-  `mc0:/MXOS/MXLINK-APP.ELF` takes ps2client's commands but the reset (version 21; 20: execee
+  `mc0:/MXOS/MXLINK.ELF` takes ps2client's commands but the reset (version 21; 20: execee
   and the ping), ends the shell for them and starts the host's program; without it the kernel
   serves only the reset, execee and the ping. A program that
   takes all memory (no core heap of its own) ends the service; it starts again after that one.
-- Start: mxlink loads the ELF (from `host:`, `usb0:`, `mx4sio0:`, `ata0:`, ...) and runs it in a thread
+- Start: the kernel loads the ELF (from `host:`, `usb0:`, `mx4sio0:`, `ata0:`, ...) and runs it in a thread
   at priority 64: one of the kernel's own threads for a `libmxk` program of version 10, which
   uses the kernel's threads, semaphores and interrupt dispatch (`kernel.md`, Interrupts and
-  threads); for every other program mxlink first starts again with the BIOS's threads. End: back to mxlink, then the shell (`mc0:/MXOS/MXSHELL.ELF`) if it started
+  threads); for every other program the kernel first starts again with the BIOS's threads. End: back to the kernel, then the shell (`mc0:/MXOS/MXSHELL.ELF`) if it started
   the program. A `libmxk` program (version 8 on) ends without a restart: the kernel removes its
   threads, semaphores and interrupt handlers, waits for its IOP calls, resets the units and
   empties the caches (`kernel.md`, The end of a program).
 
 | Who | Owns |
 |---|---|
-| Kernel (mxlink) | IOP, SIF, program start and end, TLB and VM, heaps, files, exceptions, the pad, threads, semaphores and interrupt dispatch (`libmxk`); later sound |
+| Kernel (mxkernel) | IOP, SIF, program start and end, TLB and VM, heaps, files, exceptions, the pad, threads, semaphores and interrupt dispatch (`libmxk`); later sound |
 | Program | GS, VIF, VU, DMAC, its frame loop |
 
 ## Memory (EE)
@@ -159,9 +159,9 @@ too. `apps/mxshell/package-games.sh` writes this layout.
 
 - Without the PC: start it from the shell. A test with `ps2client` connected can hide `host:` use:
   look for `open name host:` in the run's log, it must be absent.
-- A run ends when the program comes back to mxlink, however it ended: mxlink prints the end marker
+- A run ends when the program comes back to the kernel, however it ended: the kernel (or the host link's app beside it) prints the end marker
   (`@@PS2TEST_END@@ status=N`) with its exit status. A game prints no marker of its own: the host
-  would go away while the game still ends. `MX_TEST_END` is silent under mxlink.
+  would go away while the game still ends. `MX_TEST_END` is silent under the kernel.
 - Quit must return to the shell with status 0. A crash ends with status 255, and the shell
   shows the kernel's report (`kernel.md`, Crashes).
 - Run on the real PS2 at 32 MiB (`/ps2-hw-test`). PCSX2 needs `PCSX2_EE=interp` for VM.

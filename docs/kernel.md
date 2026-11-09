@@ -181,7 +181,7 @@ execee and dumpreg (ps2client's ping) on to the port of the process with the IOP
 `MX_IOP_CHANNEL_HOST` (18, `<mx/iop.h>`): the packet up to its last string's 0. The kernel keeps
 the reset, dumpmem, writemem, gsexec, the VU commands and the IOP's exception, and serves all of
 them while no process has the channel (no service, a program that took all memory, a program on
-the BIOS's threads, mxlink-high). A service's `mx_proc_kill` or `mx_proc_spawn` of the program in
+the BIOS's threads, mxkernel-high). A service's `mx_proc_kill` or `mx_proc_spawn` of the program in
 front means the host took over: the text screen after it, not the shell, until the next reset,
 and a shell it ended keeps the IOP as the old takeover did (cleaned up, not reset: reading the
 modules again from the card failed after the shell's drivers). A service with nothing in front
@@ -201,7 +201,7 @@ and the VU commands too; the kernel keeps the reset and the IOP's exception. A s
 ends always gets the restart (as the takeover did): ended without it, the next program crashed
 at once, before its first line, when the shell had not changed the IOP (something of the shell's
 went on; not found yet). Test: `k43_phys`. Without the app (no service, a program that took
-all memory or runs on the BIOS's threads, mxlink-high) the kernel serves only the reset, execee,
+all memory or runs on the BIOS's threads, mxkernel-high) the kernel serves only the reset, execee,
 dumpreg (ps2client's ping) and the IOP's exception; the other commands are the app's only.
 
 Two things a process beside showed: a program's end waits only for the IOP calls of its own
@@ -310,7 +310,7 @@ from the EE: the PS2 must be switched off then.
 
 ## PCSX2
 
-`make -C apps/mxos emu` builds the kernel for PCSX2 (`build/apps/mxos-emu/mxlink.elf`,
+`make -C apps/mxos emu` builds the kernel for PCSX2 (`build/apps/mxos-emu/mxkernel.elf`,
 `MX_LOADER` in `mk/maxsdk.mk`): no network, no IOP modules, no commands. Its command thread
 starts the program in `host:mxload.txt` (path and arguments, in words) from the directory of
 the ELF, as on the PS2, so programs end without a restart and start others (`launch`,

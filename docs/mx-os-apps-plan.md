@@ -194,8 +194,10 @@ mxlink needs something, it is general:
      execee and the ping; dumpmem, writemem, gsexec and the VU commands are the app's only
      (16 KiB of the kernel's memory free). The rest of `cmd.c` stays while programs can push
      the service out.
-   - Next: the names: `MXOS.ELF` the kernel, `MXLINK.ELF` the app (a service in
-     `SERVICES.CFG`), with mxboot's `BOOT.CFG`, the skill and the card's install.
+   - Done 2026-11-10: the names. The kernel is `MXKERNEL.ELF` (`mxkernel-high.elf` for tests,
+     `mxos-emu/mxkernel.elf` on PCSX2; its screen "mx kernel", its lines "mxkernel:"), the host
+     link's app `MXLINK.ELF` in `SERVICES.CFG`; mxboot's `BOOT.CFG` names `MXKERNEL.ELF`.
+     Step 2e-4 is done.
 5. **2f-1, the home menu over a paused game** (the mockup): the shell draws, with the frozen frame
    as one texture, while the game's GS memory is saved.
 6. **2f-2, consoles.** The shell's console window of a service (the log of its process, its
