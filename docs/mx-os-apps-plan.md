@@ -166,6 +166,10 @@ mxlink needs something, it is general:
      unless it starts one. Test `k38_service`.
    - Done 2026-11-09 (PCSX2 only): mxlink's app skeleton (`apps/mxlink/ee`), a text service:
      events, its port, its IOP channel, the log.
+   - Done 2026-11-09 (kernel version 19, PCSX2 only): timers as the kernel's service, software
+     timers for every process and EE timers lent out (`mx_timer_add`, `mx_timer_claim`); the
+     shell's hires claims one. Test `k42_timers` with `vm35_timers`. The shell and its console
+     run on PCSX2 now.
    - Next (needs the PS2: the network): mxlink's EE side (`cmd.c`) out of the kernel into the
      app; ps2link.irx's commands by SIF command to its IOP channel. `MXOS.ELF` is the kernel
      alone, `MXLINK.ELF` a service on the interface, in `SERVICES.CFG`. At the boot the kernel

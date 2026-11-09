@@ -6,6 +6,7 @@
 #include <mx/vu.h>
 
 static volatile u32 samples, busy[MX_TS_N];
+static int timer = -1;
 
 u32 mx_trace_units(void) {
   static const u8 ch[5] = {MX_CH_VIF0, MX_CH_VIF1, MX_CH_GIF, MX_CH_FROMSPR, MX_CH_TOSPR};
@@ -46,15 +47,16 @@ static void sample(void *arg) {
 }
 
 void mx_trace_sample(u32 hz) {
-  if (!hz) {
-    mx_timer_periodic(1, 0, 0, 0);
+  if (timer >= 0)
+    mx_timer_remove(timer);
+  timer = -1;
+  if (!hz)
     return;
-  }
   samples = 0;
   for (int i = 0; i < MX_TS_N; i++)
     busy[i] = 0;
-  u32 period = (MX_BUS_HZ / 256) / hz;
-  mx_timer_periodic(1, period ? period : 1, sample, 0);
+  u32 us = 1000000u / hz;
+  timer = mx_timer_add(us ? us : 1, us ? us : 1, sample, 0);
 }
 
 u32 mx_trace_busy(u32 *out) {

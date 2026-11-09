@@ -12,11 +12,11 @@ static struct {
   u32 n;
 } b[NB];
 static u32 total, lost;
+static int timer = -1;
 
 static void sample(void *arg) {
   (void)arg;
-  extern volatile u32 mx__irq_epc;
-  u32 epc = mx__irq_epc;
+  u32 epc = mx_timer_epc();
   u32 key = (epc >> 4) + 1;
   u32 h = (key * 2654435761u) >> 19;
   total++;
@@ -52,12 +52,16 @@ void mx_prof_start(u32 hz) {
     b[i].key = b[i].n = 0;
   total = lost = 0;
   window(0);
-  u32 period = (MX_BUS_HZ / 256) / (hz ? hz : 1000);
-  mx_timer_periodic(1, period ? period : 1, sample, 0);
+  u32 us = 1000000u / (hz ? hz : 1000);
+  if (timer >= 0)
+    mx_timer_remove(timer);
+  timer = mx_timer_add(us ? us : 1, us ? us : 1, sample, 0);
 }
 
 void mx_prof_stop(void) {
-  mx_timer_periodic(1, 0, 0, 0);
+  if (timer >= 0)
+    mx_timer_remove(timer);
+  timer = -1;
   window(1);
 }
 

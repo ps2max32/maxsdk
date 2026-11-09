@@ -92,9 +92,10 @@ $(OUT)/objk/%.c.o: $(HERE)/%.c $(HDRS)
 	$(CC) $(CFLAGS) -DMX_KERNEL=1 -c $< -o $@
 
 LIBK_SRCS = ee/src/base/start.c ee/src/base/sif.c ee/src/base/kstubs.c ee/src/base/proc.c \
-            ee/src/thread/sleep.c
+            ee/src/thread/sleep.c ee/src/irq/timer.c
 # what is the kernel's: no code in libmxk
 LIBK_OUT  = ee/src/base/start.c ee/src/base/sif.c ee/src/base/proc.c ee/src/thread/sleep.c \
+            ee/src/irq/timer.c \
             ee/src/base/exception.c ee/src/base/exception.S \
             ee/src/vm/vm.c ee/src/vm/mem.c ee/src/vm/heap.c ee/src/vm/image.c ee/src/vm/tlb.S
 LIBK_OBJS = $(filter-out $(LIBK_OUT:%=$(OUT)/obj/%.o),$(LIB_OBJS)) $(LIBK_SRCS:%=$(OUT)/objk/%.o)
@@ -104,12 +105,12 @@ $(LIBK): $(LIBK_OBJS)
 	$(LLVM)/llvm-ar rcs $@ $^
 
 # tests linked into VM (ee/ld/maxsdk-vm.ld), started by mxlink (or mxlink's EMU build)
-VM_TESTS = vm11_vmlink vm12_elfpage vm13_guards vm16_lock vm21_crash vm22_net vm23_pad vm24_home vm25_ids vm26_launch vm27_pads vm28_asid vm29_long vm30_dmairq vm31_rumble vm32_side vm33_msg vm34_child
+VM_TESTS = vm11_vmlink vm12_elfpage vm13_guards vm16_lock vm21_crash vm22_net vm23_pad vm24_home vm25_ids vm26_launch vm27_pads vm28_asid vm29_long vm30_dmairq vm31_rumble vm32_side vm33_msg vm34_child vm35_timers
 $(VM_TESTS:%=$(OUT)/tests/%.elf): MX_MEMORY = vm
 $(VM_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
 
 # tests on libmxk without VM, started by mxlink
-K_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k37_iopchan k38_service k40_frame k41_present
+K_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k37_iopchan k38_service k40_frame k41_present k42_timers
 $(K_TESTS:%=$(OUT)/tests/%.elf): LIB = $(LIBK)
 $(K_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
 # k37: an IOP module of its own (tests/iop/chantest), embedded

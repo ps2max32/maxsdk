@@ -119,11 +119,7 @@ the program in front for another process the way its `mx_exit` would, without th
 (which would end the caller too): the command thread's `program_ended`. `mx_sleep_us` is the
 kernel's (`sleep_us`): timer 0 is one for all processes, and a program's own (as before
 version 14) set it for itself and stopped it at its end, so the other's sleepers were never
-woken. It is on timer 1 (the kernel builds its maxsdk with `MX_SLEEP_TIMER=1`): timer 0 is
-the programs', and `mx_hires` (the shell) races the beam with it, which the kernel's sleep
-rewrote under it. The kernel makes its slots' semaphores and the handler at its start (`mx__sleep_init`)
-and, at a program's end, frees its threads' slots and sets the timer again (`mx__sleep_reap`,
-after `units_off` stopped it). A program's arguments are copied into its own memory at its
+woken. Since version 19 it is one of the kernel's software timers (below). A program's arguments are copied into its own memory at its
 start: the kernel's are the next program's once it starts another.
 
 Version 15: `proc_events` (`mx_proc_events`): the kernel's events to a port of the process
@@ -163,6 +159,20 @@ and after a restart, the kernel starts the service in `mc0:/MXOS/SERVICES.CFG` (
 its arguments; on PCSX2 `host:services.txt`, the runner's `MXSERVICE`) in place of the shell.
 With a service beside, the kernel prints no test end marker: it is the service's (2e-4:
 mxlink's, for the host's runs).
+
+Version 19: timers are the kernel's service (`<mx/timer.h>`, `src/irq/timer.c`; the kernel
+builds its maxsdk with `MX_SOFT_TIMER=1`). Software timers (`mx_timer_add`, once or every
+period, and `mx_sleep_us`'s sleepers) are slots of one table, each due at a COP0 Count, on EE
+timer 1, which no program sees: it is set, one-shot, to the earliest, and its interrupt runs
+what is due. A callback runs in its process's address space (`mx__timer_enter`, `kproc.c`), so
+it and its argument are in core. The other EE timer, 0, is lent out whole (`mx_timer_claim`,
+`mx_timer_release`) for a clock of its own: `mx_hires` counts H-blanks with it (the kernel's
+sleep on timer 0, versions 14 to 18, rewrote it under the shell). Timers 2 and 3 are the
+BIOS's page, read-only to programs. A process's end takes its timers, sleepers and claim
+(`mx__timer_reap`, after `units_off` stopped the EE timers, which sets the kernel's again).
+`mx_timer_epc` gives a callback where the interrupted code was (the profiler, a software
+timer now). The old `mx_timer_periodic(t, ...)` is a software timer too. A program of its own
+(`libmx`) has the same calls in `timer.c`, on timer 0, with timer 1 to lend out.
 
 Two things a process beside showed: a program's end waits only for the IOP calls of its own
 threads, those that are gone (`mx__sif_calls_finish` keeps the calls and packets of threads

@@ -3,6 +3,7 @@
 #include <mx/dma.h>
 #include <mx/frame.h>
 #include <mx/hires.h>
+#include <mx/timer.h>
 #include <mx/irq.h>
 #include <mx/mx.h>
 #include <mx/sif.h>
@@ -62,11 +63,20 @@ static u64 pass_mem[NPASS_CHAINS][PASS_QW * 2] MX_ALIGNED(64);
 static u32 shot_line[2048] MX_ALIGNED(64);
 static u8 shot_out[2048 * 3];
 
-/* timer 0: the page of timers 2 and 3 is mapped read-only on the PS2 (the
-   kernel's; a write is a TLB modified exception, PS2 2026-10-31) */
-#define TMR_MODE MX_R32(MX_TIMER_T0_MODE)
-#define TMR_COUNT MX_R32(MX_TIMER_T0_COUNT)
-#define TMR_COMP MX_R32(MX_TIMER_T0_COMP)
+/* an EE timer of its own (mx_timer_claim): it counts H-blanks */
+static int tmr = -1;
+static u32 tmr_base;
+#define TMR_MODE MX_R32(tmr_base + MX_TIMER_MODE_OFFSET)
+#define TMR_COUNT MX_R32(tmr_base + MX_TIMER_COUNT_OFFSET)
+#define TMR_COMP MX_R32(tmr_base + MX_TIMER_COMP_OFFSET)
+static void tmr_off(void) {
+  if (tmr < 0)
+    return;
+  TMR_MODE = 0;
+  mx_irq_intc(MX_INTC_TIM0 + tmr, 0, 0);
+  mx_timer_release(tmr);
+  tmr = -1;
+}
 
 /* A slot retired by the pass 0 that replaced it is free once the DMA of
    its last pass is done (interrupts off or in a handler). */
@@ -299,12 +309,19 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   mx_dmaq_init(&h.q, MX_CH_VIF1);
   mx__frame_init_record(spr, spr_bytes);
 
-  /* timer 0 counts H-blanks; its compare is the next strip's line */
+  /* a timer counts H-blanks; its compare is the next strip's line */
+  if (tmr < 0)
+    tmr = mx_timer_claim(MX_TIMER_HBLANK);
+  if (tmr < 0) {
+    mx_printf("mx_hires_init: no EE timer free\n");
+    return -1;
+  }
+  tmr_base = mx_timer_base(tmr);
   TMR_MODE = 0;
   h.next_line = h.npass;
   TMR_COUNT = 0;
   TMR_COMP = 0xFFFF;
-  mx_irq_intc(MX_INTC_TIM0, timer_irq, 0);
+  mx_irq_intc(MX_INTC_TIM0 + tmr, timer_irq, 0);
   TMR_MODE = (u32)(MX_SET(TIMER_MODE_CLKS, 3) | MX_BIT(TIMER_MODE_CUE) | MX_BIT(TIMER_MODE_CMPE) |
                   MX_BIT(TIMER_MODE_EQUF) | MX_BIT(TIMER_MODE_OVFF));
   int was = mx_di();
@@ -386,8 +403,7 @@ void mx__hires_stop(void) {
   int was = mx_di();
   mx__vsync_hook = 0;
   mx_irq_restore(was);
-  TMR_MODE = 0;
-  mx_irq_intc(MX_INTC_TIM0, 0, 0);
+  tmr_off();
   /* the pass being sent and a once record over PATH3 finish: the pipeline
      can be started again (another mode) */
   mx_dmaq_release(&h.q);
@@ -426,8 +442,7 @@ int mx_hires_save_tga(const char *path) {
   int was = mx_di();
   mx__vsync_hook = 0;
   mx_irq_restore(was);
-  TMR_MODE = 0;
-  mx_irq_intc(MX_INTC_TIM0, 0, 0);
+  tmr_off();
   mx_dmaq_drain(&h.q);
   int s = h.played;
   if (s < 0)

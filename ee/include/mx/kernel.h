@@ -10,6 +10,7 @@
    version, which it checks with size. */
 
 #include <mx/debug.h>
+#include <mx/irq.h>
 #include <mx/mem.h>
 #include <mx/sif.h>
 #include <mx/bios.h>
@@ -20,7 +21,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 18
+#define MX_KERNEL_VERSION 19
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -220,6 +221,13 @@ struct mxk_services {
   int (*iop_channel)(u32 cid, int port);
   /* version 18: the caller a service beside every program in front */
   int (*proc_service)(void);
+  /* version 19: timers (<mx/timer.h>): software timers on the kernel's EE
+     timer, the others lent out whole */
+  int (*timer_add)(u32 us, u32 period_us, mx_irq_fn fn, void *arg);
+  void (*timer_remove)(int id);
+  int (*timer_claim)(int clock);
+  void (*timer_release)(int t);
+  u32 (*timer_epc)(void);
 };
 /* the size of a table of version MX_KERNEL_MIN */
 #define MXK_MIN_SIZE __builtin_offsetof(struct mxk_services, pad_init)
@@ -243,10 +251,10 @@ struct mx_sif_client;
 void mx__sif_client_check(struct mx_sif_client *c);
 void mx__irq_vbon_unhook(void (*fn)(void));
 void mx__vm_unhook(void);
-/* the kernel's mx_sleep_us (src/thread/sleep.c): its semaphores and handler
-   at its start, the slots of a program's threads freed at its end */
-void mx__sleep_init(void);
-void mx__sleep_reap(void);
+/* the kernel's timers (src/irq/timer.c): the sleepers' semaphores and the
+   handler at its start, a process's timers and claims freed at its end */
+void mx__timer_init(void);
+void mx__timer_reap(int proc);
 
 /* The kernel's side of sif_call (ee/src/base/sif.c). */
 int mx__sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,

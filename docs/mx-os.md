@@ -114,10 +114,10 @@ socket code adds `$(MX_NET_CFLAGS)`: `socket`, `select`, `fcntl` and the rest ar
 addresses only), `MSG_PEEK`, `FIONREAD`, broadcast, and options, which are accepted and ignored.
 
 Waiting: sleep, do not spin. `mx_sleep_us` (`<mx/thread.h>`) lets the other threads run; `mx_delay_us`
-keeps the CPU. Under the kernel (`libmxk`, version 14 on) it is the kernel's, on EE timer 1, one for
-all processes: leave timer 1 alone (the profiler, `mx_prof`/`mx_sample`, uses it too: not under the
-kernel for now). Timer 0 is the program's (`mx_hires` races the beam with it). In a program of its
-own (`libmx`) `mx_sleep_us` takes timer 0 and the profiler timer 1.
+keeps the CPU. Timers are a service (`<mx/timer.h>`; under the kernel its, version 19): never
+write an EE timer by its number. `mx_timer_add` calls a function once or every period (in core,
+from an interrupt); `mx_timer_claim` lends a whole EE timer for a clock of its own (as
+`mx_hires` does) and says which, or -1. The profiler is a software timer.
 
 Provided for every program: the home button (`MX_PAD_HOME`: a USB pad's PS button; on a SIO2 pad
 Select + Start + L1 + R1 held together, which the program then gets as the home button, not as
