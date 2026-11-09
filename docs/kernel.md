@@ -91,8 +91,10 @@ about 4 KiB) with the side's copy; the rest (the VM, the image, the home menu, e
 is the one in front's. The scheduler switches when the next thread is of the other process,
 VU0's registers with it (not the accumulator); the kernel's own threads (the command thread
 acts on the one in front) and the kernel's interrupt handlers (the VM's vblank) run in the
-front's, a program's handlers in their process's. Not yet: the side ending, crashing or using
-the pad while the other runs.
+front's, a program's handlers in their process's. A cause or channel that a program turns off
+(its `irq.c` does when its own slot is empty, its end does for its handlers) stays on while a
+handler of another process is on it: the side's vblank, the kernel's SIF wake. Not yet: the side
+ending, crashing or using the pad while the other runs.
 
 ## Interrupts and threads
 
@@ -194,9 +196,12 @@ from the EE: the PS2 must be switched off then.
 ## PCSX2
 
 `make -C apps/mxos emu` builds the kernel for PCSX2 (`build/apps/mxos-emu/mxlink.elf`,
-`MX_LOADER` in `mk/maxsdk.mk`): no network, no IOP modules, no commands. It starts the
-program in `host:mxload.txt` (path and arguments, in words) from the directory of the
-ELF. Run it with `PCSX2_EE=interp`.
+`MX_LOADER` in `mk/maxsdk.mk`): no network, no IOP modules, no commands. Its command thread
+starts the program in `host:mxload.txt` (path and arguments, in words) from the directory of
+the ELF, as on the PS2, so programs end without a restart and start others (`launch`,
+`launch_beside`). Run it with `PCSX2_EE=interp`. PCSX2's TLB does not look at the ASID (of
+two entries at one address, the last written is used), so at a switch between processes this
+kernel writes the next one's entries again (`tlb_emu_asid`).
 
 ## Crashes
 

@@ -12,6 +12,12 @@ static u32 vm_buf[N];
 static u32 core_buf[N] MX_CORE_DATA;
 static volatile u32 vblanks MX_CORE_DATA;
 
+static u32 entry_hi(void) {
+  u32 v;
+  __asm__ volatile("mfc0 %0, $10" : "=r"(v));
+  return v;
+}
+
 static u32 asid(void) {
   u32 v;
   __asm__ volatile("mfc0 %0, $10" : "=r"(v));
@@ -51,6 +57,8 @@ int main(void) {
     for (u32 i = 0; i < N; i++)
       bad_mem += vm_buf[i] != i * 40503u + 7 || core_buf[i] != ~(i * 40503u);
     bad_vu += vu_check(0x2000);
+    if (asid() != a && !bad_asid)
+      mx_printf("vm32: round %u, ASID %u, EntryHi %08x\n", r, asid(), entry_hi());
     bad_asid += asid() != a;
     if (r % 100 == 99)
       mx_printf("vm32: round %u, %u vblanks\n", r + 1, vblanks);

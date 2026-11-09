@@ -193,7 +193,7 @@ static void tlb_read(u32 i, u32 *pm, u32 *hi, u32 *lo0, u32 *lo1) {
   __asm__ volatile("mtc0 %4, $0\n\tsync.p\n\ttlbr\n\tsync.p\n\t"
                    "mfc0 %0, $5\n\tmfc0 %1, $10\n\tmfc0 %2, $2\n\tmfc0 %3, $3\n\t"
                    "mtc0 %5, $10\n\tsync.p"
-                   : "=r"(*pm), "=r"(*hi), "=r"(*lo0), "=r"(*lo1)
+                   : "=&r"(*pm), "=&r"(*hi), "=&r"(*lo0), "=&r"(*lo1)
                    : "r"(i), "r"(mx__asid));
 }
 
