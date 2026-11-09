@@ -55,21 +55,25 @@ Three kinds, one way to start them (the kernel's `spawn`):
 |---|---|---|
 | full screen | all of GS memory and the video mode, as programs have now. One at a time, in front; the home button pauses it (its frozen frame as a texture, its GS memory saved: the mockup) | the games, ps2sdk and `libmx` programs |
 | windowed | a surface the kernel gives it; the shell shows it | step 3's programs in windows |
-| service | runs without being in front; may have a surface as well | mxlink, later a file or network server |
+| service | runs without being in front, a text console as its window | mxlink, later a file or network server |
 
-**Surfaces**, two sorts:
+**Text consoles** (decided 2026-11-09, in place of EE surfaces for services): a service is a
+command line program. What it says is its `mx_printf`, in the kernel's log with its process
+(version 16); the shell shows a console window of it, the log's pieces of that process in its
+own font, with a few KiB of lines kept. What it is told comes as messages to a port of its
+own (`<name>.in`): lines the shell sends, typed or picked with the pad. It costs the service
+no memory for a screen (an EE surface of 512 x 256 CT16 would be 256 KiB in each service,
+and uploads to the GS), and needs no GS arbitration.
 
-- *EE surface*: a front buffer in the app's own memory (for example 512 x 256 CT16, 256 KiB),
-  drawn by the CPU. The app never touches the GS: the shell uploads it as a texture while it
-  shows it, and only the parts that changed (the app marks them). This is mxlink's window, the
-  "window with only a front buffer". It costs no GS memory while a full-screen game runs and
-  needs no GS arbitration, so it is the first sort to build.
-- *GS surface*: a render target in GS memory, drawn by the GS through the kernel's queue
-  (step 3: the chain CALLed after a prelude of FRAME, SCISSOR, XYOFFSET), one or two buffers.
-  This is for games in a window, later.
+**GS surfaces**, for programs that draw: a render target in GS memory, drawn by the GS through
+the kernel's queue (step 3: the chain CALLed after a prelude of FRAME, SCISSOR, XYOFFSET), one
+or two buffers. This is for games in a window, later. EE surfaces (a front buffer in the
+app's memory that the shell uploads) are dropped for now; they come back only if an app that
+draws cannot use the GS.
 
 **A manifest per app**, `app.ini` (it replaces `game.ini`, which keeps working): the name, the
-kind, the surface size, the cover, and whether a service starts at the boot by default.
+kind, the surface size (windowed), the cover, and whether a service starts at the boot by
+default.
 
 - System apps are in `mc0:/MXOS/APPS/<id>/`: mxlink, the shell.
 - The other apps are in `<device>:/PS2MAX/<id>/`, as now.
@@ -81,7 +85,8 @@ itself is not in it: the kernel always starts it last, in front.
 ## The interface: the kernel and every app
 
 One set of calls in `struct mxk_services` (version 12 and on), and `libmxk`'s wrappers in new
-headers (`<mx/proc.h>`, `<mx/msg.h>`, `<mx/surface.h>`). Each group has a test of its own. Where
+headers (`<mx/proc.h>`, `<mx/msg.h>`, `<mx/log.h>`; `<mx/surface.h>` with step 3). Each group
+has a test of its own. Where
 mxlink needs something, it is general:
 
 | Group | Calls | mxlink uses it for |
@@ -92,7 +97,8 @@ mxlink needs something, it is general:
 | The log | every process's `mx_printf` to the kernel's log, with its process; any process may read it from where it last was | the console to the host, and its window |
 | IOP channels | an app registers a SIF channel, and what its IOP module sends there reaches its port (instead of a fixed EE address, as ps2link's 0xFF800 is now) | ps2link.irx's commands |
 | Memory of another process | `proc_read`, `proc_regs`, for debuggers | `dumpmem`, `dumpreg` |
-| Surfaces | `surface_create(w, h, psm, kind)`, `surface_damage(rect)`, `surface_title`; events: shown, hidden, focus | its log window |
+| Consoles | the log (its output) and a port `<name>.in` (its input); events: shown, hidden, focus | its window |
+| Surfaces (step 3) | `surface_create(w, h, psm)` in GS memory, `surface_title`; events: shown, hidden, focus | |
 | Input | the pad of the process in front or with the focus; the home button to the shell | |
 
 - **Who may do what**: for now every app may use every call; the manifest's `system=1`
@@ -157,21 +163,26 @@ mxlink needs something, it is general:
    - Done 2026-11-09 (kernel version 18, PCSX2 only): services. `mx_proc_service` makes a
      program the one beside for good; the kernel starts `SERVICES.CFG`'s at the boot, then
      the shell in front; a program's end goes to it as an event and the shell comes next
-     unless it starts one. Test `k38_service`. Next: mxlink's EE side (`cmd.c`) out of the
-     kernel onto this interface (needs the PS2: the network). `MXOS.ELF` is the kernel alone, `MXLINK.ELF` a service on the interface;
-   `SERVICES.CFG`. At the boot the kernel starts mxlink and then the shell. ps2client works as
-   before, and now also while a game runs. The skill and the card's install follow.
+     unless it starts one. Test `k38_service`.
+   - Done 2026-11-09 (PCSX2 only): mxlink's app skeleton (`apps/mxlink/ee`), a text service:
+     events, its port, its IOP channel, the log.
+   - Next (needs the PS2: the network): mxlink's EE side (`cmd.c`) out of the kernel into the
+     app; ps2link.irx's commands by SIF command to its IOP channel. `MXOS.ELF` is the kernel
+     alone, `MXLINK.ELF` a service on the interface, in `SERVICES.CFG`. At the boot the kernel
+     starts mxlink and then the shell. ps2client works as before, and now also while a game
+     runs. The skill and the card's install follow.
 5. **2f-1, the home menu over a paused game** (the mockup): the shell draws, with the frozen frame
    as one texture, while the game's GS memory is saved.
-6. **2f-2, EE surfaces.** mxlink's window in the shell, and Settings > Services.
+6. **2f-2, consoles.** The shell's console window of a service (the log of its process, its
+   input port), mxlink's among them, and Settings > Services.
 7. Then step 3 (GS surfaces, games in windows) and 2g (the BIOS only at the boot), as in
    mx-os-plan.md.
 
 ## Open points
 
-- **Memory**: mxlink in VM takes its memory (about 150 - 300 KiB: code, buffers, an EE surface)
-  from what games have now. The kernel's area below 1 MiB gets that much back.
-- **Message size**: copies of up to 4 KiB keep the kernel simple. Larger data (a surface, a file
-  block) would need a shared page granted to the other process. Is that needed in 2e, or only
-  for GS surfaces?
+- **Memory**: mxlink takes its memory (its core: code and buffers, no screen; the skeleton is
+  22 KiB) from what games have now. The kernel's area below 1 MiB gets back what moves out.
+- **Message size**: copies of up to 4 KiB keep the kernel simple (256 bytes until 2e-4 frees
+  the room). Larger data (a file block) would need a shared page granted to the other
+  process.
 - **mxlink while no network is up**: it stays a service without a link, and its window says so.
