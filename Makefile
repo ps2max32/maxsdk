@@ -109,7 +109,7 @@ $(VM_TESTS:%=$(OUT)/tests/%.elf): MX_MEMORY = vm
 $(VM_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
 
 # tests on libmxk without VM, started by mxlink
-K_TESTS = k29_stay k31_beside k32_port k33_spawn
+K_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events
 $(K_TESTS:%=$(OUT)/tests/%.elf): LIB = $(LIBK)
 $(K_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
 # VU0's registers set and read in C (the compiler keeps off them)

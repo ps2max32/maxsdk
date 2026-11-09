@@ -1,7 +1,7 @@
 #ifndef MX_PROC_H
 #define MX_PROC_H
 
-/* Processes under mx-kernel (kernel version 13, spawn and wait 14; docs/kernel.md,
+/* Processes under mx-kernel (kernel version 13, spawn and wait 14, events 15; docs/kernel.md,
    docs/mx-os-apps-plan.md step 2e-3): a program started by the kernel is a
    process, with an address space of its own. libmxk only: libmx's calls
    return -1. */
@@ -46,6 +46,21 @@ int mx_proc_wait(int id, int *status, int nohang);
    id is not that one, is the caller, or cannot end without a restart. Its
    end follows soon after: mx_proc_wait for it. */
 int mx_proc_kill(int id, int status);
+
+/* Kernel version 15: the kernel's events to this process, as messages on
+   one of its ports (<mx/msg.h>): from process 0, a struct mx_event each,
+   no reply wanted. 0 to stop them. 0, or -1 for a port not its own. An
+   event that finds the kernel's message slots full is dropped. */
+enum {
+  MX_EVENT_END = 1, /* a program it started ended: proc, its exit status */
+};
+struct mx_event {
+  u32 type; /* MX_EVENT_* */
+  s32 proc;
+  s32 status;
+  u32 pad;
+};
+int mx_proc_events(int port);
 
 #ifdef __cplusplus
 }

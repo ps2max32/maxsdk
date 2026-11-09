@@ -140,7 +140,11 @@ mxlink needs something, it is general:
      the kernel's now; the end's `units_off` stops it, so the kernel sets it again; a core
      program's `argv` was in the kernel's memory, the next program's arguments once it
      started another; `core_vm` of the other stayed after its end.
-   - Next: events (a process's end as a message to a port), the log, IOP channels.
+   - Done 2026-11-09 (kernel version 15): events, the kernel's messages to a port of the
+     process (`mx_proc_events`), the first a program's end with its exit status; test
+     `k35_events` with `vm34_child`. Focus, close, suspend and the home button come with the
+     surfaces (2f).
+   - Next: the log, IOP channels.
 4. **2e-4, mxlink an app.** `MXOS.ELF` is the kernel alone, `MXLINK.ELF` a service on the interface;
    `SERVICES.CFG`. At the boot the kernel starts mxlink and then the shell. ps2client works as
    before, and now also while a game runs. The skill and the card's install follow.
