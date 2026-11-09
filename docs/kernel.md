@@ -96,6 +96,20 @@ front's, a program's handlers in their process's. A cause or channel that a prog
 handler of another process is on it: the side's vblank, the kernel's SIF wake. Not yet: the side
 ending, crashing or using the pad while the other runs.
 
+Version 13: processes and messages (`<mx/proc.h>`, `<mx/msg.h>`; `apps/mxos/ee/kmsg.c`, `exec.c`;
+`docs/mx-os-apps-plan.md`, step 2e-3). `proc_self` is the calling thread's process, `proc_list`
+the program in front and the one beside it or waiting for it (id, state, core run, path).
+Ports have names of up to 15 characters, 8 at once. A message is copied twice, each time in
+the thread of the process it belongs to and so in its address space (threads run in user
+mode: the kernel cannot reach another's memory): the request into one of 4 slots of 256 bytes
+in the kernel's memory, which every process sees, and out of it in the receiver's
+`mx_msg_receive`; the reply the same way back in that slot. Senders wait for a free slot,
+receivers on their port's semaphore (their own process's: it goes with them), a sender on its
+slot's for the reply. A process's end (`end_cleanup`, before its semaphores) takes its ports,
+answers the requests to them with -2, drops its requests not yet received and marks those
+received, so that their reply only frees the slot. The slots are what fits below the kernel's
+code now; step 2e-4, which moves the command thread out of the kernel, gives them more room.
+
 ## Interrupts and threads
 
 The kernel is first at every INTC and DMAC interrupt (`apps/mxos/ee/kirq.S`, `kirq.c`;

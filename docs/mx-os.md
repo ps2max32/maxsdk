@@ -82,6 +82,13 @@ Retail PS2s have 32 MiB; never count on more.
     of memory. `mx_loader_launch_beside` (kernel version 12) is the same, but the program's
     other threads and interrupt handlers go on while the other runs: they may not end the
     program (`mx_exit`) or use the pad meanwhile, and the other runs in front.
+12. **Talking to another program** (kernel version 13): through the kernel, never through
+    memory, which is your own (another program's addresses are its own). `<mx/proc.h>` lists
+    the processes; `<mx/msg.h>`'s ports: make one by name (`mx_port_create`), receive and
+    reply on it in a thread of your own; any process finds it (`mx_port_find`) and sends,
+    waiting for the reply. At most `MX_MSG_MAX` (256) bytes each way, copied by the kernel;
+    `MX_MSG_SLOTS` (4) messages under way at once, more senders wait. Your ports go with your
+    end, and so do requests you did not answer (their senders get -2).
 8. **Graphics are yours**: full control of GS, VIF, VU and DMA, but the display registers (PMODE,
    DISPFB, DISPLAY, BGCOLOR) only through maxsdk (`<mx/display.h>`, `mx_gs_*`): under `libmxk` the
    kernel writes them (`kernel.md`). Prefer beam racing for memory

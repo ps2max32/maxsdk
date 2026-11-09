@@ -123,6 +123,18 @@ mxlink needs something, it is general:
    outside its range (the kernel reads modules to 0x0100_0000).
 3. **2e-3, the interface, part 1.** Processes, messages, events, the log, IOP channels, each
    with a test of two processes.
+   - Done 2026-11-09 (kernel version 13): `proc_self`, `proc_list`, and ports and messages
+     (`<mx/proc.h>`, `<mx/msg.h>`; `apps/mxos/ee/kmsg.c`). Test: `k32_port` serves a port
+     beside `vm33_msg`, which checks the list, sends requests of every length from VM and
+     from core, and ends without answering one of `k32_port`'s (it gets -2). On PCSX2: the
+     kernel's PCSX2 build now runs programs side by side (its TLB ignores the ASID: the
+     kernel writes the entries again at a switch).
+   - Learned: the kernel has 2 KiB left below its code (`0xC0000`, the rest is read-only to
+     threads, which run in user mode), so a message is at most 256 bytes and 4 are under way
+     until 2e-4 frees the command thread's 32 KiB. A program turning an interrupt off turned
+     it off for the other process too (now: only when no other process has a handler there).
+   - Next: spawn, wait and kill with the events (a process's end to whoever waits), the log,
+     IOP channels.
 4. **2e-4, mxlink an app.** `MXOS.ELF` is the kernel alone, `MXLINK.ELF` a service on the interface;
    `SERVICES.CFG`. At the boot the kernel starts mxlink and then the shell. ps2client works as
    before, and now also while a game runs. The skill and the card's install follow.

@@ -15,10 +15,12 @@
 #include <mx/bios.h>
 #include <mx/types.h>
 #include <mx/video.h>
+#include <mx/proc.h>
+#include <mx/msg.h>
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 12
+#define MX_KERNEL_VERSION 13
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -194,6 +196,16 @@ struct mxk_services {
   /* version 12: mx_loader_launch_beside, the caller's other threads going on
      beside the other program (docs/mx-os-apps-plan.md, step 2e-2) */
   int (*launch_beside)(int argc, const char *args, u32 args_len, const char *swap);
+  /* version 13: processes and messages, <mx/proc.h>, <mx/msg.h>
+     (docs/mx-os-apps-plan.md, step 2e-3) */
+  int (*proc_self)(void);
+  int (*proc_list)(struct mx_proc_info *p, int max);
+  int (*port_create)(const char *name);
+  int (*port_find)(const char *name);
+  int (*port_delete)(int port);
+  int (*msg_send)(int port, const void *req, u32 len, void *reply, u32 max);
+  int (*msg_receive)(int port, void *buf, u32 max, struct mx_msg *m);
+  int (*msg_reply)(int msg, const void *reply, u32 len);
 };
 /* the size of a table of version MX_KERNEL_MIN */
 #define MXK_MIN_SIZE __builtin_offsetof(struct mxk_services, pad_init)
