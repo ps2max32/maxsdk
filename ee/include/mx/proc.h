@@ -1,7 +1,7 @@
 #ifndef MX_PROC_H
 #define MX_PROC_H
 
-/* Processes under mx-kernel (kernel version 13, spawn and wait 14, events 15; docs/kernel.md,
+/* Processes under mx-kernel (kernel version 13, spawn and wait 14, events 15, services 18; docs/kernel.md,
    docs/mx-os-apps-plan.md step 2e-3): a program started by the kernel is a
    process, with an address space of its own. libmxk only: libmx's calls
    return -1. */
@@ -61,6 +61,18 @@ struct mx_event {
   u32 pad;
 };
 int mx_proc_events(int port);
+
+/* Kernel version 18: this program (its core at a run of its own, without
+   VM: MX_CORE_HEAP) becomes a service: it stays beside every program in
+   front from now on, and the one that comes next in front (the shell; on
+   PCSX2 host:mxload.txt's) starts now. The kernel starts a service at the
+   boot from mc0:/MXOS/SERVICES.CFG. A service's mx_proc_spawn starts the
+   program in front when none runs (-1 while one does: mx_proc_kill it
+   first), and at a program's end the next comes (the shell) unless it
+   starts one. The kernel prints no test end marker while a service is
+   beside: that is the service's. 0 or the started program's process; -1
+   when this program cannot. */
+int mx_proc_service(void);
 
 #ifdef __cplusplus
 }

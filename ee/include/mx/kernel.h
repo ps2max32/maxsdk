@@ -20,7 +20,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 17
+#define MX_KERNEL_VERSION 18
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -218,6 +218,8 @@ struct mxk_services {
   int (*log_read)(u32 *pos, void *buf, u32 max, int *proc, int wait);
   /* version 17: an IOP module's SIF commands to a port (<mx/iop.h>) */
   int (*iop_channel)(u32 cid, int port);
+  /* version 18: the caller a service beside every program in front */
+  int (*proc_service)(void);
 };
 /* the size of a table of version MX_KERNEL_MIN */
 #define MXK_MIN_SIZE __builtin_offsetof(struct mxk_services, pad_init)

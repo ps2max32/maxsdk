@@ -153,7 +153,12 @@ mxlink needs something, it is general:
    - Left for later: `proc_read`/`proc_regs` (with 2e-4's `dumpmem`/`dumpreg`), surfaces and
      input (2f), more and larger messages (2e-4 frees the room), a service started beside
      the shell (the kernel starts one at the boot: 2e-4).
-4. **2e-4, mxlink an app.** `MXOS.ELF` is the kernel alone, `MXLINK.ELF` a service on the interface;
+4. **2e-4, mxlink an app.**
+   - Done 2026-11-09 (kernel version 18, PCSX2 only): services. `mx_proc_service` makes a
+     program the one beside for good; the kernel starts `SERVICES.CFG`'s at the boot, then
+     the shell in front; a program's end goes to it as an event and the shell comes next
+     unless it starts one. Test `k38_service`. Next: mxlink's EE side (`cmd.c`) out of the
+     kernel onto this interface (needs the PS2: the network). `MXOS.ELF` is the kernel alone, `MXLINK.ELF` a service on the interface;
    `SERVICES.CFG`. At the boot the kernel starts mxlink and then the shell. ps2client works as
    before, and now also while a game runs. The skill and the card's install follow.
 5. **2f-1, the home menu over a paused game** (the mockup): the shell draws, with the frozen frame

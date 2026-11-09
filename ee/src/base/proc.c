@@ -45,3 +45,7 @@ int mx_log_read(u32 *pos, void *buf, u32 max, int *proc, int wait) {
   return CALLV(16, log_read, (pos, buf, max, proc, wait));
 }
 int mx_iop_channel(u32 cid, int port) { return CALLV(17, iop_channel, (cid, port)); }
+int mx_proc_service(void) {
+  mx_debug_flush();
+  return CALLV(18, proc_service, ());
+}

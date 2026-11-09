@@ -150,6 +150,18 @@ kernel's `mx__sif_cmd`, in the interrupt, which posts its payload (the packet wi
 This replaces a fixed EE address for what an IOP module sends (ps2link's packets to
 `0xFF800`, step 2e-4). A process's end gives its ids up.
 
+Version 18: services (`mx_proc_service`; `apps/mxos/ee/main.c`, `exec.c`; step 2e-4). A
+program with its core at a run of its own and without VM becomes the one beside for good: the
+kernel parks it as for `launch_beside` (`park.service`) and starts the program in front that
+would have come next (the shell; on PCSX2 `host:mxload.txt`'s). When that one ends the
+service is not unparked: the end is cleaned up as usual, the service gets `MX_EVENT_END`, and
+the next program in front starts (the shell) unless the service starts one (its
+`mx_proc_spawn` starts a program in front when none runs; -1 while one does). At the boot,
+and after a restart, the kernel starts the service in `mc0:/MXOS/SERVICES.CFG` (a path and
+its arguments; on PCSX2 `host:services.txt`, the runner's `MXSERVICE`) in place of the shell.
+With a service beside, the kernel prints no test end marker: it is the service's (2e-4:
+mxlink's, for the host's runs).
+
 ## Interrupts and threads
 
 The kernel is first at every INTC and DMAC interrupt (`apps/mxos/ee/kirq.S`, `kirq.c`;
