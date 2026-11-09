@@ -8,7 +8,12 @@
 static int sinks = MX_SINK_TTY;
 extern const int mx__debug_start_sinks __attribute__((weak));
 static int hold;
-static char hold_buf[16384];
+/* the kernel (apps/mxos) builds its maxsdk with a small one: it never holds,
+   and its memory below its code is short */
+#ifndef MX_DEBUG_HOLD_BYTES
+#define MX_DEBUG_HOLD_BYTES 16384
+#endif
+static char hold_buf[MX_DEBUG_HOLD_BYTES];
 static u32 hold_len;
 
 static void sio_write(const char *s, u32 n) {
@@ -24,7 +29,12 @@ static void sio_write(const char *s, u32 n) {
   }
 }
 
+/* the kernel's log (apps/mxos, klog.c): its own output too */
+void mx__debug_tap(const char *s, u32 n) __attribute__((weak));
+
 static void send(const char *s, u32 n) {
+  if (mx__debug_tap)
+    mx__debug_tap(s, n);
   if (sinks & MX_SINK_SIO)
     sio_write(s, n);
   if ((sinks & MX_SINK_TTY) && mx_tty_write(s, n) < 0) {

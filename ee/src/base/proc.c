@@ -1,8 +1,9 @@
-/* Processes and messages (<mx/proc.h>, <mx/msg.h>): the kernel's, from
+/* Processes, messages and the log (<mx/proc.h>, <mx/msg.h>, <mx/log.h>): the kernel's, from
    version 13 and 14 (docs/kernel.md). libmx and the kernel's own library have none:
    -1. */
 #include <mx/debug.h>
 #include <mx/kernel.h>
+#include <mx/log.h>
 #include <mx/msg.h>
 #include <mx/proc.h>
 
@@ -39,3 +40,6 @@ int mx_proc_wait(int id, int *status, int nohang) {
 }
 int mx_proc_kill(int id, int status) { return CALLV(14, proc_kill, (id, status)); }
 int mx_proc_events(int port) { return CALLV(15, proc_events, (port)); }
+int mx_log_read(u32 *pos, void *buf, u32 max, int *proc, int wait) {
+  return CALLV(16, log_read, (pos, buf, max, proc, wait));
+}

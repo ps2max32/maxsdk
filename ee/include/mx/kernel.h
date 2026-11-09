@@ -20,7 +20,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 15
+#define MX_KERNEL_VERSION 16
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -214,6 +214,8 @@ struct mxk_services {
   void (*sleep_us)(u32 us);
   /* version 15: the kernel's events to a port of the process (<mx/proc.h>) */
   int (*proc_events)(int port);
+  /* version 16: the kernel's log (<mx/log.h>) */
+  int (*log_read)(u32 *pos, void *buf, u32 max, int *proc, int wait);
 };
 /* the size of a table of version MX_KERNEL_MIN */
 #define MXK_MIN_SIZE __builtin_offsetof(struct mxk_services, pad_init)

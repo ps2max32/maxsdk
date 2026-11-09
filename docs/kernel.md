@@ -132,6 +132,16 @@ wanted. The first: `MX_EVENT_END`, a program it started ended (its process and e
 at `exec_unpark`. A process's end takes its registration; a port that goes takes its
 events not yet received.
 
+Version 16: the kernel's log (`<mx/log.h>`, `log_read`; `apps/mxos/ee/klog.c`). Every
+process's tty output (libmxk's `mx_printf` comes through the kernel's `mx_tty_write`) and the
+kernel's own (maxsdk's `debug.c` calls the kernel's `mx__debug_tap`) go into a ring of 8 KiB as
+pieces of up to 64 bytes, each with its process (0: the kernel), before they go on to the tty
+as before. A piece is copied in the writer's thread, with interrupts on (its text may be in
+VM), and out in the reader's (`mx_log_read`, from its own position; with `wait` it sleeps
+until the next write). A reader that fell more than the ring behind goes on from the oldest
+piece. Room for it: the kernel builds its maxsdk with a debug hold buffer of 256 bytes
+(`MX_DEBUG_HOLD_BYTES`; it never holds), 16 KiB less.
+
 ## Interrupts and threads
 
 The kernel is first at every INTC and DMAC interrupt (`apps/mxos/ee/kirq.S`, `kirq.c`;
