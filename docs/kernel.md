@@ -119,7 +119,9 @@ the program in front for another process the way its `mx_exit` would, without th
 (which would end the caller too): the command thread's `program_ended`. `mx_sleep_us` is the
 kernel's (`sleep_us`): timer 0 is one for all processes, and a program's own (as before
 version 14) set it for itself and stopped it at its end, so the other's sleepers were never
-woken. The kernel makes its slots' semaphores and the handler at its start (`mx__sleep_init`)
+woken. It is on timer 1 (the kernel builds its maxsdk with `MX_SLEEP_TIMER=1`): timer 0 is
+the programs', and `mx_hires` (the shell) races the beam with it, which the kernel's sleep
+rewrote under it. The kernel makes its slots' semaphores and the handler at its start (`mx__sleep_init`)
 and, at a program's end, frees its threads' slots and sets the timer again (`mx__sleep_reap`,
 after `units_off` stopped it). A program's arguments are copied into its own memory at its
 start: the kernel's are the next program's once it starts another.

@@ -1,4 +1,4 @@
-/* mx_sleep_us: a thread sleeps on a semaphore, and EE timer 0 wakes it.
+/* mx_sleep_us: a thread sleeps on a semaphore, and an EE timer wakes it.
 
    The timer runs one-shot, set to the earliest of the sleepers' ends; its
    interrupt signals each sleeper whose end has passed (COP0 Count says when),
@@ -6,9 +6,11 @@
    alarms (SetAlarm): those fire late or wrap when interrupts stay off for
    more than a line, which happens here (EE Kernel Reference, SetAlarm).
 
-   Under mx-kernel (libmxk, kernel version 14) the kernel's: timer 0 is one,
-   and programs side by side each set it and stopped it at their end (the
-   other's sleepers were never woken). The kernel makes the semaphores and
+   Timer 0 in a program of its own (libmx). Under mx-kernel (libmxk, kernel
+   version 14) the kernel's, on timer 1 (its maxsdk is built with
+   MX_SLEEP_TIMER=1): programs side by side each set the timer and stopped
+   it at their end (the other's sleepers were never woken), and timer 0 is
+   the programs' (mx_hires' beam racing). The kernel makes the semaphores and
    the handler at its start (mx__sleep_init) and frees the slots of a
    program's threads at its end (mx__sleep_reap). */
 #include <mx/bios.h>
@@ -21,8 +23,19 @@
 #include <mx/thread.h>
 #include <mx/timer.h>
 
+#ifndef MX_SLEEP_TIMER
+#define MX_SLEEP_TIMER 0
+#endif
+#if MX_SLEEP_TIMER == 1
+#define TIMER_BASE MX_TIMER_T1
+#define TIMER_CAUSE MX_INTC_TIM1
+#else
+#define TIMER_BASE MX_TIMER_T0
+#define TIMER_CAUSE MX_INTC_TIM0
+#endif
+
 #define SLOTS 16
-/* timer 0 counts the bus clock / 256: one count is 512 EE cycles (1.74 us) */
+/* the timer counts the bus clock / 256: one count is 512 EE cycles (1.74 us) */
 #define CYCLES_PER_COUNT (MX_EE_HZ / (MX_BUS_HZ / 256u))
 /* one wait at most this long; longer sleeps take several (Count wraps in 14 s) */
 #define CHUNK_US 1000000u
@@ -35,7 +48,7 @@ static struct {
 } slot[SLOTS];
 static int handler_on;
 
-static void timer_stop(void) { MX_R32(MX_TIMER_T0 + MX_TIMER_MODE_OFFSET) = 0; }
+static void timer_stop(void) { MX_R32(TIMER_BASE + MX_TIMER_MODE_OFFSET) = 0; }
 
 /* With interrupts off: the timer to the earliest end, or off. */
 static void arm(void) {
@@ -55,7 +68,7 @@ static void arm(void) {
   u32 counts = wait / CYCLES_PER_COUNT + 1;
   if (counts > 0xFFFF)
     counts = 0xFFFF; /* about 113 ms: the interrupt then sets it again */
-  u32 b = MX_TIMER_T0;
+  u32 b = TIMER_BASE;
   MX_R32(b + MX_TIMER_COUNT_OFFSET) = 0;
   MX_R32(b + MX_TIMER_COMP_OFFSET) = counts;
   MX_R32(b + MX_TIMER_MODE_OFFSET) =
@@ -110,7 +123,7 @@ void mx_sleep_us(u32 us) {
   }
 #endif
   if (!handler_on) {
-    mx_irq_intc(MX_INTC_TIM0, tick, 0);
+    mx_irq_intc(TIMER_CAUSE, tick, 0);
     handler_on = 1;
   }
   int i = take_slot();
@@ -140,7 +153,7 @@ void mx__sleep_stop(void) {
   if (!handler_on)
     return;
   timer_stop();
-  mx_irq_intc(MX_INTC_TIM0, 0, 0);
+  mx_irq_intc(TIMER_CAUSE, 0, 0);
   handler_on = 0;
 }
 
@@ -154,7 +167,7 @@ void mx__sleep_init(void) {
     slot[i].sema = s >= 0 ? s + 1 : 0;
   }
   timer_stop();
-  mx_irq_intc(MX_INTC_TIM0, tick, 0);
+  mx_irq_intc(TIMER_CAUSE, tick, 0);
   handler_on = 1;
 }
 

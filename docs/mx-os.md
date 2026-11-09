@@ -113,9 +113,11 @@ socket code adds `$(MX_NET_CFLAGS)`: `socket`, `select`, `fcntl` and the rest ar
 (`ee/libc/net.c`), blocking unless made non-blocking; a blocking call sleeps, it does not spin. Not there: DNS (dotted
 addresses only), `MSG_PEEK`, `FIONREAD`, broadcast, and options, which are accepted and ignored.
 
-Waiting: sleep, do not spin. `mx_sleep_us` (`<mx/thread.h>`) lets the other threads run and takes EE
-timer 0 once a thread has slept; `mx_delay_us` keeps the CPU. Leave timer 0 to it; timer 1 is the
-profiler's.
+Waiting: sleep, do not spin. `mx_sleep_us` (`<mx/thread.h>`) lets the other threads run; `mx_delay_us`
+keeps the CPU. Under the kernel (`libmxk`, version 14 on) it is the kernel's, on EE timer 1, one for
+all processes: leave timer 1 alone (the profiler, `mx_prof`/`mx_sample`, uses it too: not under the
+kernel for now). Timer 0 is the program's (`mx_hires` races the beam with it). In a program of its
+own (`libmx`) `mx_sleep_us` takes timer 0 and the profiler timer 1.
 
 Provided for every program: the home button (`MX_PAD_HOME`: a USB pad's PS button; on a SIO2 pad
 Select + Start + L1 + R1 held together, which the program then gets as the home button, not as

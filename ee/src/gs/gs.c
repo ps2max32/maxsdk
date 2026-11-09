@@ -146,7 +146,9 @@ void mx_vram_free(u32 page, u32 pages) {
 static int present_release(void) {
   u32 code = MX_R32(MX_VIF_VIF1_CODE);
   /* bit 15: the PATH3 stream's marks (frame3.c) */
-  if (!(MX_R32(MX_VIF_VIF1_STAT) & MX_BIT(VIF_STAT_VIS)) ||
+  /* INT: the MARK with the I-bit is done; VIS follows once VIF1 tries the
+     next code (as frame3.c's release; PCSX2 sets INT only) */
+  if (!(MX_R32(MX_VIF_VIF1_STAT) & (MX_BIT(VIF_STAT_VIS) | MX_BIT(VIF_STAT_INT))) ||
       code >> 24 != (MX_VIF_IBIT >> 24 | MX_VIF_MARK) || (code & 0x8000) ||
       (mx_gs.frames_done - code) & 0x4000)
     return 0;

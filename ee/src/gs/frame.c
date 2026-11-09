@@ -655,7 +655,9 @@ int mx_frame_vu1_compute(const struct mx_kernel *k, const void *hdr, const void 
   mx_frame_commit(c);
   kick();
   u32 t0 = mx_count();
-  while (!(MX_R32(MX_VIF_VIF1_STAT) & MX_BIT(VIF_STAT_VIS)))
+  /* INT: the NOP with the I-bit is done (VIS follows on the PS2, not on
+     PCSX2): the program has ended */
+  while (!(MX_R32(MX_VIF_VIF1_STAT) & (MX_BIT(VIF_STAT_VIS) | MX_BIT(VIF_STAT_INT))))
     if (mx_count() - t0 > 300000000u)
       return -1;
   mx_vu1_read_dma(dst, k->data_qw, n * k->item_qw, spr, spr_bytes);
