@@ -147,7 +147,12 @@ mxlink needs something, it is general:
    - Done 2026-11-09 (kernel version 16): the log, every process's `mx_printf` and the
      kernel's output in a ring of 8 KiB that any process reads (`mx_log_read`); test `k36_log`.
      The room came from the kernel's debug hold buffer (16 KiB, unused by it).
-   - Next: IOP channels.
+   - Done 2026-11-09 (kernel version 17): IOP channels, an IOP module's SIF commands (cid
+     0-31) as messages to a port (`mx_iop_channel`); test `k37_iopchan` with its own module
+     (`tests/iop/chantest`). Step 2e-3 is done; all of it is tested on PCSX2 only.
+   - Left for later: `proc_read`/`proc_regs` (with 2e-4's `dumpmem`/`dumpreg`), surfaces and
+     input (2f), more and larger messages (2e-4 frees the room), a service started beside
+     the shell (the kernel starts one at the boot: 2e-4).
 4. **2e-4, mxlink an app.** `MXOS.ELF` is the kernel alone, `MXLINK.ELF` a service on the interface;
    `SERVICES.CFG`. At the boot the kernel starts mxlink and then the shell. ps2client works as
    before, and now also while a game runs. The skill and the card's install follow.

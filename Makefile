@@ -109,9 +109,14 @@ $(VM_TESTS:%=$(OUT)/tests/%.elf): MX_MEMORY = vm
 $(VM_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
 
 # tests on libmxk without VM, started by mxlink
-K_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log
+K_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k37_iopchan
 $(K_TESTS:%=$(OUT)/tests/%.elf): LIB = $(LIBK)
 $(K_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
+# k37: an IOP module of its own (tests/iop/chantest), embedded
+$(OUT)/tests/k37_iopchan.elf: CFLAGS += --embed-dir=$(IOP_OUT) -Wno-c23-extensions
+$(OUT)/tests/k37_iopchan.elf: $(IOP_OUT)/chantest.irx
+$(IOP_OUT)/chantest.irx: $(wildcard $(HERE)/tests/iop/chantest/src/*)
+	$(MAKE) -C $(HERE)/tests/iop/chantest OUT=$(IOP_OUT)
 # VU0's registers set and read in C (the compiler keeps off them)
 $(OUT)/tests/k31_beside.elf $(OUT)/tests/vm32_side.elf: CFLAGS += -mvu0 $(foreach r,$(shell seq 1 31),-ffixed-vf$(r))
 

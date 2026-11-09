@@ -76,4 +76,12 @@ int mx_iop_patch_prefix_check(void);
 int mx_iop_load_module_buffer(const void *buf, u32 size, const char *args, u32 args_len,
                               int *modres);
 
+/* An IOP channel (kernel version 17; libmxk only, libmx returns -1): what an
+   IOP module sends with sceSifSendCmd(cid, ...), cid 0-31, comes as a
+   message (<mx/msg.h>, from process 0, no reply wanted) to port, a port of
+   this process: the packet's payload, without its 16-byte header (up to 96
+   bytes). One process per cid; port 0 gives it up; the process's end too.
+   0, or -1 (taken, not its port, cid out of range). */
+int mx_iop_channel(u32 cid, int port);
+
 #endif

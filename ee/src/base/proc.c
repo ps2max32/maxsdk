@@ -2,6 +2,7 @@
    version 13 and 14 (docs/kernel.md). libmx and the kernel's own library have none:
    -1. */
 #include <mx/debug.h>
+#include <mx/iop.h>
 #include <mx/kernel.h>
 #include <mx/log.h>
 #include <mx/msg.h>
@@ -43,3 +44,4 @@ int mx_proc_events(int port) { return CALLV(15, proc_events, (port)); }
 int mx_log_read(u32 *pos, void *buf, u32 max, int *proc, int wait) {
   return CALLV(16, log_read, (pos, buf, max, proc, wait));
 }
+int mx_iop_channel(u32 cid, int port) { return CALLV(17, iop_channel, (cid, port)); }

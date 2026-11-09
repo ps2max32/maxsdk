@@ -262,6 +262,10 @@ static void serve(const u32 *pkt) {
   send_cmd(1, CMD_RPC_END, r, RPC_PKT_SIZE, (mx_paddr){0}, 0, 0);
 }
 
+/* a command not the SIF's own (an app's IOP channel): the kernel's
+   (apps/mxos, kmsg.c), in the interrupt; the packet with its header */
+void mx__sif_cmd(u32 cid, const u32 *pkt, u32 bytes) __attribute__((weak));
+
 /* SIF0 (IOP -> EE) DMA end: one command packet is in rx_buf. */
 static int sif0_handler(int ch, void *arg, void *addr) {
   (void)ch, (void)arg, (void)addr;
@@ -326,6 +330,8 @@ static int sif0_handler(int ch, void *arg, void *addr) {
     serve(pkt);
     break;
   default:
+    if (mx__sif_cmd)
+      mx__sif_cmd(pkt[2], pkt, words * 4);
     break;
   }
   return 0;

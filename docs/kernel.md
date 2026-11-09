@@ -142,6 +142,14 @@ until the next write). A reader that fell more than the ring behind goes on from
 piece. Room for it: the kernel builds its maxsdk with a debug hold buffer of 256 bytes
 (`MX_DEBUG_HOLD_BYTES`; it never holds), 16 KiB less.
 
+Version 17: IOP channels (`mx_iop_channel`, `<mx/iop.h>`; `kmsg.c`). A process gives a SIF
+command id of the user range (0-31) to a port of its own, at most 4 at once, one process per
+id. maxsdk's SIF0 handler (`src/base/sif.c`) hands a command that is not the SIF's own to the
+kernel's `mx__sif_cmd`, in the interrupt, which posts its payload (the packet without its
+16-byte header, up to 96 bytes) to that port as a message from process 0, without waiting.
+This replaces a fixed EE address for what an IOP module sends (ps2link's packets to
+`0xFF800`, step 2e-4). A process's end gives its ids up.
+
 ## Interrupts and threads
 
 The kernel is first at every INTC and DMAC interrupt (`apps/mxos/ee/kirq.S`, `kirq.c`;

@@ -86,7 +86,9 @@ Retail PS2s have 32 MiB; never count on more.
     `mx_proc_spawn` (version 14) starts it without a waiting thread: `mx_proc_wait` for its
     end and exit status, `mx_proc_kill` to end it. `mx_proc_events` (version 15) sends the
     kernel's events, such as that end, as messages to a port of yours. `mx_log_read` (version
-    16) reads every process's `mx_printf` output.
+    16) reads every process's `mx_printf` output. A system app with an IOP module of its own
+    (rule 3 is for games) gets what the module sends with `sceSifSendCmd` as messages:
+    `mx_iop_channel` (version 17).
 12. **Talking to another program** (kernel version 13): through the kernel, never through
     memory, which is your own (another program's addresses are its own). `<mx/proc.h>` lists
     the processes; `<mx/msg.h>`'s ports: make one by name (`mx_port_create`), receive and
