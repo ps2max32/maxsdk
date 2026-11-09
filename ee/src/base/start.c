@@ -198,8 +198,10 @@ void mx__main(void) {
     a = copy_mxload_args(&l->args);
   } else if ((a->argc == 0 || mx__kthreads) && loader_args_ok(l) && l->args.argc != 0)
     /* on the kernel's threads SetupThread answers for the BIOS thread they
-       all run on, the kernel's own: its arguments are not the program's */
-    a = &l->args;
+       all run on, the kernel's own: its arguments are not the program's.
+       Copied: the kernel's are the next program's once this one starts
+       another and goes on (mx_proc_spawn) */
+    a = copy_mxload_args(&l->args);
 
 #ifndef MX_KERNEL
   if (a->argc > 0 && a->argv[0])

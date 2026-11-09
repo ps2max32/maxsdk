@@ -82,6 +82,8 @@ Retail PS2s have 32 MiB; never count on more.
     of memory. `mx_loader_launch_beside` (kernel version 12) is the same, but the program's
     other threads and interrupt handlers go on while the other runs: they may not end the
     program (`mx_exit`) or use the pad meanwhile, and the other runs in front.
+    `mx_proc_spawn` (version 14) starts it without a waiting thread: `mx_proc_wait` for its
+    end and exit status, `mx_proc_kill` to end it.
 12. **Talking to another program** (kernel version 13): through the kernel, never through
     memory, which is your own (another program's addresses are its own). `<mx/proc.h>` lists
     the processes; `<mx/msg.h>`'s ports: make one by name (`mx_port_create`), receive and

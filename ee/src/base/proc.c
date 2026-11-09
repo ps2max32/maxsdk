@@ -1,19 +1,21 @@
 /* Processes and messages (<mx/proc.h>, <mx/msg.h>): the kernel's, from
-   version 13 (docs/kernel.md). libmx and the kernel's own library have none:
+   version 13 and 14 (docs/kernel.md). libmx and the kernel's own library have none:
    -1. */
+#include <mx/debug.h>
 #include <mx/kernel.h>
 #include <mx/msg.h>
 #include <mx/proc.h>
 
 #ifdef MX_KERNEL
-static int has13(void) {
-  return mx__kernel && mx__kernel->version >= 13 &&
-         mx__kernel->size >= __builtin_offsetof(struct mxk_services, msg_reply) + sizeof(void *);
-}
-#define CALL(f, args) (has13() && mx__kernel->f ? mx__kernel->f args : -1)
+#define HAS(v, f)                                                                          \
+  (mx__kernel && mx__kernel->version >= (v) &&                                             \
+   mx__kernel->size >= __builtin_offsetof(struct mxk_services, f) + sizeof(void *) &&      \
+   mx__kernel->f)
+#define CALLV(v, f, args) (HAS(v, f) ? mx__kernel->f args : -1)
 #else
-#define CALL(f, args) -1
+#define CALLV(v, f, args) -1
 #endif
+#define CALL(f, args) CALLV(13, f, args)
 
 int mx_proc_self(void) { return CALL(proc_self, ()); }
 int mx_proc_list(struct mx_proc_info *p, int max) { return CALL(proc_list, (p, max)); }
@@ -27,3 +29,12 @@ int mx_msg_receive(int port, void *buf, u32 max, struct mx_msg *m) {
   return CALL(msg_receive, (port, buf, max, m));
 }
 int mx_msg_reply(int msg, const void *reply, u32 len) { return CALL(msg_reply, (msg, reply, len)); }
+
+int mx_proc_spawn(int argc, const char *args, u32 args_len, const char *swap) {
+  mx_debug_flush();
+  return CALLV(14, proc_spawn, (argc, args, args_len, swap));
+}
+int mx_proc_wait(int id, int *status, int nohang) {
+  return CALLV(14, proc_wait, (id, status, nohang));
+}
+int mx_proc_kill(int id, int status) { return CALLV(14, proc_kill, (id, status)); }

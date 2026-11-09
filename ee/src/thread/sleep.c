@@ -4,12 +4,20 @@
    interrupt signals each sleeper whose end has passed (COP0 Count says when),
    then sets the timer to the next. Without sleepers it is off. Not the BIOS's
    alarms (SetAlarm): those fire late or wrap when interrupts stay off for
-   more than a line, which happens here (EE Kernel Reference, SetAlarm). */
+   more than a line, which happens here (EE Kernel Reference, SetAlarm).
+
+   Under mx-kernel (libmxk, kernel version 14) the kernel's: timer 0 is one,
+   and programs side by side each set it and stopped it at their end (the
+   other's sleepers were never woken). The kernel makes the semaphores and
+   the handler at its start (mx__sleep_init) and frees the slots of a
+   program's threads at its end (mx__sleep_reap). */
+#include <mx/bios.h>
 #include <mx/bits.h>
 #include <mx/cpu.h>
 #include <mx/hw/formats.h>
 #include <mx/hw/regs.h>
 #include <mx/irq.h>
+#include <mx/kernel.h>
 #include <mx/thread.h>
 #include <mx/timer.h>
 
@@ -23,6 +31,7 @@ static struct {
   u32 due;  /* COP0 Count at the end */
   int sema; /* + 1, 0: not made yet */
   u8 used, waiting;
+  s16 tid; /* the thread using it */
 } slot[SLOTS];
 static int handler_on;
 
@@ -70,6 +79,7 @@ static int take_slot(void) {
   for (int i = 0; i < SLOTS; i++)
     if (!slot[i].used) {
       slot[i].used = 1;
+      slot[i].tid = (s16)mx_bios_get_thread_id();
       mx_irq_restore(was);
       return i;
     }
@@ -91,6 +101,14 @@ void mx_sleep_us(u32 us) {
     mx_thread_yield();
     return;
   }
+#ifdef MX_KERNEL
+  if (mx__kernel && mx__kernel->version >= 14 &&
+      mx__kernel->size >= __builtin_offsetof(struct mxk_services, sleep_us) + sizeof(void *) &&
+      mx__kernel->sleep_us) {
+    mx__kernel->sleep_us(us);
+    return;
+  }
+#endif
   if (!handler_on) {
     mx_irq_intc(MX_INTC_TIM0, tick, 0);
     handler_on = 1;
@@ -116,10 +134,41 @@ void mx_sleep_us(u32 us) {
   slot[i].used = 0;
 }
 
-/* mx_exit: no interrupt of ours once the program has gone */
+/* mx_exit: no interrupt of ours once the program has gone (not the
+   kernel's timer: this program did not set it then) */
 void mx__sleep_stop(void) {
+  if (!handler_on)
+    return;
   timer_stop();
-  if (handler_on)
-    mx_irq_intc(MX_INTC_TIM0, 0, 0);
+  mx_irq_intc(MX_INTC_TIM0, 0, 0);
   handler_on = 0;
 }
+
+#ifndef MX_KERNEL
+/* the kernel (apps/mxos), at its start in a thread of its own: the
+   semaphores and the handler are its, not a program's */
+void mx__sleep_init(void) {
+  for (int i = 0; i < SLOTS; i++) {
+    slot[i].used = slot[i].waiting = 0;
+    int s = mx_sema_create(0, 1);
+    slot[i].sema = s >= 0 ? s + 1 : 0;
+  }
+  timer_stop();
+  mx_irq_intc(MX_INTC_TIM0, tick, 0);
+  handler_on = 1;
+}
+
+/* the kernel, at a program's end, its threads gone: their slots free, and
+   the timer set again (the end stopped it) for the other's sleepers */
+void mx__sleep_reap(void) {
+  int was = mx_di();
+  for (int i = 0; i < SLOTS; i++)
+    if (slot[i].used && mx_bios_refer_thread_status(slot[i].tid, 0) <= 0) { /* 0: none */
+      slot[i].used = slot[i].waiting = 0;
+      if (slot[i].sema)
+        mx_bios_ipoll_sema(slot[i].sema - 1); /* a wake it did not take */
+    }
+  arm();
+  mx_irq_restore(was);
+}
+#endif

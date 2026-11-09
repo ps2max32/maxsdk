@@ -110,6 +110,20 @@ answers the requests to them with -2, drops its requests not yet received and ma
 received, so that their reply only frees the slot. The slots are what fits below the kernel's
 code now; step 2e-4, which moves the command thread out of the kernel, gives them more room.
 
+Version 14: `proc_spawn`, `proc_wait`, `proc_kill` (`<mx/proc.h>`) and `sleep_us`. `proc_spawn` is
+`launch_beside` without the waiting thread: the caller comes back once the other runs (the
+command thread's `exec_park_started`), with its process, and goes on beside it; -1 if it did
+not start. `proc_wait` waits for (or, with `nohang`, asks about) the end of the program it
+started, and gives its exit status (the last one's, also after its end). `proc_kill` ends
+the program in front for another process the way its `mx_exit` would, without the restart
+(which would end the caller too): the command thread's `program_ended`. `mx_sleep_us` is the
+kernel's (`sleep_us`): timer 0 is one for all processes, and a program's own (as before
+version 14) set it for itself and stopped it at its end, so the other's sleepers were never
+woken. The kernel makes its slots' semaphores and the handler at its start (`mx__sleep_init`)
+and, at a program's end, frees its threads' slots and sets the timer again (`mx__sleep_reap`,
+after `units_off` stopped it). A program's arguments are copied into its own memory at its
+start: the kernel's are the next program's once it starts another.
+
 ## Interrupts and threads
 
 The kernel is first at every INTC and DMAC interrupt (`apps/mxos/ee/kirq.S`, `kirq.c`;
