@@ -162,6 +162,13 @@ its arguments; on PCSX2 `host:services.txt`, the runner's `MXSERVICE`) in place 
 With a service beside, the kernel prints no test end marker: it is the service's (2e-4:
 mxlink's, for the host's runs).
 
+Two things a process beside showed: a program's end waits only for the IOP calls of its own
+threads, those that are gone (`mx__sif_calls_finish` keeps the calls and packets of threads
+still alive: a service's tty write was waited for until it gave up, and its packet was
+freed). An interrupt handler whose code is the kernel's (below 1 MiB, its `irq.c`: the SIF
+waits' vblank wake, added in a program's thread at the first call that needed it) belongs to
+process 0, not to that program, so its end cannot turn the line off under it.
+
 ## Interrupts and threads
 
 The kernel is first at every INTC and DMAC interrupt (`apps/mxos/ee/kirq.S`, `kirq.c`;

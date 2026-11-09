@@ -174,6 +174,9 @@ static void send_rdata(int intr, const u32 *w) {
    whether they give up). */
 #define NSLEEP 8
 static struct mx_sif_client *volatile sleepers[NSLEEP];
+/* the thread of each (0: the kernel's drain): mx__sif_calls_finish waits only
+   for the calls of threads that are gone, not of another process's beside */
+static s16 sleeper_tid[NSLEEP];
 
 static void wake_sleepers(void) {
   for (int i = 0; i < NSLEEP; i++) {
@@ -460,7 +463,7 @@ static int sleep_wait(struct mx_sif_client *c, u32 limit, u32 t0, int *r) {
   int slot = -1, was = mx_di();
   for (int i = 0; i < NSLEEP && slot < 0; i++)
     if (!sleepers[i])
-      sleepers[i] = c, slot = i;
+      sleepers[i] = c, slot = i, sleeper_tid[i] = (s16)mx_bios_get_thread_id();
   if (slot >= 0)
     c->sleeping = 1;
   mx_irq_restore(was);
@@ -1610,11 +1613,25 @@ static int program_memory(const volatile void *p) {
    240 wakes, at least 2 s; an RDATA the IOP asks for meanwhile is sent),
    and their sleeper slots freed; then every RPC packet back. Returns the
    waiting calls that did not end, plus the packets not back << 8. */
+static int sleeper_alive(int i) {
+  return sleeper_tid[i] > 0 && mx_bios_refer_thread_status(sleeper_tid[i], 0) > 0;
+}
 int mx__sif_calls_finish(void) {
   int left = 0;
+  /* the packets of calls that threads still alive wait for (a process
+     beside, step 2e-2): theirs, not given up below */
+  u32 live = 0;
   for (int i = 0; i < NSLEEP; i++) {
     struct mx_sif_client *c = sleepers[i];
-    if (!c)
+    if (c && sleeper_alive(i)) {
+      u32 k = (u32)((u8 *)c->pkt - pkt_pool[0]) / RPC_PKT_SIZE;
+      if (k < NPKT)
+        live |= 1u << k;
+    }
+  }
+  for (int i = 0; i < NSLEEP; i++) {
+    struct mx_sif_client *c = sleepers[i];
+    if (!c || sleeper_alive(i))
       continue;
     /* asleep on its semaphore (not deleted yet): the answer and each
        vblank start (wake_sleepers) signal it while it is a sleeper */
@@ -1643,7 +1660,7 @@ int mx__sif_calls_finish(void) {
     s32 count, max_count, init_count, wait_threads;
     u32 attr, option;
   } p = {0, 1, 0, 0, 0, 0};
-  int slot = -1, sema = pkt_busy ? mx_bios_create_sema(&p) : -1;
+  int slot = -1, sema = pkt_busy & ~live ? mx_bios_create_sema(&p) : -1;
   if (sema >= 0) {
     if (!sleep_hooked) {
       sleep_hooked = 1;
@@ -1653,13 +1670,13 @@ int mx__sif_calls_finish(void) {
     int was = mx_di();
     for (int i = 0; i < NSLEEP && slot < 0; i++)
       if (!sleepers[i])
-        sleepers[i] = &drain, slot = i;
+        sleepers[i] = &drain, slot = i, sleeper_tid[i] = 0;
     drain.sleeping = slot >= 0;
     mx_irq_restore(was);
-    for (int wakes = 0; slot >= 0 && pkt_busy && wakes < 120; wakes++) {
+    for (int wakes = 0; slot >= 0 && (pkt_busy & ~live) && wakes < 120; wakes++) {
       if (ndeferred)
         send_deferred();
-      if (pkt_busy)
+      if (pkt_busy & ~live)
         mx_bios_wait_sema(sema);
     }
     was = mx_di();
@@ -1671,8 +1688,8 @@ int mx__sif_calls_finish(void) {
     drain.sema = 0;
   }
   /* the rest given up: their answers would land in freed packets */
-  left += __builtin_popcount(pkt_busy) << 8;
-  pkt_busy = 0;
+  left += __builtin_popcount(pkt_busy & ~live) << 8;
+  pkt_busy &= live;
   return left;
 }
 
