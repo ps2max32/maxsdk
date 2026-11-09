@@ -200,7 +200,9 @@ app serves dumpmem and writemem (physical addresses, as the kernel saw them befo
 and the VU commands too; the kernel keeps the reset and the IOP's exception. A shell the service
 ends always gets the restart (as the takeover did): ended without it, the next program crashed
 at once, before its first line, when the shell had not changed the IOP (something of the shell's
-went on; not found yet). Test: `k43_phys`.
+went on; not found yet). Test: `k43_phys`. Without the app (no service, a program that took
+all memory or runs on the BIOS's threads, mxlink-high) the kernel serves only the reset, execee,
+dumpreg (ps2client's ping) and the IOP's exception; the other commands are the app's only.
 
 Two things a process beside showed: a program's end waits only for the IOP calls of its own
 threads, those that are gone (`mx__sif_calls_finish` keeps the calls and packets of threads

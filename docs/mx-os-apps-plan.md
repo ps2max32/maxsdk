@@ -189,10 +189,13 @@ mxlink needs something, it is general:
      `cmd.c` as the fallback while no service runs. Test `k43_phys`; on the PS2 a writemem and
      dumpmem of 64 KiB match. Learned: a shell ended without the restart left something running
      that crashed the next program at once (not found yet): the restart, as the takeover did.
-   - Next: the kernel without `cmd.c`. `MXOS.ELF` is the kernel
-     alone, `MXLINK.ELF` a service on the interface, in `SERVICES.CFG`. At the boot the kernel
-     starts mxlink and then the shell. ps2client works as before, and now also while a game
-     runs. The skill and the card's install follow.
+   - Done 2026-11-09: the kernel's `cmd.c` keeps only the fallback for when no service runs
+     (a program on the BIOS's threads, one that takes all memory, mxlink-high): the reset,
+     execee and the ping; dumpmem, writemem, gsexec and the VU commands are the app's only
+     (16 KiB of the kernel's memory free). The rest of `cmd.c` stays while programs can push
+     the service out.
+   - Next: the names: `MXOS.ELF` the kernel, `MXLINK.ELF` the app (a service in
+     `SERVICES.CFG`), with mxboot's `BOOT.CFG`, the skill and the card's install.
 5. **2f-1, the home menu over a paused game** (the mockup): the shell draws, with the frozen frame
    as one texture, while the game's GS memory is saved.
 6. **2f-2, consoles.** The shell's console window of a service (the log of its process, its
