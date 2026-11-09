@@ -80,6 +80,20 @@ takes all memory: the waiting program is given up and ends with it (its threads 
 go with the other's), and mxlink goes on as before (the shell starts again). The kernel's VM state is cleared by the
 restart after each program.
 
+Version 12: `mx_loader_launch_beside` (`launch_beside`) parks it the same way but leaves its
+other threads and its interrupt handlers as they are: they go on beside the other (`apps/mxos/ee/kproc.c`;
+`docs/mx-os-apps-plan.md`, step 2e-2). Both cores are in the TLB at once, each under its ASID
+(the side's entries are kept in the first core slots, the other's come after them; `tlb_restore`
+then leaves out the BIOS's entries over the side's range). A switch between the two sets the
+ASID and `mx__core_off`, and exchanges the part of the kernel's state of a program that each
+has of its own (`ee/resident.ld`'s `__proc_*`: the heaps, memory, exceptions, threads, the pad;
+about 4 KiB) with the side's copy; the rest (the VM, the image, the home menu, every DMA line)
+is the one in front's. The scheduler switches when the next thread is of the other process,
+VU0's registers with it (not the accumulator); the kernel's own threads (the command thread
+acts on the one in front) and the kernel's interrupt handlers (the VM's vblank) run in the
+front's, a program's handlers in their process's. Not yet: the side ending, crashing or using
+the pad while the other runs.
+
 ## Interrupts and threads
 
 The kernel is first at every INTC and DMAC interrupt (`apps/mxos/ee/kirq.S`, `kirq.c`;

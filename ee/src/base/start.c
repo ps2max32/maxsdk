@@ -140,6 +140,15 @@ void mx_exit(int status) {
   mx_bios_exit(status);
 }
 
+int mx_loader_launch_beside(int argc, const char *args, u32 args_len, const char *swap) {
+  if (!mx__kernel || mx__kernel->version < 12 ||
+      mx__kernel->size < __builtin_offsetof(struct mxk_services, launch_beside) + sizeof(void *) ||
+      !mx__kernel->launch_beside)
+    return -1;
+  mx_debug_flush();
+  return mx__kernel->launch_beside(argc, args, args_len, swap);
+}
+
 int mx_loader_launch(int argc, const char *args, u32 args_len, const char *swap) {
   if (!loader_launch)
     return -1;

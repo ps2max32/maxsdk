@@ -236,7 +236,7 @@ runs (now it cannot), and in step 3 it is a window like the others.
 **2f. Both run.** mxshell draws while a game is paused (its threads suspended, its GS memory
 kept), and the game goes on when mxshell gives it back: the base of step 3's windows.
 Here two processes first run side by side, so 2d-3's switch (ASID, core TLB slots, VU0) and
-2d-4's interrupts per process come with it.
+2d-4's interrupts per process come with it (done in the apps plan's step 2e-2).
 
 **2g. The BIOS only at the boot.** After 2d what the kernel still asks of the BIOS is its own
 too: the SIF DMA queue (SifSetDma), the video mode (SetGsCrt), the caches, the program's start

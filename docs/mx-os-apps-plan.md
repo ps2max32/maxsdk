@@ -6,9 +6,10 @@ and one interface between the kernel and every app. Agreed 2026-11-08.
 
 ## Decided
 
-- mxlink becomes an ordinary `libmxk` program in VM, with an address space (ASID) of its own
-  (option B). So the process switch of 2d-3 (ASID, core TLB slots, VU0) and 2d-4's interrupts
-  per process come in this step, not in 2f: two processes really run side by side here.
+- mxlink becomes an ordinary `libmxk` program with an address space (ASID) of its own
+  (option B): its core at a run of its own, without VM (as mxshell; one VM, the front's). So
+  the process switch of 2d-3 (ASID, core TLB slots, VU0) and 2d-4's interrupts per process
+  come in this step, not in 2f: two processes really run side by side here.
 - mxlink is an app the shell shows like the others. It runs as a service: started at the
   boot, or not, as chosen in the shell.
 - The interface between the kernel and mxlink is the kernel's general app interface. Nothing
@@ -20,7 +21,7 @@ and one interface between the kernel and every app. Agreed 2026-11-08.
 
 ## The shell's name
 
-It was called mxshell in some places and mxshell in others (`MXSHELL.ELF`, `shell/`). "Loader" no
+It was called mxloader in some places and mxshell in others (`MXSHELL.ELF`, `shell/`). "Loader" no
 longer fits: the kernel loads programs, and the shell becomes the launcher and window manager.
 Chosen: mxshell. The other names weighed:
 
@@ -110,6 +111,16 @@ mxlink needs something, it is general:
 2. **2e-2, the process switch.** The ASID, the core's TLB slots, VU0's registers and the
    interrupts per process at a switch to another process's thread. Test: two VM programs side
    by side (a counting service beside vm28 and Quake), each checking its own memory.
+   Done 2026-11-09 (kernel version 12, `apps/mxos/ee/kproc.c`, `kernel.md`): a program without
+   VM starts another with `mx_loader_launch_beside` and goes on beside it; the one beside has
+   no VM (the VM's state stays the front's). `k31_beside` beside `vm32_side`, `vm28_asid` and
+   Quake (600 frames, 1 % slower; the worker 33 000 rounds meanwhile), each checking its
+   memory at the same virtual addresses, VU0's registers, its ASID and its vblank handler.
+   Learned: threads run in user mode, so the side's copy of the state is read under its own
+   ASID, not through kseg0; the kernel's handlers act on the front (the VM's vblank in the
+   side's space wrote into the other's memory); DMA lines (the pad's) are never exchanged (the
+   IOP died after 60 Quake frames); `tlb_restore` beside the side keeps the BIOS's entries
+   outside its range (the kernel reads modules to 0x0100_0000).
 3. **2e-3, the interface, part 1.** Processes, messages, events, the log, IOP channels, each
    with a test of two processes.
 4. **2e-4, mxlink an app.** `MXOS.ELF` is the kernel alone, `MXLINK.ELF` a service on the interface;

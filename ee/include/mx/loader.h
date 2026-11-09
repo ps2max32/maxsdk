@@ -60,6 +60,14 @@ int mx_loader_mxload(void);
    could not be started (this one staying). */
 int mx_loader_launch(int argc, const char *args, u32 args_len, const char *swap);
 
+/* As mx_loader_launch for a program with its core at a run of its own and
+   without VM, under a kernel of version 12: the calling thread waits for the
+   other's end as there, and this program's other threads go on running
+   beside it, in their own address space (docs/mx-os-apps-plan.md, step
+   2e-2). While the other runs they may not end the program (mx_exit), nor
+   use the pad. Returns -1 if the kernel cannot. */
+int mx_loader_launch_beside(int argc, const char *args, u32 args_len, const char *swap);
+
 /* A program without VM asks for its core at a physical run of its own (a
    kernel of version 9), with this core heap after its end (bytes): what
    mx_sbrk, malloc and the heaps (<mx/mem.h>) have, the rest of memory being
