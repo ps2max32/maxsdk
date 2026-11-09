@@ -183,8 +183,13 @@ mxlink needs something, it is general:
      it; the TLB entries kept for the one beside stayed after a program that takes all memory
      ended it; reading the modules from the card again after the shell ended failed (its drivers):
      a shell ended for the host keeps the IOP, as the takeover did.
-   - Next: dumpmem and writemem need the kernel's reading of another process's memory
-     (`proc_read`); then the rest of `cmd.c`, and the kernel without it. `MXOS.ELF` is the kernel
+   - Done 2026-11-09 (kernel version 21, on the PS2): `mx_phys_read` and `mx_phys_write`, the
+     EE's physical memory copied by the kernel in kernel mode; the app serves dumpmem, writemem,
+     gsexec and the VU commands. The kernel keeps the reset and the IOP's exception, and its
+     `cmd.c` as the fallback while no service runs. Test `k43_phys`; on the PS2 a writemem and
+     dumpmem of 64 KiB match. Learned: a shell ended without the restart left something running
+     that crashed the next program at once (not found yet): the restart, as the takeover did.
+   - Next: the kernel without `cmd.c`. `MXOS.ELF` is the kernel
      alone, `MXLINK.ELF` a service on the interface, in `SERVICES.CFG`. At the boot the kernel
      starts mxlink and then the shell. ps2client works as before, and now also while a game
      runs. The skill and the card's install follow.

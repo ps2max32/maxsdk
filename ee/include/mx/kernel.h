@@ -21,7 +21,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 20
+#define MX_KERNEL_VERSION 21
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -228,6 +228,10 @@ struct mxk_services {
   int (*timer_claim)(int clock);
   void (*timer_release)(int t);
   u32 (*timer_epc)(void);
+  /* version 21: the EE's physical memory to or from the caller's core
+     (<mx/proc.h>) */
+  int (*phys_read)(u32 phys, void *to, u32 n);
+  int (*phys_write)(u32 phys, const void *from, u32 n);
 };
 /* the size of a table of version MX_KERNEL_MIN */
 #define MXK_MIN_SIZE __builtin_offsetof(struct mxk_services, pad_init)

@@ -110,7 +110,7 @@ $(VM_TESTS:%=$(OUT)/tests/%.elf): MX_MEMORY = vm
 $(VM_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
 
 # tests on libmxk without VM, started by mxlink
-K_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k37_iopchan k38_service k40_frame k41_present k42_timers
+K_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k37_iopchan k38_service k40_frame k41_present k42_timers k43_phys
 $(K_TESTS:%=$(OUT)/tests/%.elf): LIB = $(LIBK)
 $(K_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
 # k37: an IOP module of its own (tests/iop/chantest), embedded

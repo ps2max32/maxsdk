@@ -30,8 +30,9 @@ memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-
 - Services: the kernel starts the program `mc0:/MXOS/SERVICES.CFG` names (a path and its
   arguments) at the boot and after a restart; it stays beside every program in front
   (`mx_proc_service`, kernel version 18). The host link is one (kernel version 20):
-  `mc0:/MXOS/MXLINK-APP.ELF` takes ps2client's execee and ping, ends the shell for them and
-  starts the host's program; without it the kernel serves the host itself. A program that
+  `mc0:/MXOS/MXLINK-APP.ELF` takes ps2client's commands but the reset (version 21; 20: execee
+  and the ping), ends the shell for them and starts the host's program; without it the kernel
+  serves the host itself. A program that
   takes all memory (no core heap of its own) ends the service; it starts again after that one.
 - Start: mxlink loads the ELF (from `host:`, `usb0:`, `mx4sio0:`, `ata0:`, ...) and runs it in a thread
   at priority 64: one of the kernel's own threads for a `libmxk` program of version 10, which

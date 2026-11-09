@@ -190,6 +190,18 @@ next reset. The kernel's file calls are one at a time for every process's thread
 `sif.c`, made by the kernel, given back for a thread that ended in a call): a service's tty
 write and the kernel's own ran into each other and sent a packet twice.
 
+Version 21: the EE's physical memory for a process (`mx_phys_read`, `mx_phys_write` in
+`<mx/proc.h>`; `apps/mxos/ee/kirq.c`). Threads run in user mode under their process's ASID, so
+the kernel copies in kernel mode: its poke syscall copies up to 4 KiB a call between physical
+memory (kseg0) and the caller's core (touched in user mode first: a buffer that is not the
+caller's faults in its thread, not in the syscall). The buffer is core, not VM; writing is a
+service's only, and the caches are written back and emptied after it. With it the host link's
+app serves dumpmem and writemem (physical addresses, as the kernel saw them before), and gsexec
+and the VU commands too; the kernel keeps the reset and the IOP's exception. A shell the service
+ends always gets the restart (as the takeover did): ended without it, the next program crashed
+at once, before its first line, when the shell had not changed the IOP (something of the shell's
+went on; not found yet). Test: `k43_phys`.
+
 Two things a process beside showed: a program's end waits only for the IOP calls of its own
 threads, those that are gone (`mx__sif_calls_finish` keeps the calls and packets of threads
 still alive: a service's tty write was waited for until it gave up, and its packet was

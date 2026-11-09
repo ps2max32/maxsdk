@@ -49,3 +49,8 @@ int mx_proc_service(void) {
   mx_debug_flush();
   return CALLV(18, proc_service, ());
 }
+
+int mx_phys_read(u32 phys, void *to, u32 n) { return CALLV(21, phys_read, (phys, to, n)); }
+int mx_phys_write(u32 phys, const void *from, u32 n) {
+  return CALLV(21, phys_write, (phys, from, n));
+}

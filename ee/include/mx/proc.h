@@ -73,6 +73,12 @@ int mx_proc_events(int port);
    beside: that is the service's. 0 or the started program's process; -1
    when this program cannot. */
 int mx_proc_service(void);
+/* Kernel version 21: the EE's physical memory (0 up to its size, 32 MiB), as
+   the kernel sees it, read into or written from this program's core memory
+   (not VM). Writing is for a service only (the host link's writemem): the
+   caches are written back and emptied after it. 0, or -1. */
+int mx_phys_read(u32 phys, void *to, u32 n);
+int mx_phys_write(u32 phys, const void *from, u32 n);
 
 #ifdef __cplusplus
 }
