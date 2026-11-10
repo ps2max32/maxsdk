@@ -678,7 +678,7 @@ int mx_iop_read(u32 iop, void *dst, u32 size) {
     rdc.done = 0;
     w[7] = (u32)(uintptr_t)&rdc;
     w[8] = base;
-    w[9] = (u32)(uintptr_t)rd_buf;
+    w[9] = mx_paddr_of(rd_buf).v; /* the IOP's DMA writes it: physical */
     w[10] = len;
     send_cmd(0, CMD_RPC_RDATA, p, RPC_PKT_SIZE, (mx_paddr){0}, 0, 0);
     if (wait_done(&rdc) < 0)
@@ -1454,7 +1454,8 @@ static int fio_dread_unlocked(int fd, char *name, u32 room, u32 *size) {
   mx_dcache_invalidate(&de, sizeof de);
   volatile s32 *a = (volatile s32 *)MX_UNCACHED(dr_arg);
   a[0] = fd;
-  a[1] = (s32)(uintptr_t)&de;
+  a[1] = (s32)mx_paddr_of(&de).v; /* the IOP writes it: physical, as a program's core
+                                    need not be at its own addresses */
   volatile s32 *r = (volatile s32 *)MX_UNCACHED(wr_result);
   if (fio_call(FILEIO_DREAD, (void *)a, 16, (void *)r, 4) < 0)
     return -1;

@@ -105,12 +105,12 @@ $(LIBK): $(LIBK_OBJS)
 	$(LLVM)/llvm-ar rcs $@ $^
 
 # tests linked into VM (ee/ld/maxsdk-vm.ld), started by mxlink (or mxlink's EMU build)
-VM_TESTS = vm11_vmlink vm12_elfpage vm13_guards vm16_lock vm21_crash vm22_net vm23_pad vm24_home vm25_ids vm26_launch vm27_pads vm28_asid vm29_long vm30_dmairq vm31_rumble vm32_side vm33_msg vm34_child vm35_timers
+VM_TESTS = vm11_vmlink vm12_elfpage vm13_guards vm16_lock vm21_crash vm22_net vm23_pad vm24_home vm25_ids vm26_launch vm27_pads vm28_asid vm29_long vm30_dmairq vm31_rumble vm32_side vm33_msg vm34_child vm35_timers vm36_dir
 $(VM_TESTS:%=$(OUT)/tests/%.elf): MX_MEMORY = vm
 $(VM_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
 
 # tests on libmxk without VM, started by mxlink
-K_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k37_iopchan k38_service k40_frame k41_present k42_timers k43_phys
+K_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k37_iopchan k38_service k40_frame k41_present k42_timers k43_phys k44_read k45_alldir
 $(K_TESTS:%=$(OUT)/tests/%.elf): LIB = $(LIBK)
 $(K_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
 # k37: an IOP module of its own (tests/iop/chantest), embedded
