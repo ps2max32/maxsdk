@@ -4,6 +4,17 @@
 
 #include <mx/cpu.h>
 
+/* __atomic_fetch_<name>_N: *p = *p OP v, returning the old value */
+#define FETCH_OP(N, T, name, OP)                                                           \
+  T __atomic_fetch_##name##_##N(volatile void *p, T v, int m) {                            \
+    (void)m;                                                                               \
+    int was = mx_di();                                                                     \
+    T o = *(volatile T *)p;                                                                \
+    *(volatile T *)p = (T)(o OP v);                                                        \
+    mx_irq_restore(was);                                                                   \
+    return o;                                                                              \
+  }
+
 #define OPS(N, T)                                                                          \
   T __atomic_load_##N(const volatile void *p, int m) {                                    \
     (void)m;                                                                               \
@@ -54,7 +65,10 @@
     *(volatile T *)p = (T)(o - v);                                                         \
     mx_irq_restore(was);                                                                   \
     return o;                                                                              \
-  }
+  }                                                                                        \
+  FETCH_OP(N, T, or, |)                                                                    \
+  FETCH_OP(N, T, and, &)                                                                   \
+  FETCH_OP(N, T, xor, ^)
 
 OPS(1, unsigned char)
 OPS(2, unsigned short)
