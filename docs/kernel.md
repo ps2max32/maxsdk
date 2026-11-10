@@ -330,6 +330,8 @@ The program ends with status 255 and the kernel restarts.
 The report survives the restart in the kernel's `.data`. `mx_crash_last` gives it to
 the next program (the shell shows it, `libmxk` in core), and the text screen shows it. It
 belongs to the program that ended last: the next return replaces it, and a reset drops it.
+A shell that crashes, also before its first line, is not started again until a reset: the
+kernel shows its text screen (not the shell crashing at each start).
 
 - The report never reads VM: a page fault there might not end. Trace words in code in VM
   are not checked for a call before them, so one can be stale; `tools/symbolize.py` shows
