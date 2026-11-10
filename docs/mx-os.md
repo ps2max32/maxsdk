@@ -137,7 +137,9 @@ default. Do not bind these.
 The pads a program reads (`mx_pad_*`): first the SIO2 pads that are there, in port order, then
 the USB pads in the order they came; a pad plugged into a SIO2 port moves the USB pads up a port
 (a SIO2 pad holds its port for half a second after it was last seen, so plugging it in or out
-moves the others once).
+moves the others once). A SIO2 pad counts only with the configuration mode (DualShock, DualShock 2):
+digital PS1 pads and guns are not read, as a slim PS2's port 0 answers like one with nothing
+plugged in (probably its IR receiver) and took port 0 from the USB pads.
 A USB pad's Share (Create) is Select, Options is Start; its sticks and buttons are the SIO2 pad's
 (`<mx/pad.h>`). `mx_pad_rumble` runs a pad's motors (USB, Bluetooth or a SIO2 DualShock, which it puts in
 DualShock mode) until the next call; the kernel stops them when the program ends.

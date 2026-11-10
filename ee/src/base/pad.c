@@ -88,9 +88,13 @@ static volatile struct pad_record *newest(int port) {
   return r[0].frame < r[1].frame ? &r[1] : &r[0];
 }
 
+/* A pad with the configuration mode only (DualShock, DualShock 2: the
+   driver's STABLE). Not FINDCTP1, a pad without it (digital PS1 pads, guns):
+   on a slim PS2 (SCPH-70004) port 0 answers so with no pad plugged in
+   (digital, model 0; probably its IR receiver for the DVD remote), and took
+   port 0 from the USB and Bluetooth pads. */
 static int connected(volatile struct pad_record *n) {
-  return (n->state == PAD_STATE_STABLE || n->state == PAD_STATE_FINDCTP1) && n->length >= 4 &&
-         n->data[0] == 0;
+  return n->state == PAD_STATE_STABLE && n->length >= 4 && n->data[0] == 0;
 }
 
 /* The motors: PADMAN takes them only from a pad that is stable, in
