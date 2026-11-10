@@ -64,6 +64,7 @@ static struct mx_args *copy_mxload_args(const struct mx_args *from) {
 }
 
 extern char _end[];
+extern char __stack[], __stack_size[]; /* crt0's SetupThread: the main stack */
 extern void (*__init_array_start[])(void);
 extern void (*__init_array_end[])(void);
 
@@ -172,7 +173,12 @@ void mx__fio_base(const char *argv0);
 void mx__kstart(void *heap_lo, void *heap_hi);
 void mx__main(void) __attribute__((noreturn));
 void mx__main(void) {
+  /* SetupHeap(-1) ends the heap at the main stack. That is in the program
+     (.stack, before _end) unless it was linked with __mx_top: the heap is
+     then the rest of memory */
   heap_end = mx_bios_setup_heap(_end, -1);
+  if ((char *)heap_end < _end)
+    heap_end = (void *)MX_CORE_HI;
   mx_bios_flush_cache(0);
 
   struct mx_args *a = &mx__kernel_args;
@@ -209,6 +215,15 @@ void mx__main(void) {
 #endif
   mx_debug_init();
   mx_exception_init();
+  /* a stack larger than .stack runs into the heap: --defsym=__stack_size
+     instead of __mx_stack_size (ee/ld/maxsdk.ld) */
+  uintptr_t st = (uintptr_t)__stack, end = (uintptr_t)_end;
+  if (st < end && st + (uintptr_t)__stack_size > end) {
+    mx_printf("maxsdk: the main stack (%u KiB) is larger than the space for it: link with "
+              "--defsym=__mx_stack_size=<bytes>, not __stack_size\n",
+              (u32)(uintptr_t)__stack_size >> 10);
+    mx_exit(255);
+  }
   mx_vif_reset(0);
   mx_vif_reset(1);
   mx_ei();

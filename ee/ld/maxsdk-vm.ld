@@ -92,8 +92,14 @@ SECTIONS {
   } >ram
   /* The main stack (crt0's SetupThread): in the core after the program, not
      at the top of memory, so that it moves with the core when the kernel puts
-     that at a physical run of its own (docs/mx-os-plan.md, step 2b) */
-  .stack (NOLOAD) : ALIGN(64) { __mx_main_stack = .; . += 128 * 1024; } >ram
+     that at a physical run of its own (docs/mx-os-plan.md, step 2b). 128 KiB,
+     or --defsym=__mx_stack_size=<bytes> (a --defsym of __stack_size comes
+     after this has used it: crt0 would give SetupThread that size over 128
+     KiB, the stack would run into the heap) */
+  .stack (NOLOAD) : ALIGN(64) {
+    __mx_main_stack = .;
+    . += DEFINED(__mx_stack_size) ? __mx_stack_size : 128 * 1024;
+  } >ram
   _end = .;
 
   /* VM: the program's own objects */
@@ -111,7 +117,7 @@ SECTIONS {
   /DISCARD/ : { *(.MIPS.abiflags) *(.reginfo) *(.gnu.attributes) *(.comment) *(.pdr) }
 
   PROVIDE(__stack = __mx_main_stack);
-  PROVIDE(__stack_size = 128 * 1024);
+  PROVIDE(__stack_size = DEFINED(__mx_stack_size) ? __mx_stack_size : 128 * 1024);
 }
 
 ASSERT(_end <= 0x01F00000, "the core takes all memory")

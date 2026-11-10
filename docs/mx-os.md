@@ -86,10 +86,11 @@ Retail PS2s have 32 MiB; never count on more.
 11. **Starting another program.** `mx_loader_launch` ends a program, or, with its core at a run
     of its own and without VM (`MX_CORE_HEAP`, as mxshell), returns the other's exit status when
     that ends: then set up again what the other had (the GS and the display, the pad's ports:
-    `mx_pad_init`, files). The main stack is in the core after `.bss` (128 KiB), not at the top
-    of memory. `mx_loader_launch_beside` (kernel version 12) is the same, but the program's
-    other threads and interrupt handlers go on while the other runs: they may not end the
-    program (`mx_exit`) or use the pad meanwhile, and the other runs in front.
+    `mx_pad_init`, files). The main stack is in the core after `.bss` (128 KiB, or
+    `--defsym=__mx_stack_size=<bytes>`; not `__stack_size`), not at the top of memory.
+    `mx_loader_launch_beside` (kernel version 12) is the same, but the program's other threads
+    and interrupt handlers go on while the other runs: they may not end the program
+    (`mx_exit`) or use the pad meanwhile, and the other runs in front.
     `mx_proc_spawn` (version 14) starts it without a waiting thread: `mx_proc_wait` for its
     end and exit status, `mx_proc_kill` to end it. `mx_proc_events` (version 15) sends the
     kernel's events, such as that end, as messages to a port of yours. `mx_log_read` (version

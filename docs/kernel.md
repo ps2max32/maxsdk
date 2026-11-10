@@ -60,8 +60,11 @@ by entries of its ASID in the slots of the BIOS's cached entries from 0x10_0000
 writes the offset into the program's `mx__core_off` after the load and keeps it in its own while
 the program runs, so `mx_paddr_of` and `MX_UNCACHED` / `MX_UCAB` translate the program's
 pointers in both. The VM's frames are the memory below the run (`mx__vm_frames`), the core heap
-ends with it. The main stack of a program linked into VM is in its core (`.stack`, 128 KiB, in
-`ee/ld/maxsdk-vm*.ld`), not at the top of memory, so it moves with it. A program without VM, of
+ends with it. The main stack of a program linked into VM is in its core (`.stack`, 128 KiB or
+`--defsym=__mx_stack_size=<bytes>`, in `ee/ld/maxsdk-vm*.ld`), not at the top of memory, so it
+moves with it; a program without VM has it there too (`ee/ld/maxsdk.ld`), its heap from `_end` to
+the top of memory. A `--defsym` of `__stack_size` itself gives crt0's SetupThread a stack larger
+than `.stack`, which runs into the heap: the start-up stops with a message. A program without VM, of
 an older version, or too large stays at its own addresses. A program without VM gets a run only
 when it asks for one with `MX_CORE_HEAP(bytes)` (`<mx/loader.h>`, a second note): its core heap
 is then that much and no more.
