@@ -149,8 +149,8 @@ void mx__vm_code(void) { vm.code = 1; }
    Thread code with interrupts on (positive syscalls turn them on). */
 static void code_sync(void) {
   if (vm.code) {
-    mx_bios_flush_cache(0);
-    mx_bios_flush_cache(2);
+    mx_dcache_flush_all();
+    mx_icache_invalidate_all();
   }
 }
 
@@ -1817,7 +1817,7 @@ void mx__vm_frames(u32 phys_lo, u32 phys_hi) {
 }
 
 int mx_vm_init(const struct mx_vm_config *cfg) {
-  if (vm.active || mx_bios_get_memory_size() != 32 * 1024 * 1024)
+  if (vm.active)
     return -1;
   vm.lock = vm.swapsema = -1;
   u32 size = cfg->size ? cfg->size : 128u << 20;
@@ -1910,14 +1910,14 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   vm.swapsema = mx_bios_create_sema(&sp);
   vm.wsema = -1;
 
-  mx_bios_flush_cache(0); /* no dirty line of the frames under the BIOS's mapping */
+  mx_dcache_flush_all(); /* no dirty line of the frames under the BIOS's mapping */
   int was = mx_di();
   tlb_init(flo, fhi);
   mx_irq_restore(was);
   mx_bios_set_syscall(VM_RESUME_SYSCALL, (void *)mx__vm_resume_k);
   for (int c = 1; c <= 3; c++)
     bios_handler[c] = mx_bios_set_tlb_handler(c, mx__vm_vector);
-  mx_bios_flush_cache(0);
+  mx_dcache_flush_all();
   vm.dbit = 1;
   vm.active = 1;
 

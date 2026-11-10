@@ -221,7 +221,7 @@ static void crt(const struct mx_video_mode *m) {
   mx_gs.hz = m->hz;
   MX_R32(MX_GIF_CTRL) = (u32)MX_BIT(GIF_CTRL_RST);
   CSR = MX_BIT(GS_CSR_RESET);
-  mx_bios_gs_put_imr(0xFF00);
+  MX_R64(MX_GS_IMR) = 0xFF00; /* write only: no BIOS GsPutIMR */
   mx_bios_set_gs_crt(m->interlace, m->code, m->ffmd);
   if (m->interlace)
     MX_R64(MX_GS_SMODE2) = MX_SET(GS_SMODE2_INT, 1) | MX_SET(GS_SMODE2_FFMD, m->ffmd);
@@ -233,7 +233,7 @@ static void irq_on(void) {
   CSR = MX_BIT(GS_CSR_SIGNAL) | MX_BIT(GS_CSR_FINISH);
   mx_irq_intc(MX_INTC_GS, gs_irq, 0);
   mx_irq_intc(MX_INTC_VBON, vsync_irq, 0);
-  mx_bios_gs_put_imr(IMR_ON);
+  MX_R64(MX_GS_IMR) = IMR_ON;
 }
 
 /* Two vblanks within 100 ms: a mode the console does not have gives none

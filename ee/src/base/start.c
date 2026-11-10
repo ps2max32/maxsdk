@@ -179,7 +179,7 @@ void mx__main(void) {
   heap_end = mx_bios_setup_heap(_end, -1);
   if ((char *)heap_end < _end)
     heap_end = (void *)MX_CORE_HI;
-  mx_bios_flush_cache(0);
+  mx_dcache_flush_all();
 
   struct mx_args *a = &mx__kernel_args;
   struct mx_loader_args *l = mx__loader_args;

@@ -228,7 +228,14 @@ void mx_dcache_writeback(const void *p, u32 size);
 /* Invalidate the data cache lines covering [p, p + size), without writing
    back. Lines only partly inside the range lose their other bytes too. */
 void mx_dcache_invalidate(const void *p, u32 size);
-/* Write back and invalidate the whole data cache (BIOS FlushCache(0)). */
+/* Write back and invalidate the whole data cache (as the BIOS's
+   FlushCache(0)). */
 void mx_dcache_flush_all(void);
+/* Invalidate the whole instruction cache and the branch target cache (as
+   the BIOS's FlushCache(2)): after code was written. */
+void mx_icache_invalidate_all(void);
+
+/* Main memory: 32 MiB on every retail PS2 (no BIOS GetMemorySize). */
+#define MX_MAIN_BYTES 0x02000000u
 
 #endif
