@@ -314,21 +314,33 @@ static int interrupt_out(struct pad *p, u32 len) {
 
 /* ---- output: rumble and lights ---- */
 
-/* the light of each slot: the PS4's colours, the DualSense's player lights */
-static const u8 slot_rgb[MXPAD_PADS][3] = {{0, 0, 64}, {64, 0, 0}, {0, 64, 0}, {64, 0, 32}};
-static const u8 slot_ds5[MXPAD_PADS] = {0x04, 0x0a, 0x15, 0x1b};
+/* the light of each player: the PS4's colours, the DualSense's player
+   lights; the player each slot shows (MXPAD_PLAYERS: the EE's port order) */
+static const u8 player_rgb[4][3] = {{0, 0, 64}, {64, 0, 0}, {0, 64, 0}, {64, 0, 32}};
+static const u8 player_ds5[4] = {0x04, 0x0a, 0x15, 0x1b};
+static u8 slot_player[MXPAD_PADS] = {0, 1, 2, 3};
+
+/* a DS3's LEDs 1-4 (bits 1-4 of its byte), as a PS3 counts: 5 = 4 + 1, ... */
+u8 mxpad_ds3_leds(int slot) {
+  int n = slot_player[slot & (MXPAD_PADS - 1)];
+  return (u8)(n < 4 ? 0x02 << n : 0x10 | 0x02 << ((n - 4) % 3));
+}
+u8 mxpad_ds5_lights(int slot) { return player_ds5[slot_player[slot & (MXPAD_PADS - 1)] & 3]; }
 
 static int output(struct pad *p) {
   int slot = p->slot < 0 ? 0 : p->slot;
   u8 *b = p->buf, r = p->r, g = p->g, bl = p->b;
-  if (!r && !g && !bl)
-    r = slot_rgb[slot][0], g = slot_rgb[slot][1], bl = slot_rgb[slot][2];
+  if (!r && !g && !bl) {
+    u8 c[3];
+    mxpad_slot_rgb(slot, c);
+    r = c[0], g = c[1], bl = c[2];
+  }
   memset(b, 0, sizeof p->buf);
   switch (p->kind) {
   case MXPAD_DS3: /* output report 1, without its id */
     b[1] = p->small ? 0xff : 0, b[2] = p->small ? 1 : 0;
     b[3] = p->big ? 0xff : 0, b[4] = p->big;
-    b[9] = (u8)(0x02 << slot);
+    b[9] = mxpad_ds3_leds(slot);
     for (int i = 0; i < 4; i++) {
       u8 *l = b + 10 + 5 * i;
       l[0] = 0xff, l[1] = 0x27, l[2] = 0x10, l[3] = 0, l[4] = 0x32;
@@ -346,7 +358,7 @@ static int output(struct pad *p) {
     b[3] = p->small, b[4] = p->big;
     b[39] = 0x02;        /* light bar setup control */
     b[42] = 0x02;        /* light bar setup: light out (ends the start-up animation) */
-    b[44] = slot_ds5[slot];
+    b[44] = mxpad_ds5_lights(slot);
     b[45] = r, b[46] = g, b[47] = bl;
     return p->out >= 0 ? interrupt_out(p, 63) : control(p, 0x21, 0x09, 0x0202, 63, b);
   }
@@ -653,6 +665,25 @@ static void *rpc(int fn, void *data, int size) {
     bt_pair(a[0]);
     a[0] = 0;
     break;
+  case MXPAD_PLAYERS: {
+    const u8 *n = (const u8 *)a;
+    for (int i = 0; i < MXPAD_PADS; i++) {
+      if (slot_player[i] == n[i])
+        continue;
+      slot_player[i] = n[i];
+      struct pad *p = slot_owner[i] ? &pads[slot_owner[i] - 1] : 0;
+      if (!p || !p->used || p->gone)
+        continue;
+      if (p->bt) {
+        bt_relight(i);
+      } else {
+        p->want = 1; /* its light again, by its thread */
+        SignalSema(p->work_sema);
+      }
+    }
+    a[0] = 0;
+    break;
+  }
   default:
     a[0] = (u32)-1;
   }
@@ -730,4 +761,6 @@ void mxpad_close(int slot) {
   p->used = 0;
 }
 
-void mxpad_slot_rgb(int slot, u8 rgb[3]) { memcpy(rgb, slot_rgb[slot], 3); }
+void mxpad_slot_rgb(int slot, u8 rgb[3]) {
+  memcpy(rgb, player_rgb[slot_player[slot & (MXPAD_PADS - 1)] & 3], 3);
+}

@@ -345,6 +345,7 @@ static struct conn {
      the pad answers, out_wanted for what came meanwhile */
   u8 out_busy, out_wanted;
   u8 small, big, rgb[3];
+  u8 rgb_own;    /* the EE gave the light bar's colour (else the player's) */
   u8 pairing;    /* ours, to pair it: name, authentication, encryption, then the channels */
   u8 out_seq;    /* the DualSense's output reports are numbered */
   u8 shown;      /* input reports not taken, shown (a few) */
@@ -568,7 +569,6 @@ static void with_crc(u8 *o, u32 n) {
 
 /* the pad's rumble and light as they are wanted now */
 static void output(struct conn *c) {
-  static const u8 player[4] = {0x04, 0x0a, 0x15, 0x1b};
   if (c->slot < 0)
     return;
   if (c->kind == MXPAD_DS3) {
@@ -581,7 +581,7 @@ static void output(struct conn *c) {
     u8 o[1 + 36] = {0x52, 0x01};
     o[2 + 1] = c->small ? 0xff : 0, o[2 + 2] = c->small ? 1 : 0; /* right (small): duration, on */
     o[2 + 3] = c->big ? 0xff : 0, o[2 + 4] = c->big;             /* left (big): duration, force */
-    o[2 + 9] = (u8)(0x02 << c->slot);
+    o[2 + 9] = mxpad_ds3_leds(c->slot);
     for (int i = 0; i < 4; i++) {
       u8 *l = o + 2 + 10 + 5 * i;
       l[0] = 0xff, l[1] = 0x27, l[2] = 0x10, l[3] = 0, l[4] = 0x32;
@@ -609,7 +609,7 @@ static void output(struct conn *c) {
     b[3] = c->small, b[4] = c->big;
     b[39] = 0x02;       /* light bar setup control */
     b[42] = 0x02;       /* light bar setup: light out (ends the start-up animation) */
-    b[44] = player[c->slot & 3];
+    b[44] = mxpad_ds5_lights(c->slot);
     b[45] = c->rgb[0], b[46] = c->rgb[1], b[47] = c->rgb[2];
     with_crc(o, sizeof o);
     l2cap_send(c, c->intr, o, sizeof o);
@@ -625,9 +625,23 @@ void bt_output(int slot, u8 small, u8 big, const u8 rgb[3]) {
     if (!c->used || c->slot != slot)
       continue;
     c->small = small, c->big = big;
-    if (rgb[0] | rgb[1] | rgb[2])
+    c->rgb_own = (rgb[0] | rgb[1] | rgb[2]) != 0;
+    if (c->rgb_own)
       memcpy(c->rgb, rgb, 3);
     else
+      mxpad_slot_rgb(slot, c->rgb);
+    c->out_wanted = 1;
+    output_kick = 1;
+    SignalSema(bt.sema);
+  }
+}
+
+void bt_relight(int slot) {
+  for (int i = 0; i < CONNS; i++) {
+    struct conn *c = &conns[i];
+    if (!c->used || c->slot != slot)
+      continue;
+    if (!c->rgb_own)
       mxpad_slot_rgb(slot, c->rgb);
     c->out_wanted = 1;
     output_kick = 1;

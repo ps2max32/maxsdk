@@ -140,6 +140,8 @@ the USB pads in the order they came; a pad plugged into a SIO2 port moves the US
 moves the others once). A SIO2 pad counts only with the configuration mode (DualShock, DualShock 2):
 digital PS1 pads and guns are not read, as a slim PS2's port 0 answers like one with nothing
 plugged in (probably its IR receiver) and took port 0 from the USB pads.
+A USB or Bluetooth pad's light shows the port it is (DS3 LED, DS4 light bar colour, DualSense
+player lights): the kernel tells mxpad.irx (`MXPAD_PLAYERS`) when the order changes.
 A USB pad's Share (Create) is Select, Options is Start; its sticks and buttons are the SIO2 pad's
 (`<mx/pad.h>`). `mx_pad_rumble` runs a pad's motors (USB, Bluetooth or a SIO2 DualShock, which it puts in
 DualShock mode) until the next call; the kernel stops them when the program ends.

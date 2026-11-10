@@ -25,6 +25,11 @@
    paired and connected; out: s32 0 */
 #define MXPAD_PAIR 3
 
+/* in: u8 the player number (0: player 1) shown by the pad in each slot, one
+   byte a slot; out: s32 0. Before it, the slot's own number. Not answered
+   (-1) by an mxpad.irx before it: the version stays 1. */
+#define MXPAD_PLAYERS 4
+
 /* the pad's kind, 0: no pad in the slot */
 #define MXPAD_NONE 0
 #define MXPAD_DS3 1

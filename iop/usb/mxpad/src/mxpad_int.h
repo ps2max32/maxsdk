@@ -22,6 +22,10 @@ int mxpad_open(int kind, const u8 addr[6]);
 void mxpad_input(int slot, const u8 *report, u32 n);
 void mxpad_close(int slot);
 void mxpad_slot_rgb(int slot, u8 rgb[3]);
+/* mxpad.c: the player a slot shows (MXPAD_PLAYERS) as a DS3's LED byte and
+   as a DualSense's player lights */
+u8 mxpad_ds3_leds(int slot);
+u8 mxpad_ds5_lights(int slot);
 /* bt.c: a pad that will connect without a link key (the DS3), paired over USB */
 void bt_known(const u8 addr[6], int kind);
 /* bt.c: the kind of a pad with a key (bt_new_key keeps a DS4's) */
@@ -32,6 +36,8 @@ int bt_drop(const u8 addr[6]);
 /* bt.c: rumble and light of the Bluetooth pad in a slot (MXPAD_OUTPUT; rgb
    all 0: the slot's colour) */
 void bt_output(int slot, u8 small, u8 big, const u8 rgb[3]);
+/* bt.c: the light of the Bluetooth pad in a slot again (its player changed) */
+void bt_relight(int slot);
 /* bt.c: for the given seconds, a pad in pairing mode that is not paired yet
    is looked for, paired and connected (MXPAD_PAIR) */
 void bt_pair(u32 seconds);
