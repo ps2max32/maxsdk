@@ -286,6 +286,11 @@ Steps, each on the PS2 on its own:
   not started from MXOS for now (once the BIOS's memory is the kernel's there is no ExecPS2;
   later perhaps through a reset into mxboot's one-shot). A new kernel is tried through mxboot's
   one-shot, or a start of the kernel's own without ExecPS2.
+  First part done 2026-11-11: `execee` of a new `MXKERNEL.ELF` replaces the running kernel
+  (`kernel.md`; mxkernel-high is not needed for it any more). A software restart of the PS2
+  through the ROM's reset vector was tried (`probe/p40_reboot.c`): the EE alone, with the IOP
+  reset to the ROM's modules, gave a black screen (the ROM's EE path starts with the RDRAM's
+  initialisation, which may fail on a warm machine; not followed further).
 - *2h-3, `libmxk` calls the kernel only.* The kernel counts the BIOS syscalls that still come
   in, by number; each `mx_bios_*` left in `libmxk` becomes a kernel service or goes.
 - *2h-4, the kernel without the BIOS.* Its own vectors (refill, common, interrupt) and syscall

@@ -207,6 +207,16 @@ went on; not found yet). Test: `k43_phys`. Without the app (no service, a progra
 all memory or runs on the BIOS's threads, mxkernel-high) the kernel serves only the reset, execee,
 dumpreg (ps2client's ping) and the IOP's exception; the other commands are the app's only.
 
+Another kernel replaces this one (2026-11-11, mx OS plan step 2h-2; `apps/mxos/ee/exec.c`,
+`kreplace.S`): an ELF whose segments lie below 1 MiB over the running kernel (a new
+`MXKERNEL.ELF`, `ps2client execee host:MXKERNEL.ELF`) is read to 0x0100_0000, a table of its
+segments and a trampoline go to 0x00F0_0000, and ExecPS2 starts the trampoline, which copies the
+segments over the old kernel, clears their bss, writes the data cache back, drops the
+instruction cache and jumps to the new kernel's entry with ExecPS2's arguments. It boots as after
+a restart (the IOP reset, the services and the shell started again). Before, a new kernel was
+tried by starting mxkernel-high (a copy linked at 0x1E0_0000) and from it `MXKERNEL.ELF`. Once the
+BIOS is gone (2h-5) the kernel starts the trampoline itself instead of ExecPS2.
+
 Version 22: the video timing without the BIOS (plan step 2g; `apps/mxos/ee/kvideo.c`), and
 `iop_write` (below). maxsdk
 computes the CRTC registers (SMODE1 with the PLL, SYNCH1, SYNCH2, SYNCV, SRFSH, SMODE2) from a
