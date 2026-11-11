@@ -72,7 +72,9 @@ Retail PS2s have 32 MiB; never count on more.
    module forces a full IOP reset at return.
 4. **No loader calls.** No `ExecPS2`, `LoadExecPS2` or BIOS `Exit`. End with `mx_exit`, `exit()` or
    a return from `main`; to start another program, `mx_loader_launch`. `mx_exit` ends the threads
-   of `mx_thread_start`, without a chance to clean up.
+   of `mx_thread_start`, without a chance to clean up. No `SetupThread` or `SetupHeap` either:
+   maxsdk's crt0 sets the main stack, and on the kernel's threads (`libmxk`, kernel version 10 and
+   up) the start-up asks the BIOS nothing (`kernel.md`).
 5. **Leave the TLB and the exception handlers alone.** Interrupt handlers only through `mx_irq_*`
    (`<mx/irq.h>`): the kernel removes those when the program ends, not ones added to the BIOS directly.
 6. **Swap.** Set `mx_vm_config.swap` to a relative name; the shell's shared

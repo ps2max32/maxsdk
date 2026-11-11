@@ -64,7 +64,7 @@ static struct mx_args *copy_mxload_args(const struct mx_args *from) {
 }
 
 extern char _end[];
-extern char __stack[], __stack_size[]; /* crt0's SetupThread: the main stack */
+extern char __stack[], __stack_size[]; /* the main stack (crt0 sets it) */
 extern void (*__init_array_start[])(void);
 extern void (*__init_array_end[])(void);
 
@@ -173,14 +173,6 @@ void mx__fio_base(const char *argv0);
 void mx__kstart(void *heap_lo, void *heap_hi);
 void mx__main(void) __attribute__((noreturn));
 void mx__main(void) {
-  /* SetupHeap(-1) ends the heap at the main stack. That is in the program
-     (.stack, before _end) unless it was linked with __mx_top: the heap is
-     then the rest of memory */
-  heap_end = mx_bios_setup_heap(_end, -1);
-  if ((char *)heap_end < _end)
-    heap_end = (void *)MX_CORE_HI;
-  mx_dcache_flush_all();
-
   struct mx_args *a = &mx__kernel_args;
   struct mx_loader_args *l = mx__loader_args;
   if (loader_args_ok(l) && l->ret_magic == MX_LOADER_RET && l->ret &&
@@ -190,6 +182,25 @@ void mx__main(void) {
       !((u32)(uintptr_t)l->launch & 3) && (u32)(uintptr_t)l->launch < 0x02000000u)
     loader_launch = l->launch, mx__loader_swap = l->swap;
   find_kernel(l);
+
+  /* The heap ends at the main stack. That is in the program (.stack, before
+     _end) unless it was linked with __mx_top: the heap is then the rest of
+     memory. On the kernel's threads without the BIOS (mx OS plan 2g: its
+     arguments come with the loader's block below); on the BIOS's, its
+     SetupThread (argc and argv into mx__kernel_args, the thread's gp, stack
+     and end) and SetupHeap (-1: the heap up to that stack), as crt0 did */
+  if (mx__kthreads) {
+    uintptr_t st = (uintptr_t)__stack, end = (uintptr_t)_end; /* not as arrays: folded */
+    heap_end = st < end ? (void *)MX_CORE_HI : (void *)st;
+  } else {
+    extern char _gp[];
+    mx_bios_setup_thread(_gp, __stack, (int)(uintptr_t)__stack_size, &mx__kernel_args,
+                         mx_bios_exit_thread);
+    heap_end = mx_bios_setup_heap(_end, -1);
+    if ((char *)heap_end < _end)
+      heap_end = (void *)MX_CORE_HI;
+  }
+  mx_dcache_flush_all();
 #ifdef MX_KERNEL
   /* no way to go on: its memory, files and VM are the kernel's */
   if (!mx__kernel) {

@@ -244,6 +244,12 @@ too: the SIF DMA queue (SifSetDma), the video mode (SetGsCrt), the caches, the p
 kernel's, all of the first MiB: room the kernel needs (mxlink's area 0x8_8000 - 0xF_F800 is
 full). Programs on ps2sdk and `libmx`, which call the BIOS themselves, then run only after a
 restart into the BIOS (ExecPS2 from the boot ROM again), or not.
+  Done 2026-11-11 on the PS2 (kernel version 22): the caches, GS IMR and memory size without
+  the BIOS (step 1); the video timing computed and written by the kernel (`<mx/crtc.h>`,
+  `apps/mxos/ee/kvideo.c`); SIF1 through the kernel's own ring (`ee/src/base/sifdma.c`); a
+  program on the kernel's threads starts without `SetupThread` and `SetupHeap` (crt0 sets its
+  stack). Still the BIOS's: the threads' carrier, the exception and interrupt vectors' first
+  level, `ExecPS2` for programs not on `libmxk`, and the kernel's own boot.
 
 - The kernel no longer restarts (ExecPS2) after each program: it cleans up per process
   (threads, files, sockets, pad, sound, GS memory, interrupt handlers, VM frames).

@@ -1,4 +1,4 @@
-# Entry point. The loader (ps2link, the BIOS, PCSX2 -elf) jumps here with
+# Entry point. The loader (mxkernel, ps2link, the BIOS, PCSX2 -elf) jumps here with
 # a0 = its argument block (ps2link passes { pid; argc; argv[16]; payload }),
 # or garbage when there is none.
 
@@ -24,17 +24,15 @@ __start:
 	la $2, mx__loader_args
 	sw $16, 0($2)
 
-	# SetupThread(gp, stack, stack_size, args, root): the kernel sets up the
-	# main thread, fills args with argc/argv and returns the stack pointer.
-	la $4, _gp
-	la $5, __stack
-	la $6, __stack_size
-	la $7, mx__kernel_args
-	la $8, mx_bios_exit_thread
-	move $28, $4
-	li $3, 0x3c
-	syscall
-	move $29, $2
+	# The main stack, as the BIOS's SetupThread gives it (its top less the
+	# 0x2A0 bytes SetupThread uses above the stack pointer): set here, not by
+	# the BIOS (mx OS plan 2g). mx__main calls SetupThread itself for a
+	# program on the BIOS's threads (its arguments, the BIOS's bookkeeping).
+	la $28, _gp
+	la $2, __stack
+	la $3, __stack_size
+	addu $2, $2, $3
+	addiu $29, $2, -0x2a0
 
 	j mx__main
 	nop
