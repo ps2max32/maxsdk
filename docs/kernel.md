@@ -254,6 +254,10 @@ exception handlers through `src/base/excset.c`: the kernel's (`mx__kernel_syscal
 through kseg0) once its entry is in, else the BIOS's calls. SetSyscall is left only as the
 poke's bootstrap at each start and before a restart. The debug output at a program's end has the
 kernel's own BIOS syscalls since its boot (`the kernel's own BIOS syscalls since its boot`).
+The SIF's software registers (SifGetReg/SifSetReg with bit 31: the IOP's buffer address, the
+RPC's state) are the kernel's while it has the SIF (2h-4b, `src/base/sifdma.c`): copied from the
+BIOS's table (0x8002_12C0, `docs/bios.md`) at `mx__sif_dma_take` and written back at
+`mx__sif_dma_give`, before a restart, so the BIOS and the next start find them.
 
 Version 22: the video timing without the BIOS (plan step 2g; `apps/mxos/ee/kvideo.c`), and
 `iop_write` (below). maxsdk

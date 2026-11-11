@@ -71,6 +71,17 @@ static u32 phys(const void *p) { return mx_paddr_of(p).v; }
    PS2: PCSX2 lets it pass). Stored in kernel mode: at once through kseg1
    in an exception or interrupt handler, else by the kernel's syscall. */
 void (*mx__kpoke32)(u32 a, u32 v);
+/* kernel memory read in kernel mode (the kernel's; the BIOS's table below) */
+u32 (*mx__kpeek32)(u32 a);
+
+/* The BIOS's software registers (SifSetReg and SifGetReg with bit 31: the
+   IOP's buffer address, the RPC's state, ...): its table of 32 at
+   0x8002_12C0 (docs/bios.md). The kernel's own copy while it has the SIF
+   (mx OS plan 2h-4b): read from the table at the take, written back at the
+   give, so that the BIOS, and the kernel's next start, find them. */
+#define SYSREGS 0x800212C0u
+static u32 sysregs[32];
+static int sysregs_own;
 
 static void w32(u32 a, u32 v) {
   u32 st = mx_status();
@@ -109,6 +120,11 @@ static void switch_to_ring(void) {
 
 void mx__sif_dma_take(void) {
   want = 1;
+  if (!sysregs_own && mx__kpeek32 && mx__kpoke32) {
+    for (u32 i = 0; i < 32; i++)
+      sysregs[i] = mx__kpeek32(SYSREGS + 4 * i);
+    sysregs_own = 1;
+  }
 
   int was = mx_di();
   if (!own && !busy())
@@ -121,6 +137,11 @@ void mx__sif_dma_take(void) {
    ExecPS2 after it) */
 void mx__sif_dma_give(void) {
   want = 0;
+  if (sysregs_own) {
+    for (u32 i = 0; i < 32; i++)
+      mx__kpoke32(SYSREGS + 4 * i, sysregs[i]);
+    sysregs_own = 0;
+  }
   if (!own)
     return;
   for (u32 i = 0; busy() && i < 300000000u / 16; i++)
@@ -322,6 +343,8 @@ static u32 flag(u32 a) {
 }
 
 u32 mx__sif_get_reg(u32 reg) {
+  if ((reg & 0x80000000u) && sysregs_own)
+    return (reg & 0x7FFFFFFFu) < 32 ? sysregs[reg & 31] : 0;
   if (!own)
     return (u32)mx_bios_sif_get_reg(reg);
   switch (reg) {
@@ -334,6 +357,12 @@ u32 mx__sif_get_reg(u32 reg) {
 }
 
 u32 mx__sif_set_reg(u32 reg, u32 v) {
+  if ((reg & 0x80000000u) && sysregs_own) {
+    u32 i = reg & 0x7FFFFFFFu, old = i < 32 ? sysregs[i] : 0;
+    if (i < 32)
+      sysregs[i] = v;
+    return old;
+  }
   if (!own)
     return (u32)mx_bios_sif_set_reg(reg, (s32)v);
   switch (reg) {

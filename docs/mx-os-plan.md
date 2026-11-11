@@ -317,7 +317,9 @@ Steps, each on the PS2 on its own:
     (no SetSyscall, SetVTLBRefillHandler, SetVCommonHandler after its start). Done 2026-11-12:
     after `kirq_on` the kernel calls the BIOS only for SifGetReg (twice, at its start) and, on
     PCSX2, SetGsCrt; tested on PCSX2 (the MXOS tests, the standalone VM tests).
-  - 4b, the SIF's software registers its own (SifGetReg/SifSetReg with bit 31).
+  - 4b, the SIF's software registers its own (SifGetReg/SifSetReg with bit 31). Done
+    2026-11-12: a copy of the BIOS's table while the kernel has the SIF; after `kirq_on` the
+    kernel's only BIOS call left is SetGsCrt on PCSX2.
   - 4c, the restart without ExecPS2: the kernel starts itself again (its `.data` back, `.bss`
     cleared, its threads and handlers anew), as the replace's trampoline does.
   - 4d, its own level 1 vectors (refill, common, interrupt) and tables, out of the BIOS's

@@ -17,6 +17,7 @@ u32 mx__sif_set_reg(u32 reg, u32 v);
 /* a store in kernel mode (the kernel's syscall), for the registers of DMA
    channels 5 to 7, which the BIOS's TLB maps read only; set by the kernel */
 extern void (*mx__kpoke32)(u32 a, u32 v);
+extern u32 (*mx__kpeek32)(u32 a);
 /* own, want, written, cur, SIF1's CHCR, TADR, QWC, MADR (a stuck SIF's report) */
 void mx__sif_dma_state(u32 s[8]);
 
