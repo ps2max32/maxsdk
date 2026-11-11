@@ -12,6 +12,9 @@
 #include <mx/vu.h>
 #include "frame_int.h"
 
+/* gs.c: what IMR was written last (write only) */
+extern u64 mx__gs_imr;
+
 struct mx_frame_stats mx_frame_stats;
 
 void (*mx__frame3_end)(void);
@@ -86,7 +89,7 @@ void mx__frame_stalled(const char *what) {
             MX_DMA_REG(MX_CH_GIF, CHCR), MX_DMA_REG(MX_CH_GIF, MADR), mx_vpu_stat(),
             MX_R32(MX_I_STAT), MX_R32(MX_I_MASK), mx_irq_intc_count(MX_INTC_GS),
             mx_irq_intc_count(MX_INTC_VBON), (u32)MX_R64(MX_GS_CSR),
-            (u32)mx_bios_gs_get_imr(), MX_R32(MX_D_STAT), MX_R32(MX_D_CTRL));
+            (u32)mx__gs_imr, MX_R32(MX_D_STAT), MX_R32(MX_D_CTRL));
   /* the VIF1 chain's tags before TADR (uncached: DMA wrote them) */
   u32 t = MX_DMA_REG(MX_CH_VIF1, TADR) & 0x1FFFFFF0u;
   if (t >= 0x100080 && t < 0x2000000)

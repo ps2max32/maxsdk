@@ -152,7 +152,8 @@ def gen_syscalls_s():
 def gen_ksys_c():
     out = [HEADER, "/* The BIOS's thread, semaphore and interrupt handler calls, the kernel's",
            "   when it has set its table (mx-kernel, docs/mx-os-plan.md step 2d), else",
-           "   the BIOS's syscalls (src/base/syscalls.S). */", "",
+           "   the BIOS's syscalls (src/base/syscalls.S). libmxk (MX_KERNEL) has the",
+           "   kernel's only (step 2h-3): its start-up stops without a kernel. */", "",
            "#include <mx/bios.h>", "",
            "const struct mx_kthreads *mx__kthreads;", ""]
     for name, num, proto in kernels():
@@ -161,10 +162,14 @@ def gen_ksys_c():
         call = ", ".join(arg_names(args))
         r = "" if ret == "void" else "return "
         out += [f"{ret} {name}({args}) {{",
+                "#ifdef MX_KERNEL",
+                f"  {r}mx__kthreads->{short}({call});",
+                "#else",
                 f"  if (mx__kthreads)",
                 f"    {r}mx__kthreads->{short}({call});",
                 f"  else",
                 f"    {r}mx__sys_{short}({call});",
+                "#endif",
                 "}", ""]
     return "\n".join(out)
 

@@ -69,6 +69,7 @@ Retail PS2s have 32 MiB; never count on more.
    portability library: the same API on the BIOS, all in physical memory (at most 31 MiB, no VM),
    started by mxboot, a legacy loader or PCSX2's `-elf`, not by the kernel; the kernel's own calls
    (processes, ports, launch, the home menu) return -1. Same source for both, no `#ifdef`.
+   libmxk calls no BIOS (a build check, `kernel.md`); libmx is the one with the BIOS's paths.
    `MX_TARGET=mxos-core` (`MX_KERNEL=1` with `phys`): an MXOS program all in core, without VM,
    for now only for a program that stays while another runs (the shell, a service, one that
    starts others and waits): the kernel has one VM, the program in front's. It goes once every

@@ -234,16 +234,23 @@ static int crtc_set(const struct mx_video_mode *m) {
 
 /* GS reset and the CRTC timing; the GS interrupts masked. -1: a mode the BIOS
    does not have (code 0) and no kernel to write it */
+/* what IMR was written last (write only; frame.c's report) */
+u64 mx__gs_imr;
+
 static int crt(const struct mx_video_mode *m) {
   mx_video = *m;
   mx_gs.hz = m->hz;
   MX_R32(MX_GIF_CTRL) = (u32)MX_BIT(GIF_CTRL_RST);
   CSR = MX_BIT(GS_CSR_RESET);
-  MX_R64(MX_GS_IMR) = 0xFF00; /* write only: no BIOS GsPutIMR */
+  MX_R64(MX_GS_IMR) = mx__gs_imr = 0xFF00; /* write only: no BIOS GsPutIMR */
   if (crtc_set(m)) {
+#ifdef MX_KERNEL
+    return -1; /* libmxk: the kernel's only (it calls SetGsCrt itself if it must) */
+#else
     if (!m->code)
       return -1;
     mx_bios_set_gs_crt(m->interlace, m->code, m->ffmd);
+#endif
   }
   if (m->interlace)
     MX_R64(MX_GS_SMODE2) = MX_SET(GS_SMODE2_INT, 1) | MX_SET(GS_SMODE2_FFMD, m->ffmd);
@@ -256,7 +263,7 @@ static void irq_on(void) {
   CSR = MX_BIT(GS_CSR_SIGNAL) | MX_BIT(GS_CSR_FINISH);
   mx_irq_intc(MX_INTC_GS, gs_irq, 0);
   mx_irq_intc(MX_INTC_VBON, vsync_irq, 0);
-  MX_R64(MX_GS_IMR) = IMR_ON;
+  MX_R64(MX_GS_IMR) = mx__gs_imr = IMR_ON;
 }
 
 /* Two vblanks within 100 ms: a mode the console does not have gives none

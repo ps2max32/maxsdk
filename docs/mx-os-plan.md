@@ -305,6 +305,9 @@ Steps, each on the PS2 on its own:
   go through the kernel already. Next (2h-3b): the BIOS's paths out of `libmxk` (they are
   `libmx`'s), SetGsCrt through the kernel only, and a build check that `libmxk.a` calls no
   `mx_bios_*`.
+  2h-3b done 2026-11-11: so (`kernel.md`); `libmxk` keeps only the BIOS's `Exit`, for its stop
+  without a kernel. Left for 2h-4: the BIOS under the kernel itself (its threads on the BIOS's
+  carrier thread, its handlers in the BIOS's tables, its SIF software registers).
 - *2h-4, the kernel without the BIOS.* Its own vectors (refill, common, interrupt) and syscall
   entry, its threads without the BIOS's carrier thread, the SIF's software registers its own.
 - *2h-5, the first MiB for the kernel.* The BIOS's memory (0x0 - 0x7_FFFF) is the kernel's

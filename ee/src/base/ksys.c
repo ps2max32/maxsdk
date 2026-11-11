@@ -2,253 +2,394 @@
 
 /* The BIOS's thread, semaphore and interrupt handler calls, the kernel's
    when it has set its table (mx-kernel, docs/mx-os-plan.md step 2d), else
-   the BIOS's syscalls (src/base/syscalls.S). */
+   the BIOS's syscalls (src/base/syscalls.S). libmxk (MX_KERNEL) has the
+   kernel's only (step 2h-3): its start-up stops without a kernel. */
 
 #include <mx/bios.h>
 
 const struct mx_kthreads *mx__kthreads;
 
 int mx_bios_add_intc_handler(int cause, int (*handler)(int cause, void *arg, void *addr), int next, void *arg) {
+#ifdef MX_KERNEL
+  return mx__kthreads->add_intc_handler(cause, handler, next, arg);
+#else
   if (mx__kthreads)
     return mx__kthreads->add_intc_handler(cause, handler, next, arg);
   else
     return mx__sys_add_intc_handler(cause, handler, next, arg);
+#endif
 }
 
 int mx_bios_remove_intc_handler(int cause, int id) {
+#ifdef MX_KERNEL
+  return mx__kthreads->remove_intc_handler(cause, id);
+#else
   if (mx__kthreads)
     return mx__kthreads->remove_intc_handler(cause, id);
   else
     return mx__sys_remove_intc_handler(cause, id);
+#endif
 }
 
 int mx_bios_add_dmac_handler(int channel, int (*handler)(int channel, void *arg, void *addr), int next, void *arg) {
+#ifdef MX_KERNEL
+  return mx__kthreads->add_dmac_handler(channel, handler, next, arg);
+#else
   if (mx__kthreads)
     return mx__kthreads->add_dmac_handler(channel, handler, next, arg);
   else
     return mx__sys_add_dmac_handler(channel, handler, next, arg);
+#endif
 }
 
 int mx_bios_remove_dmac_handler(int channel, int id) {
+#ifdef MX_KERNEL
+  return mx__kthreads->remove_dmac_handler(channel, id);
+#else
   if (mx__kthreads)
     return mx__kthreads->remove_dmac_handler(channel, id);
   else
     return mx__sys_remove_dmac_handler(channel, id);
+#endif
 }
 
 int mx_bios_enable_intc(int cause) {
+#ifdef MX_KERNEL
+  return mx__kthreads->enable_intc(cause);
+#else
   if (mx__kthreads)
     return mx__kthreads->enable_intc(cause);
   else
     return mx__sys_enable_intc(cause);
+#endif
 }
 
 int mx_bios_disable_intc(int cause) {
+#ifdef MX_KERNEL
+  return mx__kthreads->disable_intc(cause);
+#else
   if (mx__kthreads)
     return mx__kthreads->disable_intc(cause);
   else
     return mx__sys_disable_intc(cause);
+#endif
 }
 
 int mx_bios_enable_dmac(int channel) {
+#ifdef MX_KERNEL
+  return mx__kthreads->enable_dmac(channel);
+#else
   if (mx__kthreads)
     return mx__kthreads->enable_dmac(channel);
   else
     return mx__sys_enable_dmac(channel);
+#endif
 }
 
 int mx_bios_disable_dmac(int channel) {
+#ifdef MX_KERNEL
+  return mx__kthreads->disable_dmac(channel);
+#else
   if (mx__kthreads)
     return mx__kthreads->disable_dmac(channel);
   else
     return mx__sys_disable_dmac(channel);
+#endif
 }
 
 int mx_bios_ienable_intc(int cause) {
+#ifdef MX_KERNEL
+  return mx__kthreads->ienable_intc(cause);
+#else
   if (mx__kthreads)
     return mx__kthreads->ienable_intc(cause);
   else
     return mx__sys_ienable_intc(cause);
+#endif
 }
 
 int mx_bios_idisable_intc(int cause) {
+#ifdef MX_KERNEL
+  return mx__kthreads->idisable_intc(cause);
+#else
   if (mx__kthreads)
     return mx__kthreads->idisable_intc(cause);
   else
     return mx__sys_idisable_intc(cause);
+#endif
 }
 
 int mx_bios_ienable_dmac(int channel) {
+#ifdef MX_KERNEL
+  return mx__kthreads->ienable_dmac(channel);
+#else
   if (mx__kthreads)
     return mx__kthreads->ienable_dmac(channel);
   else
     return mx__sys_ienable_dmac(channel);
+#endif
 }
 
 int mx_bios_idisable_dmac(int channel) {
+#ifdef MX_KERNEL
+  return mx__kthreads->idisable_dmac(channel);
+#else
   if (mx__kthreads)
     return mx__kthreads->idisable_dmac(channel);
   else
     return mx__sys_idisable_dmac(channel);
+#endif
 }
 
 int mx_bios_create_thread(void *param) {
+#ifdef MX_KERNEL
+  return mx__kthreads->create_thread(param);
+#else
   if (mx__kthreads)
     return mx__kthreads->create_thread(param);
   else
     return mx__sys_create_thread(param);
+#endif
 }
 
 int mx_bios_delete_thread(int id) {
+#ifdef MX_KERNEL
+  return mx__kthreads->delete_thread(id);
+#else
   if (mx__kthreads)
     return mx__kthreads->delete_thread(id);
   else
     return mx__sys_delete_thread(id);
+#endif
 }
 
 int mx_bios_start_thread(int id, void *arg) {
+#ifdef MX_KERNEL
+  return mx__kthreads->start_thread(id, arg);
+#else
   if (mx__kthreads)
     return mx__kthreads->start_thread(id, arg);
   else
     return mx__sys_start_thread(id, arg);
+#endif
 }
 
 void mx_bios_exit_thread(void) {
+#ifdef MX_KERNEL
+  mx__kthreads->exit_thread();
+#else
   if (mx__kthreads)
     mx__kthreads->exit_thread();
   else
     mx__sys_exit_thread();
+#endif
 }
 
 void mx_bios_exit_delete_thread(void) {
+#ifdef MX_KERNEL
+  mx__kthreads->exit_delete_thread();
+#else
   if (mx__kthreads)
     mx__kthreads->exit_delete_thread();
   else
     mx__sys_exit_delete_thread();
+#endif
 }
 
 int mx_bios_terminate_thread(int id) {
+#ifdef MX_KERNEL
+  return mx__kthreads->terminate_thread(id);
+#else
   if (mx__kthreads)
     return mx__kthreads->terminate_thread(id);
   else
     return mx__sys_terminate_thread(id);
+#endif
 }
 
 int mx_bios_change_thread_priority(int id, int priority) {
+#ifdef MX_KERNEL
+  return mx__kthreads->change_thread_priority(id, priority);
+#else
   if (mx__kthreads)
     return mx__kthreads->change_thread_priority(id, priority);
   else
     return mx__sys_change_thread_priority(id, priority);
+#endif
 }
 
 int mx_bios_rotate_thread_ready_queue(int priority) {
+#ifdef MX_KERNEL
+  return mx__kthreads->rotate_thread_ready_queue(priority);
+#else
   if (mx__kthreads)
     return mx__kthreads->rotate_thread_ready_queue(priority);
   else
     return mx__sys_rotate_thread_ready_queue(priority);
+#endif
 }
 
 int mx_bios_get_thread_id(void) {
+#ifdef MX_KERNEL
+  return mx__kthreads->get_thread_id();
+#else
   if (mx__kthreads)
     return mx__kthreads->get_thread_id();
   else
     return mx__sys_get_thread_id();
+#endif
 }
 
 int mx_bios_suspend_thread(int id) {
+#ifdef MX_KERNEL
+  return mx__kthreads->suspend_thread(id);
+#else
   if (mx__kthreads)
     return mx__kthreads->suspend_thread(id);
   else
     return mx__sys_suspend_thread(id);
+#endif
 }
 
 int mx_bios_resume_thread(int id) {
+#ifdef MX_KERNEL
+  return mx__kthreads->resume_thread(id);
+#else
   if (mx__kthreads)
     return mx__kthreads->resume_thread(id);
   else
     return mx__sys_resume_thread(id);
+#endif
 }
 
 int mx_bios_refer_thread_status(int id, void *status) {
+#ifdef MX_KERNEL
+  return mx__kthreads->refer_thread_status(id, status);
+#else
   if (mx__kthreads)
     return mx__kthreads->refer_thread_status(id, status);
   else
     return mx__sys_refer_thread_status(id, status);
+#endif
 }
 
 int mx_bios_sleep_thread(void) {
+#ifdef MX_KERNEL
+  return mx__kthreads->sleep_thread();
+#else
   if (mx__kthreads)
     return mx__kthreads->sleep_thread();
   else
     return mx__sys_sleep_thread();
+#endif
 }
 
 int mx_bios_wakeup_thread(int id) {
+#ifdef MX_KERNEL
+  return mx__kthreads->wakeup_thread(id);
+#else
   if (mx__kthreads)
     return mx__kthreads->wakeup_thread(id);
   else
     return mx__sys_wakeup_thread(id);
+#endif
 }
 
 int mx_bios_iwakeup_thread(int id) {
+#ifdef MX_KERNEL
+  return mx__kthreads->iwakeup_thread(id);
+#else
   if (mx__kthreads)
     return mx__kthreads->iwakeup_thread(id);
   else
     return mx__sys_iwakeup_thread(id);
+#endif
 }
 
 int mx_bios_create_sema(void *param) {
+#ifdef MX_KERNEL
+  return mx__kthreads->create_sema(param);
+#else
   if (mx__kthreads)
     return mx__kthreads->create_sema(param);
   else
     return mx__sys_create_sema(param);
+#endif
 }
 
 int mx_bios_delete_sema(int id) {
+#ifdef MX_KERNEL
+  return mx__kthreads->delete_sema(id);
+#else
   if (mx__kthreads)
     return mx__kthreads->delete_sema(id);
   else
     return mx__sys_delete_sema(id);
+#endif
 }
 
 int mx_bios_signal_sema(int id) {
+#ifdef MX_KERNEL
+  return mx__kthreads->signal_sema(id);
+#else
   if (mx__kthreads)
     return mx__kthreads->signal_sema(id);
   else
     return mx__sys_signal_sema(id);
+#endif
 }
 
 int mx_bios_isignal_sema(int id) {
+#ifdef MX_KERNEL
+  return mx__kthreads->isignal_sema(id);
+#else
   if (mx__kthreads)
     return mx__kthreads->isignal_sema(id);
   else
     return mx__sys_isignal_sema(id);
+#endif
 }
 
 int mx_bios_wait_sema(int id) {
+#ifdef MX_KERNEL
+  return mx__kthreads->wait_sema(id);
+#else
   if (mx__kthreads)
     return mx__kthreads->wait_sema(id);
   else
     return mx__sys_wait_sema(id);
+#endif
 }
 
 int mx_bios_poll_sema(int id) {
+#ifdef MX_KERNEL
+  return mx__kthreads->poll_sema(id);
+#else
   if (mx__kthreads)
     return mx__kthreads->poll_sema(id);
   else
     return mx__sys_poll_sema(id);
+#endif
 }
 
 int mx_bios_ipoll_sema(int id) {
+#ifdef MX_KERNEL
+  return mx__kthreads->ipoll_sema(id);
+#else
   if (mx__kthreads)
     return mx__kthreads->ipoll_sema(id);
   else
     return mx__sys_ipoll_sema(id);
+#endif
 }
 
 int mx_bios_refer_sema_status(int id, void *status) {
+#ifdef MX_KERNEL
+  return mx__kthreads->refer_sema_status(id, status);
+#else
   if (mx__kthreads)
     return mx__kthreads->refer_sema_status(id, status);
   else
     return mx__sys_refer_sema_status(id, status);
+#endif
 }

@@ -233,6 +233,17 @@ into the BIOS's dispatcher; the table is the BIOS's again whenever the interrupt
 (`kirq_off`). At the program's end the log has `BIOS syscalls: N, by number:` and the numbers
 with their counts (calls made through the kernel's services are the kernel's and not counted).
 
+`libmxk` calls the kernel only (2026-11-11, plan step 2h-3b): built with `MX_KERNEL`, its
+thread, semaphore and interrupt handler calls (`ksys.c`) have no BIOS path, its start-up has no
+`SetupThread`/`SetupHeap` (a program needs the kernel's threads, version 10, and stops with a
+message without them: the BIOS's `Exit`, the one BIOS call it keeps), its SIF DMA calls are
+`kstubs.c`'s (the kernel's services come first; one that is reached anyway ends the program
+with a message), and `gs.c` never calls `SetGsCrt`: the kernel's `crtc_set` does, for a mode the
+BIOS has, where its own timing does not know the console (PCSX2; `apps/mxos/ee/kvideo.c`). The
+build checks it (`tools/libk-bios-check.sh`: no object of `libmxk.a` but `syscalls.S` calls a
+BIOS stub other than `Exit` or has a syscall). A `libmxk` program built so needs a kernel with
+this `crtc_set` for a video mode on PCSX2. `libmx` keeps the BIOS's paths.
+
 Version 22: the video timing without the BIOS (plan step 2g; `apps/mxos/ee/kvideo.c`), and
 `iop_write` (below). maxsdk
 computes the CRTC registers (SMODE1 with the PLL, SYNCH1, SYNCH2, SYNCV, SRFSH, SMODE2) from a

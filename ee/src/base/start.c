@@ -138,7 +138,13 @@ void mx_exit(int status) {
   /* back to mxlink without a reboot, if it started us */
   if (loader_ret)
     loader_ret(status);
+#ifdef MX_KERNEL
+  /* libmxk: the kernel's way back always (mx__main stops without it) */
+  for (;;)
+    mx_bios_sleep_thread(); /* the kernel's (ksys.c) */
+#else
   mx_bios_exit(status);
+#endif
 }
 
 int mx_loader_launch_beside(int argc, const char *args, u32 args_len, const char *swap) {
@@ -189,10 +195,22 @@ void mx__main(void) {
      arguments come with the loader's block below); on the BIOS's, its
      SetupThread (argc and argv into mx__kernel_args, the thread's gp, stack
      and end) and SetupHeap (-1: the heap up to that stack), as crt0 did */
+#ifdef MX_KERNEL
+  /* libmxk: on the kernel's threads only (version 10 on, mx OS plan 2h-3);
+     no way to go on without them: its memory, files and VM are the
+     kernel's. The BIOS's Exit then is the one BIOS call libmxk keeps. */
+  if (!mx__kthreads) {
+    mx_debug_sinks(MX_SINK_SIO);
+    mx_printf("maxsdk: this program needs mx-kernel: start it with mxlink (apps/mxos)\n");
+    mx_bios_exit(255);
+  }
+#endif
   if (mx__kthreads) {
     uintptr_t st = (uintptr_t)__stack, end = (uintptr_t)_end; /* not as arrays: folded */
     heap_end = st < end ? (void *)MX_CORE_HI : (void *)st;
-  } else {
+  }
+#ifndef MX_KERNEL
+  else {
     extern char _gp[];
     mx_bios_setup_thread(_gp, __stack, (int)(uintptr_t)__stack_size, &mx__kernel_args,
                          mx_bios_exit_thread);
@@ -200,14 +218,9 @@ void mx__main(void) {
     if ((char *)heap_end < _end)
       heap_end = (void *)MX_CORE_HI;
   }
+#endif
   mx_dcache_flush_all();
 #ifdef MX_KERNEL
-  /* no way to go on: its memory, files and VM are the kernel's */
-  if (!mx__kernel) {
-    mx_debug_sinks(MX_SINK_SIO);
-    mx_printf("maxsdk: this program needs mx-kernel: start it with mxlink (apps/mxos)\n");
-    mx_bios_exit(255);
-  }
   mx__kstart(_end, heap_end);
 #endif
   if (loader_args_ok(l) && l->pid == MX_LOADER_MAGIC) {

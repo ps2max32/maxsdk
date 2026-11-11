@@ -3,6 +3,8 @@
 
 #include <mx/debug.h>
 #include <mx/kernel.h>
+#include <mx/mx.h>
+#include <mx/sifdma.h>
 
 #define MXK_STUB(ret, name, params, args) \
   ret name params { return mx__kernel->name args; }
@@ -62,3 +64,18 @@ void mx__paddr_fault(const void *p, u32 bytes) { mx__kernel->mx__paddr_fault(p, 
 
 void mx_exception_init(void) { mx__kernel->exception_setup(0); }
 int mx_crash_last(struct mx_crash *c) { return mx__kernel->crash(c); }
+
+/* SIF DMA is the kernel's (mx OS plan 2h-3): sif.c's calls in libmxk go
+   to the kernel's services before they reach these, which were the BIOS's
+   SifSetDma, SifSetDChain, SifGetReg, ... (src/base/sifdma.c, in libmx). A
+   program that gets here anyway ends, said so, instead of calling the BIOS. */
+static void __attribute__((noreturn)) sif_not_here(const char *what) {
+  mx_printf("maxsdk: %s from a program: SIF DMA is the kernel's\n", what);
+  mx_exit(255);
+}
+u32 mx__sif_dma_set(const void *transfers, int n, int intr) { sif_not_here("SifSetDma"); }
+int mx__sif_dma_stat(u32 id) { sif_not_here("SifDmaStat"); }
+void mx__sif_dchain(int intr) { sif_not_here("SifSetDChain"); }
+void mx__sif_stop_dma(void) { sif_not_here("SifStopDma"); }
+u32 mx__sif_get_reg(u32 reg) { sif_not_here("SifGetReg"); }
+u32 mx__sif_set_reg(u32 reg, u32 v) { sif_not_here("SifSetReg"); }

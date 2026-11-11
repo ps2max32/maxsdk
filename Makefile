@@ -94,17 +94,24 @@ $(OUT)/objk/%.c.o: $(HERE)/%.c $(HDRS)
 	$(CC) $(CFLAGS) -DMX_KERNEL=1 -c $< -o $@
 
 LIBK_SRCS = ee/src/base/start.c ee/src/base/sif.c ee/src/base/kstubs.c ee/src/base/proc.c \
-            ee/src/thread/sleep.c ee/src/irq/timer.c
-# what is the kernel's: no code in libmxk
+            ee/src/thread/sleep.c ee/src/irq/timer.c \
+            ee/src/base/ksys.c ee/src/gs/gs.c ee/src/gs/frame.c
+# what is the kernel's: no code in libmxk (sifdma.c: kstubs.c's instead)
 LIBK_OUT  = ee/src/base/start.c ee/src/base/sif.c ee/src/base/proc.c ee/src/thread/sleep.c \
-            ee/src/irq/timer.c \
+            ee/src/irq/timer.c ee/src/base/ksys.c ee/src/gs/gs.c ee/src/gs/frame.c \
+            ee/src/base/sifdma.c \
             ee/src/base/exception.c ee/src/base/exception.S \
             ee/src/vm/vm.c ee/src/vm/mem.c ee/src/vm/heap.c ee/src/vm/image.c ee/src/vm/tlb.S
 LIBK_OBJS = $(filter-out $(LIBK_OUT:%=$(OUT)/obj/%.o),$(LIB_OBJS)) $(LIBK_SRCS:%=$(OUT)/objk/%.o)
 
+# mx OS plan 2h-3: libmxk calls the kernel only. No BIOS syscall stub of
+# syscalls.S is called from its other objects but Exit (its start-up's stop
+# without a kernel), and no object but syscalls.S has a syscall of its own
+# (tools/libk-bios-check.sh).
 $(LIBK): $(LIBK_OBJS)
 	rm -f $@
 	$(LLVM)/llvm-ar rcs $@ $^
+	$(HERE)/tools/libk-bios-check.sh $(LLVM) $@ mx_bios_exit || { rm -f $@; exit 1; }
 
 # tests linked into VM (ee/ld/maxsdk-vm.ld), started by mxlink (or mxlink's EMU build)
 VM_TESTS = vm11_vmlink vm12_elfpage vm13_guards vm16_lock vm21_crash vm22_net vm23_pad vm24_home vm25_ids vm26_launch vm27_pads vm28_asid vm29_long vm30_dmairq vm31_rumble vm32_side vm33_msg vm34_child vm35_timers vm36_dir
