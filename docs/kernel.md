@@ -370,7 +370,12 @@ A program that changed the IOP (loaded modules), an IOP that does not answer,
 those before version 8, which did not tell the kernel their interrupt slots, took it too until
 2h-2 refused them):
 
-Each such program ends in `ExecPS2`, which starts the kernel again but does not load it: `.bss`
+Each such program ends in the kernel's restart. The first start (from mxboot or a loader) still
+restarts by `ExecPS2`, which sheds the loader's threads and handlers; every restart after it
+jumps to `mxlink_start` itself (2026-11-12, plan step 2h-4c; `apps/mxos/ee/main.c`'s `restart`),
+in user mode with interrupts off on the BIOS thread it runs on: the kernel's threads,
+semaphores and interrupt handlers are its own, so there is nothing of the BIOS's to drop. Either
+way the kernel is not loaded again: `.bss`
 is cleared by the start-up, and `.data` is restored from a copy by `mxlink_start`
 (`ee/hook.S`, which fills its branches' delay slots by hand: under the assembler's reorder
 mode the copy's pointer did not move, and every restart, the first boot's included, came back

@@ -322,6 +322,10 @@ Steps, each on the PS2 on its own:
     kernel's only BIOS call left is SetGsCrt on PCSX2.
   - 4c, the restart without ExecPS2: the kernel starts itself again (its `.data` back, `.bss`
     cleared, its threads and handlers anew), as the replace's trampoline does.
+    Done 2026-11-12 for every restart but the first (which sheds the loader's state; 4e):
+    tested on PCSX2 with the MXOS tests, `vm26_launch` and a chain of 20 `mx_loader_launch`es
+    (the emu build follows a launch now). Left: `kirq_off` sets the poke by SetSyscall once a
+    restart.
   - 4d, its own level 1 vectors (refill, common, interrupt) and tables, out of the BIOS's
     memory; the BIOS's kernel stack and save area its own.
   - 4e, its threads without the BIOS's carrier thread, and its start without the BIOS's calls
