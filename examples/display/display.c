@@ -57,7 +57,8 @@ static const struct demo_mode modes[] = {
 enum { OVERLAY, CROSSFADE, FADE, SMOOTH, LOW, FULL, NSCENES };
 static const char *const scenes[] = {"OVERLAY", "CROSSFADE", "FADE", "SMOOTH", "LOW", "FULL"};
 
-static u8 ring[64 * 1024] MX_ALIGNED(64 * 1024);
+/* core: the DMAC follows it (an MXOS program: its data is VM) */
+static u8 ring[64 * 1024] MX_DMA_LINES MX_ALIGNED(64 * 1024);
 static struct mx_rt hud, lo[2];
 static struct mx_display disp[2];
 static int mode = -1, scene, running, wrong_rate;

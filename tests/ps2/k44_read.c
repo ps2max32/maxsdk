@@ -7,7 +7,8 @@
 #include <mx/sif.h>
 #include <mx/string.h>
 
-static u8 area[3 * 65536 + 256] __attribute__((aligned(64)));
+/* core: the IOP's DMA writes it (the program is linked into VM) */
+static u8 area[3 * 65536 + 256] MX_DMA_LINES;
 static u8 ref[65536 + 64];
 
 int main(void) {

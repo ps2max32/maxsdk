@@ -251,6 +251,50 @@ restart into the BIOS (ExecPS2 from the boot ROM again), or not.
   stack). Still the BIOS's: the threads' carrier, the exception and interrupt vectors' first
   level, `ExecPS2` for programs not on `libmxk`, and the kernel's own boot.
 
+**2h. Only MXOS programs; the BIOS only boots** (decided 2026-11-11). Every program the kernel runs
+is an MXOS program (`libmxk`, virtual memory); backwards compatibility with ps2sdk's programs and
+with `libmx` programs under the kernel goes. One source builds two ways:
+
+| | MXOS program (`libmxk`) | Standalone ELF (`libmx`, the portability library) |
+|---|---|---|
+| Started by | the kernel (the shell, the host link) | mxboot, a legacy loader, PCSX2's `-elf`, ps2link; not by the kernel |
+| Memory | virtual only (`maxsdk-vm*.ld`), more than 31 MiB possible | physical, at most 31 MiB, no VM |
+| BIOS | none while it runs | its threads, SIF, SetGsCrt (as `libmx` now) |
+| IOP | the kernel's modules, shared | its own reset and modules |
+| Kernel-only calls (processes, ports, launch, home menu) | yes | return -1 |
+
+Steps, each on the PS2 on its own:
+- *2h-1, two targets.* `MX_TARGET=mxos` (the default: `libmxk`, VM) or `standalone` (`libmx`,
+  physical) in `mk/maxsdk.mk`. Tests that need no kernel (hardware, drivers, GS, VU) stay
+  standalone and run on PCSX2 with `-elf`. Until every process has a VM of its own (the address
+  space plan's phase 3) a program that stays while another runs cannot be VM: the kernel has
+  one VM, the program in front's (a kernel test linked into VM that started another was dropped
+  and started again, in a loop). Those (mxshell, mxlink's app, the kernel tests that start
+  others or run beside them) are `mxos-core` until then; every other MXOS program is VM. In the
+  end every MXOS program is VM (decided 2026-11-11).
+  Done 2026-11-11: `MX_TARGET` (`mxos`, `mxos-core`, `standalone`); the kernel tests k37, k43,
+  k44, k45 and `examples/display` are VM programs, k29-k36, k38, k40-k42, mxshell and mxlink's
+  app `mxos-core`; the BIOS's programs (mxboot, the kernel) and the demos standalone. Found: a
+  VM program that opened a path in its `.rodata` hung (the page fault under the file lock read
+  the page through the file server, which waited for that lock): paths are copied into core
+  before the lock now. Data the DMAC reads (the frame pipeline's MFIFO ring) must be marked
+  core (`MX_DMA_LINES`) in a VM program. On the PS2 the kernel tests that start a program
+  beside them fail while the host link's service runs: the kernel parks one program, and the
+  service takes that place (on PCSX2, without the service, they pass).
+- *2h-2, the kernel runs MXOS programs only.* An ELF without the MXK note is refused;
+  `bios_mode` (the restart with the BIOS's threads) and the Exit hook go. Standalone ELFs are
+  not started from MXOS for now (once the BIOS's memory is the kernel's there is no ExecPS2;
+  later perhaps through a reset into mxboot's one-shot). A new kernel is tried through mxboot's
+  one-shot, or a start of the kernel's own without ExecPS2.
+- *2h-3, `libmxk` calls the kernel only.* The kernel counts the BIOS syscalls that still come
+  in, by number; each `mx_bios_*` left in `libmxk` becomes a kernel service or goes.
+- *2h-4, the kernel without the BIOS.* Its own vectors (refill, common, interrupt) and syscall
+  entry, its threads without the BIOS's carrier thread, the SIF's software registers its own.
+- *2h-5, the first MiB for the kernel.* The BIOS's memory (0x0 - 0x7_FFFF) is the kernel's
+  after its boot.
+- Then the address space plan's phase 3: VM in the kernel, one frame pool, one swap file
+  (`mc0:/MXOS/SWAP.CFG`, no swap without it).
+
 - The kernel no longer restarts (ExecPS2) after each program: it cleans up per process
   (threads, files, sockets, pad, sound, GS memory, interrupt handlers, VM frames).
 - Each `libmxk` program gets an ASID; its core memory (now at the BIOS's fixed mappings from

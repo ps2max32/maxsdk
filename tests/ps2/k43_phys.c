@@ -12,7 +12,8 @@
 
 MX_CORE_HEAP(256 << 10);
 
-static u8 a[10000] MX_ALIGNED(64), b[10000] MX_ALIGNED(64);
+/* core: the DMAC reads and writes them (the program is linked into VM) */
+static u8 a[10000] MX_DMA_LINES, b[10000] MX_DMA_LINES;
 
 int main(void) {
   for (u32 i = 0; i < sizeof a; i++)

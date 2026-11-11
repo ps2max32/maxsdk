@@ -13,6 +13,8 @@ OUT       ?= $(PS2MAX)/build/libs/maxsdk/tutorials
 TUTORIALS := $(notdir $(patsubst %/,%,$(wildcard $(HERE)/[0-9]-*/)))
 # the HLSL programs of tutorial 3
 HLSL_DIRS := $(HERE)/3-vu1-hlsl
+# standalone ELFs (libmx), run on PCSX2 with -elf
+MX_TARGET ?= standalone
 include $(HERE)/../mk/maxsdk.mk
 
 STEPS := $(patsubst $(HERE)/%.c,$(OUT)/%.elf,$(foreach t,$(TUTORIALS),$(wildcard $(HERE)/$(t)/*.c)))

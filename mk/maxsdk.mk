@@ -9,7 +9,7 @@
 #                IX_N (or IX_N_<name>) vertices per indexed batch,
 #                VU_OPT_FLAGS for opt (e.g. -vu-contexts=1)
 # Optional: PS2MAX, LLVM, MAXSDK_OUT (where libmx.a and crt0 are built),
-# MX_MEMORY (phys or vm).
+# MX_TARGET (mxos or standalone, below).
 #
 # It gives CC, CFLAGS, $(call link,out,objs), MX_LIB, MX_CRT0, MX_LD, MX_HDRS, MX_LOADER,
 # VU_OBJS, HLSL_OBJS, HLSL_HDRS and their rules, and a rule that builds libmx
@@ -35,16 +35,29 @@ CC       = $(LLVM)/clang
 CFLAGS   = $(COMMON_CFLAGS) --target=mips64el -mcpu=r5900 -mabi=n32 -fno-pic -mno-abicalls \
            -fomit-frame-pointer -I$(OUT)/hlsl
 CFLAGS  += $(EXTRA_CFLAGS)
-# libmxk with MX_MEMORY=vm or MX_KERNEL=1 (all in core): under mx-kernel
-# (docs/kernel.md)
 # BSD sockets (ee/compat/net): for a program's own CFLAGS
 MX_NET_CFLAGS = -I$(MAXSDK)/ee/compat/net
-MX_LIB   = $(MAXSDK_OUT)/libmx$(if $(filter vm,$(MX_MEMORY))$(MX_KERNEL),k).a
+# MX_TARGET (docs/mx-os.md, docs/mx-os-plan.md step 2h):
+#   mxos (the default): an MXOS program: libmxk, its own objects linked into VM
+#     (docs/vm.md), started by mx-kernel (apps/mxos; on PCSX2 MX_LOADER)
+#   mxos-core: an MXOS program all in core, without VM: for now only for a program
+#     that stays while another runs (the shell, a service, one that starts others
+#     and waits): the kernel has one VM, the program in front's. Goes once every
+#     process has a VM of its own: in the end every MXOS program is VM
+#   standalone: a standalone ELF: libmx, the portability library, all in physical
+#     memory (at most 31 MiB, no VM), on the BIOS; started by mxboot, a legacy
+#     loader, PCSX2's -elf, not by mx-kernel
+# MX_MEMORY=vm and MX_MEMORY=phys still choose mxos and standalone, MX_KERNEL=1
+# with phys mxos-core.
+ifeq ($(MX_KERNEL)$(MX_MEMORY),1phys)
+MX_TARGET ?= mxos-core
+endif
+ifndef MX_TARGET
+MX_TARGET := $(if $(filter phys,$(MX_MEMORY)),standalone,mxos)
+endif
+MX_MEMORY = $(if $(filter standalone mxos-core,$(MX_TARGET)),phys,vm)
+MX_LIB   = $(MAXSDK_OUT)/libmx$(if $(filter mxos mxos-core,$(MX_TARGET)),k).a
 MX_CRT0  = $(MAXSDK_OUT)/obj/crt0.o
-# MX_MEMORY=vm: the program's own objects linked into VM (docs/vm.md),
-# started by mxlink (apps/mxos, the PS2's loader; on PCSX2 MX_LOADER); phys (the default):
-# all in core
-MX_MEMORY ?= phys
 MX_LD_phys = $(MAXSDK)/ee/ld/maxsdk.ld
 # MX_VM_TEXT=core (with MX_MEMORY=vm): the program's code stays core
 MX_VM_TEXT ?= vm

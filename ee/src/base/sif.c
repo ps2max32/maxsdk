@@ -1271,7 +1271,26 @@ static int fio_open_unlocked(const char *path, int flags) {
   return r[0];
 }
 
+/* A path into core before the file lock: the caller's may be in VM, and a
+   page fault under the lock reads the page through the file server, which
+   waits for the lock it holds (a program linked into VM opening a path in
+   its .rodata, read from its ELF when touched, hung so). 0: too long. */
+#define FIO_PATH_MAX 256
+static const char *path_core(const char *path, char *buf) {
+  u32 i = 0;
+  for (; path[i]; i++) {
+    if (i == FIO_PATH_MAX - 1)
+      return 0;
+    buf[i] = path[i];
+  }
+  buf[i] = 0;
+  return buf;
+}
+
 int mx_fio_open(const char *path, int flags) {
+  char buf[FIO_PATH_MAX];
+  if (!(path = path_core(path, buf)))
+    return -1;
   fio_lock();
   int r = fio_open_unlocked(path, flags);
   pos_set(r, flags & 0x0100 /* APPEND: writes go to the end */ ? -1 : 0);
@@ -1462,6 +1481,9 @@ static int fio_dopen_unlocked(const char *path) {
 }
 
 int mx_fio_dopen(const char *path) {
+  char buf[FIO_PATH_MAX];
+  if (!(path = path_core(path, buf)))
+    return -1;
   fio_lock();
   int r = fio_dopen_unlocked(path);
   fio_unlock();
@@ -1506,9 +1528,21 @@ static int fio_dread_unlocked(int fd, char *name, u32 room, u32 *size) {
 }
 
 int mx_fio_dread(int fd, char *name, u32 room, u32 *size) {
+  /* into core under the lock, out to the caller's (maybe VM) after it */
+  char buf[FIO_PATH_MAX];
+  u32 sz = 0;
+  if (room > sizeof buf)
+    room = sizeof buf;
   fio_lock();
-  int r = fio_dread_unlocked(fd, name, room, size);
+  int r = fio_dread_unlocked(fd, buf, room, &sz);
   fio_unlock();
+  if (r > 0) {
+    for (u32 i = 0; i < room; i++)
+      if (!(name[i] = buf[i]))
+        break;
+  }
+  if (size)
+    *size = sz;
   return r;
 }
 
@@ -1555,6 +1589,9 @@ static int fio_path_call_unlocked(int fn, const char *path) {
 }
 
 static int fio_path_call(int fn, const char *path) {
+  char buf[FIO_PATH_MAX];
+  if (!(path = path_core(path, buf)))
+    return -1;
   fio_lock();
   int r = fio_path_call_unlocked(fn, path);
   fio_unlock();
