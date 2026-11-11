@@ -244,6 +244,17 @@ build checks it (`tools/libk-bios-check.sh`: no object of `libmxk.a` but `syscal
 BIOS stub other than `Exit` or has a syscall). A `libmxk` program built so needs a kernel with
 this `crtc_set` for a video mode on PCSX2. `libmx` keeps the BIOS's paths.
 
+The kernel's own syscall entry (2026-11-12, plan step 2h-4a; `apps/mxos/ee/ksys.S`, `kirq.c`):
+the stub in the exception table's syscall entry also runs the kernel's own numbers (the
+scheduler's switch 0x3B, the poke 0x69, the VM's resume 0x5B: `ksys_set`, a table by |number|)
+the way the BIOS's dispatcher runs a SetSyscall handler (the same save area, kernel stack and
+frame, `docs/bios.md`), and sends the others on to the BIOS's. maxsdk sets its syscall and
+exception handlers through `src/base/excset.c`: the kernel's (`mx__kernel_syscall_set`,
+`mx__kernel_handler_set`: the exception table written by the kernel, a handler below 32 MiB
+through kseg0) once its entry is in, else the BIOS's calls. SetSyscall is left only as the
+poke's bootstrap at each start and before a restart. The debug output at a program's end has the
+kernel's own BIOS syscalls since its boot (`the kernel's own BIOS syscalls since its boot`).
+
 Version 22: the video timing without the BIOS (plan step 2g; `apps/mxos/ee/kvideo.c`), and
 `iop_write` (below). maxsdk
 computes the CRTC registers (SMODE1 with the PLL, SYNCH1, SYNCH2, SYNCV, SRFSH, SMODE2) from a

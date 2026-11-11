@@ -65,6 +65,10 @@ unsigned long long mx_bios_gs_get_imr(void);
 unsigned long long mx_bios_gs_put_imr(unsigned long long imr);
 unsigned long long mx_bios_igs_put_imr(unsigned long long imr);
 void mx_bios_set_syscall(int number, void *handler);
+/* maxsdk's own (src/base/excset.c): the kernel's syscall entry and exception
+   table once it has them (mx OS plan 2h-4), else the BIOS's calls above */
+void mx__set_syscall(int number, void *handler);
+void *mx__set_handler(int code, void (*handler)(void));
 void mx_bios_print(const char *fmt, ...);
 int mx_bios_sif_dma_stat(unsigned id);
 unsigned mx_bios_sif_set_dma(void *transfers, int count);

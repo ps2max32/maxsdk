@@ -146,10 +146,10 @@ void mx__exception_report(void) {
 
 void mx_exception_init(void) {
   for (int c = 1; c <= 3; c++)
-    mx_bios_set_tlb_handler(c, mx__exception_vector);
+    mx__set_handler(c, mx__exception_vector);
   static const u8 common[] = {4, 5, 6, 7, 9, 10, 12, 13};
   for (u32 i = 0; i < sizeof common; i++)
-    mx_bios_set_common_handler(common[i], mx__exception_vector);
+    mx__set_handler(common[i], mx__exception_vector);
 }
 
 /* only a kernel keeps a report */

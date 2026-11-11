@@ -310,6 +310,20 @@ Steps, each on the PS2 on its own:
   carrier thread, its handlers in the BIOS's tables, its SIF software registers).
 - *2h-4, the kernel without the BIOS.* Its own vectors (refill, common, interrupt) and syscall
   entry, its threads without the BIOS's carrier thread, the SIF's software registers its own.
+  In parts, each tested alone (the kernel counts what still goes into the BIOS, `kernel.md`):
+  - 4a, its own syscall entry: the exception table's syscall entry is the kernel's dispatcher,
+    which runs its own numbers (the scheduler's switch, the poke, the VM's resume) and sends the
+    rest on to the BIOS's; the TLB and exception handlers written into the table by the kernel
+    (no SetSyscall, SetVTLBRefillHandler, SetVCommonHandler after its start). Done 2026-11-12:
+    after `kirq_on` the kernel calls the BIOS only for SifGetReg (twice, at its start) and, on
+    PCSX2, SetGsCrt; tested on PCSX2 (the MXOS tests, the standalone VM tests).
+  - 4b, the SIF's software registers its own (SifGetReg/SifSetReg with bit 31).
+  - 4c, the restart without ExecPS2: the kernel starts itself again (its `.data` back, `.bss`
+    cleared, its threads and handlers anew), as the replace's trampoline does.
+  - 4d, its own level 1 vectors (refill, common, interrupt) and tables, out of the BIOS's
+    memory; the BIOS's kernel stack and save area its own.
+  - 4e, its threads without the BIOS's carrier thread, and its start without the BIOS's calls
+    before `kirq_on` (the IOP's reset, the SIF's set-up).
 - *2h-5, the first MiB for the kernel.* The BIOS's memory (0x0 - 0x7_FFFF) is the kernel's
   after its boot.
 - Then the address space plan's phase 3: VM in the kernel, one frame pool, one swap file

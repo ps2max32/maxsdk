@@ -99,7 +99,7 @@ LIBK_SRCS = ee/src/base/start.c ee/src/base/sif.c ee/src/base/kstubs.c ee/src/ba
 # what is the kernel's: no code in libmxk (sifdma.c: kstubs.c's instead)
 LIBK_OUT  = ee/src/base/start.c ee/src/base/sif.c ee/src/base/proc.c ee/src/thread/sleep.c \
             ee/src/irq/timer.c ee/src/base/ksys.c ee/src/gs/gs.c ee/src/gs/frame.c \
-            ee/src/base/sifdma.c \
+            ee/src/base/sifdma.c ee/src/base/excset.c \
             ee/src/base/exception.c ee/src/base/exception.S \
             ee/src/vm/vm.c ee/src/vm/mem.c ee/src/vm/heap.c ee/src/vm/image.c ee/src/vm/tlb.S
 LIBK_OBJS = $(filter-out $(LIBK_OUT:%=$(OUT)/obj/%.o),$(LIB_OBJS)) $(LIBK_SRCS:%=$(OUT)/objk/%.o)

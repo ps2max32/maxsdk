@@ -501,7 +501,7 @@ void mx__vm_shutdown(void) {
   mx_irq_restore(was);
   for (int c = 1; c <= 3; c++)
     if (bios_handler[c])
-      mx_bios_set_tlb_handler(c, (void (*)(void))bios_handler[c]);
+      mx__set_handler(c, (void (*)(void))bios_handler[c]);
 }
 
 /* After mx__vm_shutdown, at a normal end: on FAT and exFAT a file that is not
@@ -591,8 +591,8 @@ static int to_thread(struct mx__vm_x *x);
 static void (*break_fn)(u32 code);
 void mx__vm_break_init(void (*fn)(u32 code)) {
   break_fn = fn;
-  mx_bios_set_syscall(VM_RESUME_SYSCALL, (void *)mx__vm_resume_k);
-  mx_bios_set_common_handler(9, mx__vm_vector);
+  mx__set_syscall(VM_RESUME_SYSCALL, (void *)mx__vm_resume_k);
+  mx__set_handler(9, mx__vm_vector);
 }
 
 int mx__vm_exception(struct mx__vm_x *x) {
@@ -1914,9 +1914,9 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   int was = mx_di();
   tlb_init(flo, fhi);
   mx_irq_restore(was);
-  mx_bios_set_syscall(VM_RESUME_SYSCALL, (void *)mx__vm_resume_k);
+  mx__set_syscall(VM_RESUME_SYSCALL, (void *)mx__vm_resume_k);
   for (int c = 1; c <= 3; c++)
-    bios_handler[c] = mx_bios_set_tlb_handler(c, mx__vm_vector);
+    bios_handler[c] = mx__set_handler(c, mx__vm_vector);
   mx_dcache_flush_all();
   vm.dbit = 1;
   vm.active = 1;
