@@ -15,6 +15,7 @@
 #include <mx/string.h>
 #include <mx/vm.h>
 #include "../../../common/include/mxio.h"
+#include <mx/sifdma.h>
 
 /* System command IDs */
 /* libmxk (MX_KERNEL) under mx-kernel: the kernel has the one client of the
@@ -107,6 +108,17 @@ static volatile u32 *uw(void *p) { return (volatile u32 *)MX_UNCACHED(p); }
 
 /* src: the data's physical address (mx_paddr_range of a pointer; an RDATA
    request's is physical already, given by the IOP) */
+/* A wait for SIF longer than about 3 s: the kernel shows what it can (where:
+   1 the send, 2 the answer). Once a wait. */
+void mx__sif_stuck(int where) __attribute__((weak));
+static void stuck_check(int *told, u32 t0, int where) {
+  if (!*told && mx_count() - t0 > 3u * MX_EE_HZ) {
+    *told = 1;
+    if (mx__sif_stuck)
+      mx__sif_stuck(where);
+  }
+}
+
 static u32 send_cmd(int intr, u32 cid, void *pkt, u32 psize, mx_paddr src, u32 dest,
                     u32 dsize) {
   volatile u32 *h = uw(pkt);
@@ -135,12 +147,14 @@ static u32 send_cmd(int intr, u32 cid, void *pkt, u32 psize, mx_paddr src, u32 d
   u32 id;
   if (intr) {
     for (int i = 0; i < 2000; i++)
-      if ((id = mx_bios_isif_set_dma(t, n)))
+      if ((id = mx__sif_dma_set(t, n, 1)))
         return id;
     return 0;
   }
-  while (!(id = mx_bios_sif_set_dma(t, n)))
-    ;
+  u32 t0 = mx_count();
+  int told = 0;
+  while (!(id = mx__sif_dma_set(t, n, 0)))
+    stuck_check(&told, t0, 1);
   return id;
 }
 
@@ -288,7 +302,7 @@ static int sif0_handler(int ch, void *arg, void *addr) {
      done before SIF0 takes the next packet: landing after it, it would
      wipe that packet's size, and the packet (say a READ's answer) is lost */
   mx_sync();
-  mx_bios_isif_set_dchain();
+  mx__sif_dchain(1);
 
   switch (pkt[2]) {
   case CMD_CHANGE_SADDR:
@@ -390,13 +404,13 @@ int mx_sif_init(void) {
   if (MX_R32(MX_D_STAT) & (1u << MX_DMAC_SIF0))
     MX_R32(MX_D_STAT) = 1u << MX_DMAC_SIF0;
   if (!(MX_R32(MX_DMA_SIF0_CHCR) & MX_BIT(DMA_CHCR_STR)))
-    mx_bios_sif_set_dchain();
+    mx__sif_dchain(0);
 
   sif0_handler_id = mx_bios_add_dmac_handler(MX_DMAC_SIF0, sif0_handler, 0, 0);
   mx_bios_enable_dmac(MX_DMAC_SIF0);
 
   static u8 init_pkt[32] MX_DMA_LINES;
-  iop_buf = (u32)mx_bios_sif_get_reg(SYSREG_SUBADDR);
+  iop_buf = mx__sif_get_reg(SYSREG_SUBADDR);
   if (iop_buf) {
     /* The IOP side is already set up (by ps2link): tell it our receive
        buffer. */
@@ -404,17 +418,17 @@ int mx_sif_init(void) {
     send_cmd(0, CMD_CHANGE_SADDR, init_pkt, 32, (mx_paddr){0}, 0, 0);
   } else {
     u32 t0 = mx_count();
-    while (!(mx_bios_sif_get_reg(REG_SMFLAG) & SMFLAG_CMDINIT))
+    while (!(mx__sif_get_reg(REG_SMFLAG) & SMFLAG_CMDINIT))
       if (mx_count() - t0 > 300000000u)
         return -1;
-    iop_buf = (u32)mx_bios_sif_get_reg(REG_SUBADDR);
-    mx_bios_sif_set_reg(SYSREG_SUBADDR, (s32)iop_buf);
+    iop_buf = mx__sif_get_reg(REG_SUBADDR);
+    mx__sif_set_reg(SYSREG_SUBADDR, iop_buf);
     uw(init_pkt)[3] = 0;
     uw(init_pkt)[4] = (u32)(uintptr_t)MX_UNCACHED(rx_buf);
     send_cmd(0, CMD_INIT_CMD, init_pkt, 32, (mx_paddr){0}, 0, 0);
   }
 
-  if (!mx_bios_sif_get_reg(SYSREG_RPCINIT)) {
+  if (!mx__sif_get_reg(SYSREG_RPCINIT)) {
     static u8 rpc_init_pkt[16] MX_DMA_LINES;
     uw(rpc_init_pkt)[3] = 1;
     send_cmd(0, CMD_INIT_CMD, rpc_init_pkt, 16, (mx_paddr){0}, 0, 0);
@@ -422,7 +436,7 @@ int mx_sif_init(void) {
     while (!sregs[0])
       if (mx_count() - t0 > 300000000u)
         return -1;
-    mx_bios_sif_set_reg(SYSREG_RPCINIT, 1);
+    mx__sif_set_reg(SYSREG_RPCINIT, 1);
   }
   sif_state = 1;
   return 0;
@@ -471,11 +485,13 @@ static int sleep_wait(struct mx_sif_client *c, u32 limit, u32 t0, int *r) {
   if (slot < 0)
     return 0;
   *r = 0;
+  int told = 0;
   for (;;) {
     if (ndeferred)
       send_deferred();
     if (c->done)
       break;
+    stuck_check(&told, t0, 2);
     if (limit && mx_count() - t0 > limit) {
       *r = -1;
       break;
@@ -534,9 +550,11 @@ static int wait_answer1(struct mx_sif_client *c, int may_give_up) {
   int r;
   if (sleep_wait(c, may_give_up ? limit : 0, t0, &r))
     return r;
+  int told = 0;
   while (!c->done) {
     if (ndeferred)
       send_deferred();
+    stuck_check(&told, t0, 2);
     if (may_give_up && mx_count() - t0 > limit)
       return -1;
   }
@@ -693,19 +711,30 @@ int mx_iop_read(u32 iop, void *dst, u32 size) {
   return 0;
 }
 
+/* the transfer itself, from a DMA address (physical, or the scratchpad's);
+   under mx-kernel the kernel's (version 22: SIF1 is its ring) */
+int mx__iop_write_phys(u32 iop, u32 src, u32 size) {
+  struct sif_dma t = {src, iop, (s32)size, 0};
+  mx_sync();
+  u32 id;
+  while (!(id = mx__sif_dma_set(&t, 1, 0)))
+    ;
+  while (mx__sif_dma_stat(id) >= 0)
+    ;
+  return 0;
+}
+
 int mx_iop_write(u32 iop, const void *src, u32 size) {
   if ((iop | (u32)(uintptr_t)src | size) & 15)
     return -1;
   if (!mx_is_spr(src) && ((uintptr_t)src & 0xF0000000u) != 0x20000000u)
     mx_dcache_writeback(src, size);
-  struct sif_dma t = {mx_paddr_range(src, size).v, iop, (s32)size, 0};
-  mx_sync();
-  u32 id;
-  while (!(id = mx_bios_sif_set_dma(&t, 1)))
-    ;
-  while (mx_bios_sif_dma_stat(id) >= 0)
-    ;
-  return 0;
+  u32 phys = mx_paddr_range(src, size).v; /* with the core's offset: the program's */
+#ifdef MX_KERNEL
+  if (mx__kernel && mx__kernel->version >= 22)
+    return mx__kernel->iop_write(iop, phys, size);
+#endif
+  return mx__iop_write_phys(iop, phys, size);
 }
 
 int mx_iop_write_word(u32 iop, u32 value) {
@@ -1575,16 +1604,16 @@ int mx_iop_reset(const char *arg) {
   pkt.mode = 0;
   mx_dcache_writeback(&pkt, sizeof pkt);
 
-  mx_bios_sif_stop_dma();
-  struct sif_dma t = {(u32)(uintptr_t)&pkt, (u32)mx_bios_sif_get_reg(SYSREG_SUBADDR),
+  mx__sif_stop_dma();
+  struct sif_dma t = {(u32)(uintptr_t)&pkt, mx__sif_get_reg(SYSREG_SUBADDR),
                       (s32)sizeof pkt, DMA_ERT | DMA_INT_O};
-  mx_bios_sif_set_reg(REG_SMFLAG, SMFLAG_BOOTEND);
-  if (!mx_bios_sif_set_dma(&t, 1))
+  mx__sif_set_reg(REG_SMFLAG, SMFLAG_BOOTEND);
+  if (!mx__sif_dma_set(&t, 1, 0))
     return -1;
-  mx_bios_sif_set_reg(REG_SMFLAG, SMFLAG_SIFINIT);
-  mx_bios_sif_set_reg(REG_SMFLAG, SMFLAG_CMDINIT);
-  mx_bios_sif_set_reg(SYSREG_RPCINIT, 0);
-  mx_bios_sif_set_reg(SYSREG_SUBADDR, 0);
+  mx__sif_set_reg(REG_SMFLAG, SMFLAG_SIFINIT);
+  mx__sif_set_reg(REG_SMFLAG, SMFLAG_CMDINIT);
+  mx__sif_set_reg(SYSREG_RPCINIT, 0);
+  mx__sif_set_reg(SYSREG_SUBADDR, 0);
   return reset_wait();
 }
 
@@ -1611,11 +1640,11 @@ int mx__iop_reboot_udnl(const char *path, const char *args, u32 args_len) {
   lf_arg.modres = 0;
   mx_sif_call_async(&lf, 0, &lf_arg, sizeof lf_arg, (void *)MX_UNCACHED(lf_result), 8);
   /* as ps2sdk's SifIopRebootBuffer after its LoadModule without waiting */
-  mx_bios_sif_set_reg(REG_SMFLAG, SMFLAG_SIFINIT);
-  mx_bios_sif_set_reg(REG_SMFLAG, SMFLAG_CMDINIT);
-  mx_bios_sif_set_reg(REG_SMFLAG, SMFLAG_BOOTEND);
-  mx_bios_sif_set_reg(SYSREG_RPCINIT, 0);
-  mx_bios_sif_set_reg(SYSREG_SUBADDR, 0);
+  mx__sif_set_reg(REG_SMFLAG, SMFLAG_SIFINIT);
+  mx__sif_set_reg(REG_SMFLAG, SMFLAG_CMDINIT);
+  mx__sif_set_reg(REG_SMFLAG, SMFLAG_BOOTEND);
+  mx__sif_set_reg(SYSREG_RPCINIT, 0);
+  mx__sif_set_reg(SYSREG_SUBADDR, 0);
   return reset_wait();
 }
 
@@ -1634,7 +1663,7 @@ static int reset_wait(void) {
     fpos[i] = -1;
 #endif
   u32 t0 = mx_count();
-  while (!(mx_bios_sif_get_reg(REG_SMFLAG) & SMFLAG_BOOTEND))
+  while (!(mx__sif_get_reg(REG_SMFLAG) & SMFLAG_BOOTEND))
     if (mx_count() - t0 > 10u * 294912000u) /* 10 s (the counter wraps at 14.5) */
       return -1;
   if (mx_sif_init() < 0)

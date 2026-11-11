@@ -207,6 +207,38 @@ went on; not found yet). Test: `k43_phys`. Without the app (no service, a progra
 all memory or runs on the BIOS's threads, mxkernel-high) the kernel serves only the reset, execee,
 dumpreg (ps2client's ping) and the IOP's exception; the other commands are the app's only.
 
+Version 22: the video timing without the BIOS (plan step 2g; `apps/mxos/ee/kvideo.c`), and
+`iop_write` (below). maxsdk
+computes the CRTC registers (SMODE1 with the PLL, SYNCH1, SYNCH2, SYNCV, SRFSH, SMODE2) from a
+description of the line and the frame (`<mx/crtc.h>`, `ee/src/gs/crtc.c`); the descriptions of
+the BIOS's modes give the values its SetGsCrt writes, all 20 of them (`tests/host/test_crtc.c`),
+and new ones are made the same way (`mx_video_720p50`, `mx_video_1080i50`, `mx_video_1080p30`,
+or any `struct mx_crtc` in `mx_video_mode.crtc`). `mx_video_set` hands the description to the
+kernel (`crtc_set`), which writes it as SetGsCrt does: the HD clock switch (0xBF80146C bit 3,
+for the 74.25 MHz modes), the registers in its order (PRST and SINT), and the video encoder on
+the I2C bus at 0xBA000000, with the registers SetGsCrt writes for that kind of mode. Those last
+two were read from the BIOS of one console; the kernel takes this path only where the BIOS's
+boot variables are that console's (0x8002_2580 = 0x32, the encoder's id 0x1C, 0x8002_2618 = 0),
+else, and for a program before version 22, SetGsCrt as before (a mode it does not have, code 0,
+is then refused: `mx_video_set` returns -1). The kernel's own screen uses the same path.
+Test: `examples/display` (on libmxk), which also counts each mode's vblanks a second.
+
+SIF1 DMA without the BIOS (`ee/src/base/sifdma.c`): once the kernel's threads are on, its first
+SIF send takes channel 6 when it is idle and runs a ring of 31 tags of its own, and gives it back to
+the BIOS's ring before an ExecPS2. As the BIOS's SifSetDma, each transfer's first quadwords (at most
+7) are copied after the IOP tag at the call, from a physical address too: a REF to a small buffer of
+the caller's was read by the DMA after the caller had used it again, and the IOP, given another
+call's data, answered no more (on the PS2; PCSX2 does the DMA at once). A running chain is appended
+to while the DMAC is suspended. The registers of channels 5-7 (the page at 0x1000_C000) are stored
+in kernel mode, through the kernel's syscall (an interrupt handler: through kseg1), since the BIOS's
+TLB maps that page read only for user mode (`bios.md`). Once the ring is the kernel's, SIF0's chain
+and the SIF registers 1-4 are written by maxsdk too; until then, and in every program on the BIOS's
+threads, all of it goes to the BIOS (`iSifSetDma`, `iSifSetDChain` from an interrupt handler).
+`libmxk`'s `mx_iop_write` goes through the kernel (version 22: `iop_write`, a physical source):
+a program's own SifSetDma would meet the kernel's ring. A SIF wait of over 3 s shows the ring's
+state on the kernel's screen, and a crash of the kernel shows there at once, before the report
+goes out through the SIF.
+
 Two things a process beside showed: a program's end waits only for the IOP calls of its own
 threads, those that are gone (`mx__sif_calls_finish` keeps the calls and packets of threads
 still alive: a service's tty write was waited for until it gave up, and its packet was

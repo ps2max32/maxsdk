@@ -1,6 +1,9 @@
 #include "test.h"
 
 int test_failures;
+
+/* src/base/core.c is not built for the host: the core is not moved there */
+unsigned mx__core_off;
 int test_malloc(void);
 
 int main(void) {
@@ -9,6 +12,7 @@ int main(void) {
   test_emit();
   test_chain();
   test_video();
+  test_crtc();
   test_tex();
   test_vcache();
   test_failures += test_malloc();

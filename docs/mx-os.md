@@ -44,7 +44,7 @@ memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-
 
 | Who | Owns |
 |---|---|
-| Kernel (mxkernel) | IOP, SIF, program start and end, TLB and VM, heaps, files, exceptions, the pad, threads, semaphores and interrupt dispatch (`libmxk`); later sound |
+| Kernel (mxkernel) | IOP, SIF, program start and end, TLB and VM, heaps, files, exceptions, the pad, threads, semaphores and interrupt dispatch (`libmxk`), the video timing (`mx_video_set` writes it through the kernel from version 22: any timing `<mx/crtc.h>` describes, not only the BIOS's modes); later sound |
 | Program | GS, VIF, VU, DMAC, its frame loop |
 
 ## Memory (EE)

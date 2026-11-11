@@ -21,7 +21,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 21
+#define MX_KERNEL_VERSION 22
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -101,6 +101,7 @@ struct mx_pad_state {
 int mx__pad_init(void);
 void mx__pad_forget(void);
 int mx__pad_read(int port, struct mx_pad_state *s, int sticks);
+#include <mx/sifdma.h>
 /* the motors of a SIO2 pad (a DualShock): small 0/1, big 0..255, sent when
    the pad takes them (from the next mx__pad_read); 0, or -1 with no pad */
 int mx__pad_act(int port, u32 small, u32 big);
@@ -232,7 +233,20 @@ struct mxk_services {
      (<mx/proc.h>) */
   int (*phys_read)(u32 phys, void *to, u32 n);
   int (*phys_write)(u32 phys, const void *from, u32 n);
+  /* version 22: the CRTC timing written from a description (<mx/crtc.h>), not
+     the BIOS's SetGsCrt: the PLL, sync registers, the HD clock and the video
+     encoder where the console has them. 0, or -1 (a console the kernel does
+     not know: SetGsCrt then) */
+  int (*crtc_set)(const struct mx_crtc *c);
+  /* version 22: a SIF DMA transfer to IOP memory from a DMA address (the
+     caller's physical one: mx_iop_write), waited for. SIF1 is the kernel's
+     ring then: a program's own SifSetDma would meet it */
+  int (*iop_write)(u32 iop, u32 src, u32 size);
 };
+int mx__iop_write_phys(u32 iop, u32 src, u32 size);
+/* the kernel's own writer of the CRTC timing, used by mx_video_set in it
+   (ee/src/gs/gs.c) */
+extern int (*mx__crtc_set)(const struct mx_crtc *c);
 /* the size of a table of version MX_KERNEL_MIN */
 #define MXK_MIN_SIZE __builtin_offsetof(struct mxk_services, pad_init)
 

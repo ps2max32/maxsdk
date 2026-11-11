@@ -20,7 +20,8 @@
    move the picture (DY, DX: the values are shown, so a mode's offsets can
    be written down), start exits. Until a button is pressed the demo shows
    every mode for a second, then every scene, and exits. Arguments: m<n>
-   start at mode n (0 = the first of the table), s<n> n seconds a step. */
+   start at mode n (0 = the first of the table), s<n> n seconds a step, n<n>
+   only n modes from there. */
 
 #include <mx/hud.h>
 #include <mx/mx.h>
@@ -42,7 +43,10 @@ static const struct demo_mode modes[] = {
     {"480P", &mx_video_480p, 0, 640, 480},
     {"576P", &mx_video_576p, 0, 640, 576},
     {"720P", &mx_video_720p, 0, 1280, 720},
+    {"720P50", &mx_video_720p50, 0, 1280, 720},
     {"1080I FRAME", &mx_video_1080i, 1, 960, 540},
+    {"1080I50 FRAME", &mx_video_1080i50, 1, 960, 540},
+    {"1080P30", &mx_video_1080p30, 0, 960, 540},
     {"VGA 640X480", &mx_video_vga_640, 0, 640, 480},
     {"VGA 800X600", &mx_video_vga_800, 0, 800, 600},
     {"VGA 1024X768", &mx_video_vga_1024, 0, 1024, 768},
@@ -56,7 +60,7 @@ static const char *const scenes[] = {"OVERLAY", "CROSSFADE", "FADE", "SMOOTH", "
 static u8 ring[64 * 1024] MX_ALIGNED(64 * 1024);
 static struct mx_rt hud, lo[2];
 static struct mx_display disp[2];
-static int mode = -1, scene, running;
+static int mode = -1, scene, running, wrong_rate;
 static s32 dx, dy;
 
 /* text and boxes of <mx/hud.h> go to a target of this size */
@@ -199,7 +203,8 @@ static void set_mode(int i) {
   }
   struct mx_video_mode m = *dm->m;
   m.ffmd = (u8)dm->ffmd;
-  mx_printf("display: SetGsCrt %u %u %u\n", m.interlace, m.code, m.ffmd);
+  mx_printf("display: mode %s (code %02x, interlace %u, ffmd %u)\n", dm->name, m.code,
+            m.interlace, m.ffmd);
   if (mx_video_set(&m) < 0) {
     /* no vblank: this console does not have the mode */
     mx_printf("display: %s: no vblank, not on this console\n", dm->name);
@@ -207,6 +212,14 @@ static void set_mode(int i) {
     set_mode(0);
     return;
   }
+  /* the timing checked: the vblanks of a second against the mode's rate */
+  u32 v0 = mx_gs.vsync;
+  mx_sleep_us(1000000);
+  u32 hz = mx_gs.vsync - v0;
+  int ok = hz + 1 >= m.hz && hz <= m.hz + 1u;
+  wrong_rate |= !ok;
+  mx_printf("display: %s: %u vblanks a second (%u expected)%s\n", dm->name, hz, m.hz,
+            ok ? "" : ": WRONG");
   mx_vram_reset();
   mx_rt_init(&hud, mx_vram_alloc(mx_rt_pages(dm->w, dm->h, MX_GS_PSM_CT16S)), dm->w, dm->h,
              MX_GS_PSM_CT16S, 0, MX_RT_NOZ);
@@ -225,9 +238,9 @@ static void set_mode(int i) {
 }
 
 int main(int argc, char **argv) {
-  int first = 0, secs = 0;
+  int first = 0, secs = 0, count = 0;
   for (int a = 1; a < argc; a++) {
-    int *v = argv[a][0] == 'm' ? &first : argv[a][0] == 's' ? &secs : 0;
+    int *v = argv[a][0] == 'm' ? &first : argv[a][0] == 's' ? &secs : argv[a][0] == 'n' ? &count : 0;
     if (v)
       for (const char *p = argv[a] + 1; *p >= '0' && *p <= '9'; p++)
         *v = *v * 10 + (*p - '0');
@@ -235,11 +248,13 @@ int main(int argc, char **argv) {
   u32 dwell = 60 * (u32)(secs ? secs : 1);
   if (first >= NMODES)
     first = 0;
+  /* n<count>: only the modes first .. first + count - 1 (a TV without the others) */
+  int nmodes = count && first + count < NMODES ? first + count : NMODES;
   mx_gs_init_video(&mx_video_ntsc);
   set_mode(first);
   int pad = mx_pad_init() >= 0, manual = 0;
   /* until a button is pressed: every mode, then every scene, a second each */
-  u32 step = (u32)first, nsteps = NMODES + NSCENES, at = 0;
+  u32 step = (u32)first, nsteps = (u32)nmodes + NSCENES, at = 0;
   for (u32 k = mx_gs.frames;; k = mx_gs.frames) {
     u32 b = pad ? mx_pad_pressed(0) : 0;
     if (b & MX_PAD_START)
@@ -250,18 +265,18 @@ int main(int argc, char **argv) {
         at = k;
         if (++step == nsteps)
           break;
-        if (step < (u32)NMODES)
+        if (step < (u32)nmodes)
           set_mode((int)step);
         else {
-          if (step == (u32)NMODES)
+          if (step == (u32)nmodes)
             set_mode(0);
-          scene = (int)(step - NMODES);
+          scene = (int)(step - (u32)nmodes);
         }
         k = mx_gs.frames;
       }
     }
     if (b & (MX_PAD_LEFT | MX_PAD_RIGHT))
-      set_mode((mode + (b & MX_PAD_RIGHT ? 1 : NMODES - 1)) % NMODES), k = mx_gs.frames;
+      set_mode((mode + (b & MX_PAD_RIGHT ? 1 : nmodes - 1)) % nmodes), k = mx_gs.frames;
     if (b & MX_PAD_SQUARE)
       scene = (scene + 1) % NSCENES;
     dy += b & MX_PAD_DOWN ? 2 : b & MX_PAD_UP ? -2 : 0;
@@ -275,7 +290,7 @@ int main(int argc, char **argv) {
   }
   wait_shown();
   mx_frame_stop();
-  mx_printf("display: done\n");
-  MX_TEST_END(0);
+  mx_printf("display: done%s\n", wrong_rate ? ", a mode with the wrong rate" : "");
+  MX_TEST_END(wrong_rate);
   return 0;
 }

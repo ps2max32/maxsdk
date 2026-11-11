@@ -113,6 +113,10 @@ $(VM_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
 K_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k37_iopchan k38_service k40_frame k41_present k42_timers k43_phys k44_read k45_alldir
 $(K_TESTS:%=$(OUT)/tests/%.elf): LIB = $(LIBK)
 $(K_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
+# the display example on libmxk: the video modes through mx-kernel (version 22:
+# the CRTC timing without SetGsCrt)
+$(OUT)/examples/display.elf: LIB = $(LIBK)
+$(OUT)/examples/display.elf: $(LIBK)
 # k37: an IOP module of its own (tests/iop/chantest), embedded
 $(OUT)/tests/k37_iopchan.elf: CFLAGS += --embed-dir=$(IOP_OUT) -Wno-c23-extensions
 $(OUT)/tests/k37_iopchan.elf: $(IOP_OUT)/chantest.irx
@@ -267,7 +271,7 @@ batch: $(OUT)/batch/ps2batch.elf
 # Pure parts of the library are tested on the host too.
 HOST_SRCS := $(wildcard $(HERE)/tests/host/*.c) $(HERE)/ee/src/pkt/pkt.c $(HERE)/ee/src/pkt/chain.c \
              $(HERE)/ee/src/gs/shader.c $(HERE)/ee/src/gs/rt.c $(HERE)/ee/src/gs/display.c \
-             $(HERE)/ee/src/gs/video.c $(HERE)/ee/src/gs/tex.c $(HERE)/ee/src/gs/vram.c \
+             $(HERE)/ee/src/gs/video.c $(HERE)/ee/src/gs/crtc.c $(HERE)/ee/src/gs/tex.c $(HERE)/ee/src/gs/vram.c \
              $(HERE)/ee/src/gs/vcache.c $(HERE)/ee/libc/malloc.c
 HOST_BIN   = $(OUT)/host/test_host
 

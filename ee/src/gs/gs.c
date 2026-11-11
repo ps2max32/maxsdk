@@ -215,18 +215,41 @@ static void vsync_irq(void *arg) {
 
 void mx_gs_init(u32 w, u32 h) { mx_gs_init_mode(w, h, 0); }
 
-/* GS reset and the CRTC timing; the GS interrupts masked */
-static void crt(const struct mx_video_mode *m) {
+/* The kernel's own writer of the CRTC timing (apps/mxos sets it for itself);
+   programs use the kernel's (version 22). 0, or -1: not done. */
+int (*mx__crtc_set)(const struct mx_crtc *c);
+
+static int crtc_set(const struct mx_video_mode *m) {
+  const struct mx_crtc *d = m->crtc ? m->crtc : mx_crtc_for_code(m->code, m->interlace);
+  if (!d)
+    return -1;
+  struct mx_crtc c = *d;
+  c.ffmd = m->ffmd;
+  if (mx__crtc_set)
+    return mx__crtc_set(&c);
+  if (mx__kernel && mx__kernel->version >= 22)
+    return mx__kernel->crtc_set(&c);
+  return -1;
+}
+
+/* GS reset and the CRTC timing; the GS interrupts masked. -1: a mode the BIOS
+   does not have (code 0) and no kernel to write it */
+static int crt(const struct mx_video_mode *m) {
   mx_video = *m;
   mx_gs.hz = m->hz;
   MX_R32(MX_GIF_CTRL) = (u32)MX_BIT(GIF_CTRL_RST);
   CSR = MX_BIT(GS_CSR_RESET);
   MX_R64(MX_GS_IMR) = 0xFF00; /* write only: no BIOS GsPutIMR */
-  mx_bios_set_gs_crt(m->interlace, m->code, m->ffmd);
+  if (crtc_set(m)) {
+    if (!m->code)
+      return -1;
+    mx_bios_set_gs_crt(m->interlace, m->code, m->ffmd);
+  }
   if (m->interlace)
     MX_R64(MX_GS_SMODE2) = MX_SET(GS_SMODE2_INT, 1) | MX_SET(GS_SMODE2_FFMD, m->ffmd);
   if (mx__kernel && mx__kernel->version >= 7)
     mx__kernel->gs_mode(m);
+  return 0;
 }
 
 static void irq_on(void) {
@@ -247,7 +270,8 @@ static int vblanks(void) {
 }
 
 int mx_video_set(const struct mx_video_mode *m) {
-  crt(m);
+  if (crt(m))
+    return -1;
   irq_on();
   return vblanks();
 }
