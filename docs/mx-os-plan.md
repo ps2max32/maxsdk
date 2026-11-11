@@ -291,6 +291,11 @@ Steps, each on the PS2 on its own:
   through the ROM's reset vector was tried (`probe/p40_reboot.c`): the EE alone, with the IOP
   reset to the ROM's modules, gave a black screen (the ROM's EE path starts with the RDRAM's
   initialisation, which may fail on a warm machine; not followed further).
+  Done 2026-11-11: the kernel refuses an ELF without the MXK note of version 10 and a loader;
+  `bios_mode`, the loader's ExecPS2 and the Exit hook are gone (`kernel.md`). Tested on the PS2
+  (booted by the one-shot, and by a replace): a standalone hello is refused, `k44` passes, the
+  replace comes back with the shell on the screen. Card files are written with mxboot's
+  `mxboot-install-mxos.elf` from now on.
 - *2h-3, `libmxk` calls the kernel only.* The kernel counts the BIOS syscalls that still come
   in, by number; each `mx_bios_*` left in `libmxk` becomes a kernel service or goes.
 - *2h-4, the kernel without the BIOS.* Its own vectors (refill, common, interrupt) and syscall

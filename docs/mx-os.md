@@ -37,7 +37,8 @@ memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-
 - Start: the kernel loads the ELF (from `host:`, `usb0:`, `mx4sio0:`, `ata0:`, ...) and runs it in a thread
   at priority 64: one of the kernel's own threads for a `libmxk` program of version 10, which
   uses the kernel's threads, semaphores and interrupt dispatch (`kernel.md`, Interrupts and
-  threads); for every other program the kernel first starts again with the BIOS's threads. End: back to the kernel, then the shell (`mc0:/MXOS/MXSHELL.ELF`) if it started
+  threads); any other ELF (a standalone one on `libmx`, ps2sdk's, an older `libmxk`, a loader
+  such as ps2link) is refused: mxboot or a legacy loader starts those. End: back to the kernel, then the shell (`mc0:/MXOS/MXSHELL.ELF`) if it started
   the program. A `libmxk` program (version 8 on) ends without a restart: the kernel removes its
   threads, semaphores and interrupt handlers, waits for its IOP calls, resets the units and
   empties the caches (`kernel.md`, The end of a program).
