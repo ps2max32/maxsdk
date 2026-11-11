@@ -298,6 +298,13 @@ Steps, each on the PS2 on its own:
   `mxboot-install-mxos.elf` from now on.
 - *2h-3, `libmxk` calls the kernel only.* The kernel counts the BIOS syscalls that still come
   in, by number; each `mx_bios_*` left in `libmxk` becomes a kernel service or goes.
+  2h-3a done 2026-11-11 (the count, `kernel.md`), measured on PCSX2 over the MXOS tests (k29-k45,
+  vm11-vm36, display): none makes a BIOS syscall but SetGsCrt (0x02: once in vm11, vm12, vm13,
+  vm16, 18 times in display), which `gs.c` calls in the program when the kernel's video timing
+  does not know the console (PCSX2's). Threads, semaphores, interrupt handlers and SIF DMA all
+  go through the kernel already. Next (2h-3b): the BIOS's paths out of `libmxk` (they are
+  `libmx`'s), SetGsCrt through the kernel only, and a build check that `libmxk.a` calls no
+  `mx_bios_*`.
 - *2h-4, the kernel without the BIOS.* Its own vectors (refill, common, interrupt) and syscall
   entry, its threads without the BIOS's carrier thread, the SIF's software registers its own.
 - *2h-5, the first MiB for the kernel.* The BIOS's memory (0x0 - 0x7_FFFF) is the kernel's

@@ -224,6 +224,15 @@ with them: the kernel's restart with the BIOS's threads for such a program (`bio
 loader's start by ExecPS2 (so mxkernel-high, itself a standalone ELF, no longer starts), and the
 replaced BIOS `Exit` (syscall 4) for programs that did not return through the kernel.
 
+The BIOS syscalls a program still makes are counted (2026-11-11, mx OS plan step 2h-3;
+`apps/mxos/ee/ksys.S`, `kirq.c`): the kernel points the BIOS's exception table entry for
+syscalls (0x8001_5360, `docs/bios.md`) at a stub that counts, by `v1 & 0xFF` (an i-call's negative
+number at 0x81-0xFF), the syscalls of the program the kernel started last (the current ASID its,
+EPC in its own code: not the kernel's below 1 MiB, not the BIOS's in kseg0/kseg1), then goes on
+into the BIOS's dispatcher; the table is the BIOS's again whenever the interrupt table is
+(`kirq_off`). At the program's end the log has `BIOS syscalls: N, by number:` and the numbers
+with their counts (calls made through the kernel's services are the kernel's and not counted).
+
 Version 22: the video timing without the BIOS (plan step 2g; `apps/mxos/ee/kvideo.c`), and
 `iop_write` (below). maxsdk
 computes the CRTC registers (SMODE1 with the PLL, SYNCH1, SYNCH2, SYNCV, SRFSH, SMODE2) from a
