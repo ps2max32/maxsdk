@@ -24,6 +24,13 @@ int mx_thread_prio(int id);
 int mx_thread_set_prio(int id, int prio);
 /* Let the other ready threads of the same priority run. */
 void mx_thread_yield(void);
+/* Let the ready threads of priority prio run in turn (one goes to the end of
+   its queue): the EE's threads are not time-sliced. */
+void mx_thread_rotate(int prio);
+/* Sleep until another thread wakes this one up (mx_thread_wakeup); a
+   wake-up that came first is kept, and taken. */
+void mx_thread_sleep(void);
+void mx_thread_wakeup(int id);
 /* Sleep at least us microseconds while other threads run (0: mx_thread_yield).
    From a thread, not an interrupt handler. Takes EE timer 0 (<mx/timer.h>); up
    to 16 threads sleep at once, more wait in mx_delay_us. */

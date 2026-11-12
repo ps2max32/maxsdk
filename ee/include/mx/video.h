@@ -10,7 +10,6 @@
    others are gsKit's start values and have not been checked on a screen
    (docs/gif-gs.md); a mode is a plain struct, so copy one and adjust it. */
 
-#include <mx/bios.h>
 #include <mx/crtc.h>
 #include <mx/types.h>
 
@@ -74,10 +73,8 @@ int mx_video_set(const struct mx_video_mode *m);
 u32 mx_video_field(void);
 /* The board's offsets of the active area for a mode (the BIOS's
    GetGsDxDyOffset, as gsKit uses for modes other than NTSC/PAL). Only BIOSes
-   newer than 2001-06-08 have it; the caller must know. */
-MX_INLINE void mx_video_board_offset(int code, int *dx, int *dy) {
-  int dw, dh;
-  mx_bios_get_gs_dxdy_offset(code, dx, dy, &dw, &dh);
-}
+   newer than 2001-06-08 have it; the caller must know. An MXOS program asks
+   the kernel (version 23; 0, 0 from an older one). */
+void mx_video_board_offset(int code, int *dx, int *dy);
 
 #endif

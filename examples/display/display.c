@@ -252,6 +252,13 @@ int main(int argc, char **argv) {
   /* n<count>: only the modes first .. first + count - 1 (a TV without the others) */
   int nmodes = count && first + count < NMODES ? first + count : NMODES;
   mx_gs_init_video(&mx_video_ntsc);
+  /* the board's offsets of the progressive modes (the kernel's, version 23) */
+  static const u8 hd[] = {0x50, 0x51, 0x52, 0x53};
+  for (u32 i = 0; i < sizeof hd; i++) {
+    int dx, dy;
+    mx_video_board_offset(hd[i], &dx, &dy);
+    mx_printf("display: board offset of code %02x: %d, %d\n", hd[i], dx, dy);
+  }
   set_mode(first);
   int pad = mx_pad_init() >= 0, manual = 0;
   /* until a button is pressed: every mode, then every scene, a second each */

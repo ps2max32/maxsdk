@@ -4,6 +4,7 @@
    with a normal-mode drain, cycle stealing, channels running together, and
    the cost of trace sampling. */
 
+#include <mx/bios.h>
 #include <mx/emit.h>
 #include <mx/mx.h>
 

@@ -7,6 +7,7 @@
    merges with its free neighbours in the same segment. A pinned segment
    with nothing used goes back to the pool. */
 
+#include <mx/bios.h>
 #include <mx/mem.h>
 #include <mx/mx.h>
 #include <mx/vm.h>

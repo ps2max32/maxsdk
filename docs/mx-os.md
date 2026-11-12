@@ -70,6 +70,12 @@ Retail PS2s have 32 MiB; never count on more.
    started by mxboot, a legacy loader or PCSX2's `-elf`, not by the kernel; the kernel's own calls
    (processes, ports, launch, the home menu) return -1. Same source for both, no `#ifdef`.
    libmxk calls no BIOS (a build check, `kernel.md`); libmx is the one with the BIOS's paths.
+   An MXOS program makes no BIOS calls either, and does not build with one (plan step 2h-3c):
+   `<mx/bios.h>` is for `MX_TARGET=standalone` only (an `#error` otherwise, and `<mx/mx.h>` no
+   longer includes it), libmxk has no BIOS stubs (a link error), and the link checks the ELF
+   for syscall instructions (`tools/mxos-bios-check.sh`, from `$(call link)`). What a program
+   needs of the BIOS is the kernel's: threads in `<mx/thread.h>` (`mx_thread_sleep`, `_wakeup`,
+   `_rotate`), the board's video offsets in `mx_video_board_offset` (kernel version 23).
    `MX_TARGET=mxos-core` (`MX_KERNEL=1` with `phys`): an MXOS program all in core, without VM,
    for now only for a program that stays while another runs (the shell, a service, one that
    starts others and waits): the kernel has one VM, the program in front's. It goes once every

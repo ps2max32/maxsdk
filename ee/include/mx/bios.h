@@ -4,7 +4,17 @@
 #define MX_BIOS_H
 
 /* BIOS (EE kernel) syscalls. Names ending in an i-prefix call are for
-   interrupt handlers only. */
+   interrupt handlers only.
+
+   Not for MXOS programs (mx OS plan step 2h-3c): the kernel is their way
+   to the BIOS's services (docs/mx-os.md). For maxsdk itself, the kernel
+   and standalone ELFs: MX_BIOS_CALLS, which mk/maxsdk.mk defines for
+   MX_TARGET=standalone. */
+#ifndef MX_BIOS_CALLS
+#error "<mx/bios.h>: an MXOS program makes no BIOS calls (MX_TARGET=standalone only, docs/mx-os.md)"
+#endif
+
+#include <mx/kthreads.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -65,10 +75,6 @@ unsigned long long mx_bios_gs_get_imr(void);
 unsigned long long mx_bios_gs_put_imr(unsigned long long imr);
 unsigned long long mx_bios_igs_put_imr(unsigned long long imr);
 void mx_bios_set_syscall(int number, void *handler);
-/* maxsdk's own (src/base/excset.c): the kernel's syscall entry and exception
-   table once it has them (mx OS plan 2h-4), else the BIOS's calls above */
-void mx__set_syscall(int number, void *handler);
-void *mx__set_handler(int code, void (*handler)(void));
 void mx_bios_print(const char *fmt, ...);
 int mx_bios_sif_dma_stat(unsigned id);
 unsigned mx_bios_sif_set_dma(void *transfers, int count);
@@ -121,44 +127,10 @@ int mx__sys_poll_sema(int id);
 int mx__sys_ipoll_sema(int id);
 int mx__sys_refer_sema_status(int id, void *status);
 
-struct mx_kthreads {
-  int (*add_intc_handler)(int cause, int (*handler)(int cause, void *arg, void *addr), int next, void *arg);
-  int (*remove_intc_handler)(int cause, int id);
-  int (*add_dmac_handler)(int channel, int (*handler)(int channel, void *arg, void *addr), int next, void *arg);
-  int (*remove_dmac_handler)(int channel, int id);
-  int (*enable_intc)(int cause);
-  int (*disable_intc)(int cause);
-  int (*enable_dmac)(int channel);
-  int (*disable_dmac)(int channel);
-  int (*ienable_intc)(int cause);
-  int (*idisable_intc)(int cause);
-  int (*ienable_dmac)(int channel);
-  int (*idisable_dmac)(int channel);
-  int (*create_thread)(void *param);
-  int (*delete_thread)(int id);
-  int (*start_thread)(int id, void *arg);
-  void (*exit_thread)(void);
-  void (*exit_delete_thread)(void);
-  int (*terminate_thread)(int id);
-  int (*change_thread_priority)(int id, int priority);
-  int (*rotate_thread_ready_queue)(int priority);
-  int (*get_thread_id)(void);
-  int (*suspend_thread)(int id);
-  int (*resume_thread)(int id);
-  int (*refer_thread_status)(int id, void *status);
-  int (*sleep_thread)(void);
-  int (*wakeup_thread)(int id);
-  int (*iwakeup_thread)(int id);
-  int (*create_sema)(void *param);
-  int (*delete_sema)(int id);
-  int (*signal_sema)(int id);
-  int (*isignal_sema)(int id);
-  int (*wait_sema)(int id);
-  int (*poll_sema)(int id);
-  int (*ipoll_sema)(int id);
-  int (*refer_sema_status)(int id, void *status);
-};
-extern const struct mx_kthreads *mx__kthreads;
+/* maxsdk's own (src/base/excset.c): the kernel's syscall entry and exception
+   table once it has them (mx OS plan 2h-4), else the BIOS's calls above */
+void mx__set_syscall(int number, void *handler);
+void *mx__set_handler(int code, void (*handler)(void));
 
 #ifdef __cplusplus
 }

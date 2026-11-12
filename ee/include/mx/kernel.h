@@ -13,7 +13,7 @@
 #include <mx/irq.h>
 #include <mx/mem.h>
 #include <mx/sif.h>
-#include <mx/bios.h>
+#include <mx/kthreads.h>
 #include <mx/types.h>
 #include <mx/video.h>
 #include <mx/proc.h>
@@ -21,7 +21,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 22
+#define MX_KERNEL_VERSION 23
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -242,6 +242,10 @@ struct mxk_services {
      caller's physical one: mx_iop_write), waited for. SIF1 is the kernel's
      ring then: a program's own SifSetDma would meet it */
   int (*iop_write)(u32 iop, u32 src, u32 size);
+  /* version 23: the board's offsets of a video mode's active area
+     (mx_video_board_offset: the BIOS's GetGsDxDyOffset; 0, 0 where the BIOS
+     does not have it), for an MXOS program, which makes no BIOS calls */
+  void (*board_offset)(int code, int *dx, int *dy);
 };
 int mx__iop_write_phys(u32 iop, u32 src, u32 size);
 /* the kernel's own writer of the CRTC timing, used by mx_video_set in it

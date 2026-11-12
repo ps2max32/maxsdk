@@ -259,6 +259,20 @@ static int crt(const struct mx_video_mode *m) {
   return 0;
 }
 
+void mx_video_board_offset(int code, int *dx, int *dy) {
+#ifdef MX_KERNEL
+  /* libmxk: the kernel's (version 23) */
+  if (mx__kernel && mx__kernel->version >= 23) {
+    mx__kernel->board_offset(code, dx, dy);
+    return;
+  }
+  *dx = *dy = 0;
+#else
+  int dw, dh;
+  mx_bios_get_gs_dxdy_offset(code, dx, dy, &dw, &dh);
+#endif
+}
+
 static void irq_on(void) {
   CSR = MX_BIT(GS_CSR_SIGNAL) | MX_BIT(GS_CSR_FINISH);
   mx_irq_intc(MX_INTC_GS, gs_irq, 0);

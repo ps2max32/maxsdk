@@ -13,6 +13,7 @@
    mx_gs.vsync), and what a stub costs (a loop's rate with and without). The
    entries are set back at the end. Run by mxlink (a program on libmx). */
 
+#include <mx/bios.h>
 #include <mx/mx.h>
 
 #define TABLE 0x80015380u

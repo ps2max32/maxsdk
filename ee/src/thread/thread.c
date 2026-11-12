@@ -109,6 +109,12 @@ int mx_thread_set_prio(int id, int prio) { return mx_bios_change_thread_priority
 
 void mx_thread_yield(void) { mx_bios_rotate_thread_ready_queue(mx_thread_prio(mx_thread_self())); }
 
+void mx_thread_rotate(int prio) { mx_bios_rotate_thread_ready_queue(prio); }
+
+void mx_thread_sleep(void) { mx_bios_sleep_thread(); }
+
+void mx_thread_wakeup(int id) { mx_bios_wakeup_thread(id); }
+
 void mx_thread_join(int id) {
   struct start *s = id >= 0 && id < MAX_THREADS ? started[id] : 0;
   if (!s)

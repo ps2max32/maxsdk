@@ -14,6 +14,7 @@
      (at EXL = 1) sets EPC and ERETs
    - the cost of a refill and of an invalid/modified round trip */
 
+#include <mx/bios.h>
 #include <mx/mx.h>
 
 #define VA 0x08000000u

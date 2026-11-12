@@ -12,6 +12,7 @@
    the table back. Measured: both threads ran (their counts), the switches.
    Run by mxlink (a program on libmx). */
 
+#include <mx/bios.h>
 #include <mx/mx.h>
 
 #define TABLE 0x80015380u

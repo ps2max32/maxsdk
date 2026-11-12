@@ -10,7 +10,7 @@ make picolibc        # picolibc 1.8.9 (checkout + ee/libc/picolibc-r5900.patch) 
 make libc            # libmxc.a, librt.a and the C/C++ tests
 make test-host       # host tests: generated fields, packet bytes
 make check-deps      # fails if anything references ps2sdk
-make gen             # regenerate ee/include/mx/hw/*.h, ee/include/mx/bios.h, ee/src/base/syscalls.S
+make gen             # regenerate ee/include/mx/hw/*.h, ee/include/mx/bios.h, kthreads.h, ee/src/base/syscalls.S
 ```
 
 VU programs are HLSL (`examples/*/*.hlsl`, `tests/ps2/*.hlsl`, [docs/hlsl.md](docs/hlsl.md)).

@@ -239,10 +239,20 @@ thread, semaphore and interrupt handler calls (`ksys.c`) have no BIOS path, its 
 message without them: the BIOS's `Exit`, the one BIOS call it keeps), its SIF DMA calls are
 `kstubs.c`'s (the kernel's services come first; one that is reached anyway ends the program
 with a message), and `gs.c` never calls `SetGsCrt`: the kernel's `crtc_set` does, for a mode the
-BIOS has, where its own timing does not know the console (PCSX2; `apps/mxos/ee/kvideo.c`). The
-build checks it (`tools/libk-bios-check.sh`: no object of `libmxk.a` but `syscalls.S` calls a
-BIOS stub other than `Exit` or has a syscall). A `libmxk` program built so needs a kernel with
-this `crtc_set` for a video mode on PCSX2. `libmx` keeps the BIOS's paths.
+BIOS has, where its own timing does not know the console (PCSX2; `apps/mxos/ee/kvideo.c`). A
+`libmxk` program built so needs a kernel with this `crtc_set` for a video mode on PCSX2. `libmx`
+keeps the BIOS's paths.
+
+Since 2026-11-12 (plan step 2h-3c) `libmxk` has no BIOS stubs at all (`syscalls.S` is `libmx`'s
+and the kernel's), and its one syscall is the `Exit` of `mx__no_kernel_exit` (`start.c`). The
+build checks `libmxk.a` and every MXOS program it links (`tools/mxos-bios-check.sh`, in
+`$(call link)` of `mk/maxsdk.mk`): a syscall instruction anywhere else fails the link and
+removes the ELF. `<mx/bios.h>` is not for MXOS programs: it stops with an `#error` unless
+`MX_BIOS_CALLS` is defined (`mk/maxsdk.mk` does for `MX_TARGET=standalone`, maxsdk's Makefile
+for its library), and no public header includes it; the kernel's thread table, which
+`<mx/kernel.h>` needs, is `<mx/kthreads.h>`. A program's `mx_video_board_offset` (the BIOS's
+GetGsDxDyOffset) asks the kernel (version 23, `board_offset`): the kernel calls the BIOS for it
+where the ROM has the call (ROMVER after 2001-06-08), into its own variables.
 
 The kernel's own syscall entry (2026-11-12, plan step 2h-4a; `apps/mxos/ee/ksys.S`, `kirq.c`):
 the stub in the exception table's syscall entry also runs the kernel's own numbers (the

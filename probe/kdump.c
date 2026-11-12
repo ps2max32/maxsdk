@@ -2,6 +2,7 @@
    read in kernel mode by a syscall handler. Arguments: [hex address [hex
    words]]; the default is the vectors, 0x80000000 + 0x100 words. */
 
+#include <mx/bios.h>
 #include <mx/mx.h>
 
 /* One word, read by a syscall handler (the kernel runs it in kernel mode):

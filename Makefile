@@ -62,13 +62,16 @@ vpath %.c $(EXAMPLE_DIRS)
 all: $(OUT)/libmx.a $(LIBK) $(LIBKERN) $(CRT0) $(TESTS) $(PROBES) $(EXAMPLES) $(OUT)/batch/ps2batch.elf
 lib: $(OUT)/libmx.a $(LIBK) $(LIBKERN) $(CRT0)
 
+# the library's own sources: <mx/bios.h> is theirs (an MXOS program's is not)
+LIB_CFLAGS = $(CFLAGS) -DMX_BIOS_CALLS=1
+
 $(OUT)/obj/%.c.o: $(HERE)/%.c $(HDRS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(LIB_CFLAGS) -c $< -o $@
 
 $(OUT)/obj/%.S.o: $(HERE)/%.S
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(LIB_CFLAGS) -c $< -o $@
 
 # The mem*/str* bodies must not be turned into calls to themselves.
 $(OUT)/obj/ee/src/base/string.c.o: CFLAGS += -fno-builtin
@@ -91,7 +94,7 @@ $(LIBKERN): $(LIB_OBJS)
 
 $(OUT)/objk/%.c.o: $(HERE)/%.c $(HDRS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -DMX_KERNEL=1 -c $< -o $@
+	$(CC) $(LIB_CFLAGS) -DMX_KERNEL=1 -c $< -o $@
 
 LIBK_SRCS = ee/src/base/start.c ee/src/base/sif.c ee/src/base/kstubs.c ee/src/base/proc.c \
             ee/src/thread/sleep.c ee/src/irq/timer.c \
@@ -99,19 +102,19 @@ LIBK_SRCS = ee/src/base/start.c ee/src/base/sif.c ee/src/base/kstubs.c ee/src/ba
 # what is the kernel's: no code in libmxk (sifdma.c: kstubs.c's instead)
 LIBK_OUT  = ee/src/base/start.c ee/src/base/sif.c ee/src/base/proc.c ee/src/thread/sleep.c \
             ee/src/irq/timer.c ee/src/base/ksys.c ee/src/gs/gs.c ee/src/gs/frame.c \
-            ee/src/base/sifdma.c ee/src/base/excset.c \
+            ee/src/base/sifdma.c ee/src/base/excset.c ee/src/base/syscalls.S \
             ee/src/base/exception.c ee/src/base/exception.S \
             ee/src/vm/vm.c ee/src/vm/mem.c ee/src/vm/heap.c ee/src/vm/image.c ee/src/vm/tlb.S
 LIBK_OBJS = $(filter-out $(LIBK_OUT:%=$(OUT)/obj/%.o),$(LIB_OBJS)) $(LIBK_SRCS:%=$(OUT)/objk/%.o)
 
-# mx OS plan 2h-3: libmxk calls the kernel only. No BIOS syscall stub of
-# syscalls.S is called from its other objects but Exit (its start-up's stop
-# without a kernel), and no object but syscalls.S has a syscall of its own
-# (tools/libk-bios-check.sh).
+# mx OS plan 2h-3, 2h-3c: libmxk calls the kernel only. It has no BIOS syscall
+# stubs (syscalls.S), and no syscall instruction but its start-up's stop when no
+# kernel started the program (tools/mxos-bios-check.sh; mk/maxsdk.mk checks
+# every MXOS program the same way).
 $(LIBK): $(LIBK_OBJS)
 	rm -f $@
 	$(LLVM)/llvm-ar rcs $@ $^
-	$(HERE)/tools/libk-bios-check.sh $(LLVM) $@ mx_bios_exit || { rm -f $@; exit 1; }
+	$(HERE)/tools/mxos-bios-check.sh $(LLVM) $@ || { rm -f $@; exit 1; }
 
 # tests linked into VM (ee/ld/maxsdk-vm.ld), started by mxlink (or mxlink's EMU build)
 VM_TESTS = vm11_vmlink vm12_elfpage vm13_guards vm16_lock vm21_crash vm22_net vm23_pad vm24_home vm25_ids vm26_launch vm27_pads vm28_asid vm29_long vm30_dmairq vm31_rumble vm32_side vm33_msg vm34_child vm35_timers vm36_dir

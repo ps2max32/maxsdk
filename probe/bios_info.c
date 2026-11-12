@@ -3,6 +3,7 @@
    type, read through the IOP file server. Video modes beyond NTSC/PAL need
    a newer kernel; GetGsDxDyOffset only exists after 2001-06-08 (gsKit). */
 
+#include <mx/bios.h>
 #include <mx/sif.h>
 #include "../tests/ps2/t.h"
 

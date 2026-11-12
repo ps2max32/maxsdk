@@ -3,6 +3,7 @@
    per memory type, DMA throughput per channel, MFIFO, and the VIF0
    uncached-tag case. Prints "name value unit" lines for docs/. */
 
+#include <mx/bios.h>
 #include <mx/mx.h>
 
 #define SPR ((u8 *)0x70000000)

@@ -177,6 +177,17 @@ int mx_loader_launch(int argc, const char *args, u32 args_len, const char *swap)
 
 void mx__fio_base(const char *argv0);
 void mx__kstart(void *heap_lo, void *heap_hi);
+#ifdef MX_KERNEL
+/* libmxk without a kernel: the BIOS's Exit, the one syscall an MXOS program
+   has (libmxk has no BIOS stubs; tools/mxos-bios-check.sh allows this one) */
+static void mx__no_kernel_exit(int status) __attribute__((noreturn, noinline, used));
+static void mx__no_kernel_exit(int status) {
+  register int a0 __asm__("$4") = status;
+  __asm__ volatile("li $3, 4\n\tsyscall" : : "r"(a0) : "$3", "memory");
+  __builtin_unreachable();
+}
+#endif
+
 void mx__main(void) __attribute__((noreturn));
 void mx__main(void) {
   struct mx_args *a = &mx__kernel_args;
@@ -198,11 +209,12 @@ void mx__main(void) {
 #ifdef MX_KERNEL
   /* libmxk: on the kernel's threads only (version 10 on, mx OS plan 2h-3);
      no way to go on without them: its memory, files and VM are the
-     kernel's. The BIOS's Exit then is the one BIOS call libmxk keeps. */
+     kernel's. The BIOS's Exit then is the one BIOS call libmxk keeps
+     (mx__no_kernel_exit). */
   if (!mx__kthreads) {
     mx_debug_sinks(MX_SINK_SIO);
     mx_printf("maxsdk: this program needs mx-kernel: start it with mxlink (apps/mxos)\n");
-    mx_bios_exit(255);
+    mx__no_kernel_exit(255);
   }
 #endif
   if (mx__kthreads) {

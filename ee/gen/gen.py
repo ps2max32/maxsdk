@@ -115,7 +115,16 @@ def kernels():
 def gen_bios_h():
     out = [HEADER, "#ifndef MX_BIOS_H", "#define MX_BIOS_H", "",
            "/* BIOS (EE kernel) syscalls. Names ending in an i-prefix call are for",
-           "   interrupt handlers only. */", "",
+           "   interrupt handlers only.",
+           "",
+           "   Not for MXOS programs (mx OS plan step 2h-3c): the kernel is their way",
+           "   to the BIOS's services (docs/mx-os.md). For maxsdk itself, the kernel",
+           "   and standalone ELFs: MX_BIOS_CALLS, which mk/maxsdk.mk defines for",
+           "   MX_TARGET=standalone. */",
+           "#ifndef MX_BIOS_CALLS",
+           '#error "<mx/bios.h>: an MXOS program makes no BIOS calls (MX_TARGET=standalone only, docs/mx-os.md)"',
+           "#endif", "",
+           "#include <mx/kthreads.h>", "",
            "#ifdef __cplusplus", 'extern "C" {', "#endif", ""]
     for name, num, proto, *_ in D.SYSCALLS:
         ret, args, attrs = split_proto(proto)
@@ -127,7 +136,21 @@ def gen_bios_h():
     for name, num, proto in kernels():
         ret, args, attrs = split_proto(proto)
         out.append(f"{ret} mx__sys_{name[len('mx_bios_'):]}({args}){attrs};")
-    out += ["", "struct mx_kthreads {"]
+    out += ["", "/* maxsdk's own (src/base/excset.c): the kernel's syscall entry and exception",
+            "   table once it has them (mx OS plan 2h-4), else the BIOS's calls above */",
+            "void mx__set_syscall(int number, void *handler);",
+            "void *mx__set_handler(int code, void (*handler)(void));"]
+    out += ["", "#ifdef __cplusplus", "}", "#endif", "", "#endif", ""]
+    return "\n".join(out)
+
+
+def gen_kthreads_h():
+    out = [HEADER, "#ifndef MX_KTHREADS_H", "#define MX_KTHREADS_H", "",
+           "/* The kernel's threads, semaphores and interrupt handlers (mx-kernel,",
+           "   docs/mx-os-plan.md step 2d): its table, which libmxk calls (src/base/ksys.c),",
+           "   with the arguments of the BIOS's calls of the same names. */", "",
+           "#ifdef __cplusplus", 'extern "C" {', "#endif", "",
+           "struct mx_kthreads {"]
     for name, num, proto in kernels():
         ret, args, attrs = split_proto(proto)
         out.append(f"  {ret} (*{name[len('mx_bios_'):]})({args});")
@@ -210,6 +233,7 @@ def main():
     write("include/mx/hw/regs.h", gen_regs())
     write("include/mx/hw/formats.h", gen_formats())
     write("include/mx/bios.h", gen_bios_h())
+    write("include/mx/kthreads.h", gen_kthreads_h())
     write("src/base/syscalls.S", gen_syscalls_s())
     write("src/base/ksys.c", gen_ksys_c())
     write("../tests/host/test_gen.c", gen_test())
