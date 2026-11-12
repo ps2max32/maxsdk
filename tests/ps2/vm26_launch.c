@@ -16,8 +16,10 @@ static char args[512];
 
 int main(int argc, char **argv) {
   if (argc > 1 && !strcmp(argv[1], "child")) {
+    /* 7, not 0: if this one ran in the caller's place (it did not wait),
+       the run ends with 7 and fails */
     mx_printf("vm26_launch: the launched program runs\n");
-    return 0;
+    return 7;
   }
   if (argc > 2 && !strcmp(argv[1], "read")) {
     static u8 buf[16384] __attribute__((aligned(64)));
@@ -60,7 +62,7 @@ int main(int argc, char **argv) {
   int st = mx_loader_launch(count, args, n, swap);
   if (st >= 0) {
     mx_printf("vm26_launch: back from it, status %d\n", st);
-    return st;
+    return first ? st : st != 7; /* its own child ends with 7 */
   }
   mx_printf("vm26_launch: no launch\n");
   return 1;

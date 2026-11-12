@@ -168,7 +168,12 @@ beside it (`launch_beside`, `proc_spawn`), so both run beside the new one in fro
 own address space (its cores' TLB entries kept after those of the one below, a switch between
 two of them goes through the front's state). Its end unparks it (it is in front again, the
 service beside); the service's `MX_EVENT_END` is for the program it started. One that waits
-(`launch` without beside) above a service takes the restart's way, as before; a program that
+(`launch` without beside) above a service stays too when it has VM (its core pinned frames of
+the VM; before 2026-11-12 it took the restart's way and the other ran in its place, so on the
+PS2, where mxlink's app is always the service, `mx_loader_launch` never waited: `k29_stay`,
+`vm26_launch` and `vm38_vmbeside` passed there falsely, their child ending with 0; it ends with
+7 now); one without VM still takes the restart's way (it crashed at once: its stack in the next
+one's core). A program that
 takes all memory does not start while two are parked (the service's core is not its to give).
 Before, with mxlink's app as the service on the card, such a start failed (-1): `k31`-`k36` and
 `k42` failed on the PS2.

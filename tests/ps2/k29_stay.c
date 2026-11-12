@@ -2,7 +2,8 @@
    at a run of its own (MX_CORE_HEAP) starts another and goes on when that
    ends: mx_loader_launch returns its exit status, and its memory, its core
    offset and its ASID are as they were. Started by mxlink:
-     k29_stay.elf host:vm26_launch.elf child     (status 0 expected)
+     k29_stay.elf host:vm26_launch.elf child     (status 0 expected; the
+   child ends with 7, so a run in which it took this one's place fails)
    The other's run goes below this one's. */
 #include "t.h"
 #include <mx/loader.h>
@@ -45,7 +46,7 @@ int main(int argc, char **argv) {
   }
   int st = mx_loader_launch(argc - 1, args, n, 0);
   mx_printf("k29: back, status %d\n", st);
-  CHECK_EQ(st, 0);
+  CHECK_EQ(st, 7);
   CHECK_EQ(mx__core_off, off);
   CHECK_EQ(asid(), a);
   u32 bad = 0;

@@ -5,7 +5,8 @@
    "child" (which fills the same addresses with another pattern and checks
    it), first waiting for it (mx_loader_launch), then beside it
    (mx_proc_spawn, mx_proc_wait); after each its own pattern must be
-   intact, and its VM still work. Started by mxlink:
+   intact, and its VM still work. The child ends with 7: a run in which it
+   took this one's place (it did not wait) ends with 7 and fails. Started by mxlink:
      vm38_vmbeside.elf     (status 0 expected) */
 
 #include "t.h"
@@ -46,7 +47,8 @@ int main(int argc, char **argv) {
     u32 w = wrong(7);
     mx_printf("vm38: child, process %d: %u words not zero at its start, %u wrong\n",
               mx_proc_self(), z, w);
-    return z || w ? 1 : 0;
+    /* 7, not 0: a run in which it took the caller's place fails */
+    return z || w ? 1 : 7;
   }
   CHECK(mx_vm_active());
   fill(1);
@@ -58,7 +60,7 @@ int main(int argc, char **argv) {
   int st = mx_loader_launch(2, args, n, 0);
   u32 w = wrong(1);
   mx_printf("vm38: 1 waited: the child's status %d; %u words wrong here\n", st, w);
-  CHECK_EQ(st, 0);
+  CHECK_EQ(st, 7);
   CHECK_EQ(w, 0);
 
   /* 2: beside it */
@@ -68,7 +70,7 @@ int main(int argc, char **argv) {
   w = wrong(1);
   mx_printf("vm38: 2 beside: process %d, wait %d, status %d; %u words wrong here\n", id, r, st, w);
   CHECK_EQ(r, 1);
-  CHECK_EQ(st, 0);
+  CHECK_EQ(st, 7);
   CHECK_EQ(w, 0);
 
   /* its VM still works */
