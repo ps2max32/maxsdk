@@ -101,7 +101,7 @@ ending, crashing or using the pad while the other runs.
 
 Version 13: processes and messages (`<mx/proc.h>`, `<mx/msg.h>`; `apps/mxos/ee/kmsg.c`, `exec.c`;
 `docs/mx-os-apps-plan.md`, step 2e-3). `proc_self` is the calling thread's process, `proc_list`
-the program in front and the one beside it or waiting for it (id, state, core run, path).
+the program in front and those beside it or waiting for it (id, state, core run, path).
 Ports have names of up to 15 characters, 8 at once. A message is copied twice, each time in
 the thread of the process it belongs to and so in its address space (threads run in user
 mode: the kernel cannot reach another's memory): the request into one of 4 slots of 256 bytes
@@ -162,6 +162,16 @@ and after a restart, the kernel starts the service in `mc0:/MXOS/SERVICES.CFG` (
 its arguments; on PCSX2 `host:services.txt`, the runner's `MXSERVICE`) in place of the shell.
 With a service beside, the kernel prints no test end marker: it is the service's (2e-4:
 mxlink's, for the host's runs).
+Since 2026-11-12 the parked programs are a stack of two (`exec.c`'s `parks`, `end.c`'s
+`parked_at`, `kproc.c`'s `sides`): above a service the program in front may start another
+beside it (`launch_beside`, `proc_spawn`), so both run beside the new one in front, each in its
+own address space (its cores' TLB entries kept after those of the one below, a switch between
+two of them goes through the front's state). Its end unparks it (it is in front again, the
+service beside); the service's `MX_EVENT_END` is for the program it started. One that waits
+(`launch` without beside) above a service takes the restart's way, as before; a program that
+takes all memory does not start while two are parked (the service's core is not its to give).
+Before, with mxlink's app as the service on the card, such a start failed (-1): `k31`-`k36` and
+`k42` failed on the PS2.
 
 Version 19: timers are the kernel's service (`<mx/timer.h>`, `src/irq/timer.c`; the kernel
 builds its maxsdk with `MX_SOFT_TIMER=1`). Software timers (`mx_timer_add`, once or every

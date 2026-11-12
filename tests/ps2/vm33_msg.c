@@ -47,7 +47,7 @@ int main(void) {
     front += p[i].state == MX_PROC_FRONT && p[i].id == self && has(p[i].name, "vm33");
     beside += p[i].state == MX_PROC_BESIDE && p[i].id != self && has(p[i].name, "k32");
   }
-  CHECK_EQ(n, 2);
+  CHECK(n == 2 || n == 3); /* a service beside too (the host link's, on the card) */
   CHECK_EQ(front, 1);
   CHECK_EQ(beside, 1);
 
