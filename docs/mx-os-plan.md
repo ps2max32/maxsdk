@@ -359,6 +359,16 @@ Steps, each on the PS2 on its own:
     program's only: resident.ld) becomes one instance per process, switched with the ASID
     where `kproc.c` switches the rest of a process's state; the refill already writes the
     process's ASID (G = 0). Test: a VM program beside another (`k31_beside` as `mxos`).
+    Step 1 done 2026-11-12 (PCSX2): vm.c's tables of an address space are a `struct
+    vm_space` (one, `space0`, through `vs`), apart from the VM's frames, swap file, threads,
+    stats and trace; no change in behaviour. Next, as worked out: `vs` follows the running
+    thread's process (switched where `kproc.c` switches the ASID), and at each switch the VM's
+    TLB entries are cleared as at a vblank, so the TLB's table (`slot_page`) and `tlb.S`'s
+    fast refill are always the current space's; the LRU (`oldest`, `evict`) and the writer
+    take the victim's space explicitly (a frame's space next to `page_of`; stamps per space,
+    `refills` the VM's). Open: where a space's tables live. They are read by threads of every
+    process (user mode: not through kseg0) and under every ASID, but now come from the
+    program's core heap, which is mapped per ASID.
   - 3b, one frame pool: frames from one pool for every process's VM, in place of each
     process's own run below the core of the one beside.
   - 3c, one swap file for all processes, from `mc0:/MXOS/SWAP.CFG`.
