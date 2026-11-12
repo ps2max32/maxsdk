@@ -366,12 +366,18 @@ Steps, each on the PS2 on its own:
     TLB entries are cleared as at a vblank, so the TLB's table (`slot_page`) and `tlb.S`'s
     fast refill are always the current space's; the LRU (`oldest`, `evict`) and the writer
     take the victim's space explicitly (a frame's space next to `page_of`; stamps per space,
-    `refills` the VM's). Open: where a space's tables live. They are read by threads of every
-    process (user mode: not through kseg0) and under every ASID, but now come from the
-    program's core heap (`table()`: `mx__phys_alloc`), mapped per ASID at 0x10_0000 up; the
-    frames are what the kernel gives the program below its core (`exec.c`'s
-    `kernel_program`: LOW to `frames_hi`). So the tables need memory under a global (G = 1)
-    mapping, as the kernel's below 1 MiB, and the frames one pool for all (3b).
+    `refills` the VM's). Where a space's tables live: the program's core heap (`table()`) is
+    mapped per ASID, but tlb_init maps all of main memory globally at `MX_PHYS_WIN` (G = 1,
+    cached), where the frames are reached; so a space's tables are pinned frames of the pool
+    (`mx__vm_frames_take`), readable by every process's threads.
+    Step 2 done 2026-11-12 (PCSX2): several spaces in vm.c (`mx__vm_space_new`, `_switch`,
+    `_now`, `_free`): a frame's space next to its page (`frame_space`), stamps per space, the
+    LRU, the writer and the moves (`vacate`, `gather`, `pin_run`) over the pages of every
+    space; a switch clears the VM's TLB entries and points `tlb.S`'s fast refill at the new
+    space. `tests/ps2/vm37_spaces.c`: two spaces over the same addresses on 20 frames, every
+    word right after each switch (744 pages out, 680 in), a third space made and freed,
+    `mx__vm_check` consistent. Next (step 3): the kernel gives each VM program a space of its
+    own and switches it with the ASID (`kproc.c`), so a VM program may stay beside another.
   - 3b, one frame pool: frames from one pool for every process's VM, in place of each
     process's own run below the core of the one beside.
   - 3c, one swap file for all processes, from `mc0:/MXOS/SWAP.CFG`.
