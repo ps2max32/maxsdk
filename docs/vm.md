@@ -29,14 +29,18 @@ virtual memory at 0x0800_0000, in 32 KiB pages held in the physical memory left 
 
 * `MX_MEMORY=vm` (`mk/maxsdk.mk`) links with `ee/ld/maxsdk-vm.ld`: the program's own objects
   (text and rodata, then data and bss, each from a page) at 0x0800_0000, and the libraries'
-  code (since 2026-11-12, mx OS plan 4b); crt0, the libraries' code that runs with interrupts
-  off or before the VM is on (the objects listed in the script: libmxk's start-up, interrupt,
-  SIF, DMA, GS, VU, debug and string code; picolibc's `mem*`, `str*`), the libraries' rodata,
-  data and bss, libmxc's glue, the VU and HLSL objects, VU microcode, constructors, packets,
-  `MX_DMA_LINES` buffers, `mx_vm_config`, and what the program marks `MX_CORE_FN` /
-  `MX_CORE_DATA` stay core. `jal` reaches between the two. Each link of an MXOS program runs
-  `tools/pinned-check.py`: what an `MX_CORE_FN` function (an interrupt handler) or code after
-  a `di` calls must be core, else the link fails.
+  code and data (since 2026-11-12, mx OS plan 4b); crt0, the libraries' code and data that run
+  with interrupts off or before the VM is on (the objects listed in the script: libmxk's
+  start-up, interrupt, SIF, DMA, frame pipeline, GS, VU, debug, printf and string code;
+  picolibc's `mem*`, `str*`), libmxc's glue, the VU and HLSL objects, VU microcode,
+  constructors, packets, `MX_DMA_LINES` buffers, `mx_vm_config`, and what the program marks
+  `MX_CORE_FN` / `MX_CORE_DATA` / `MX_CORE_BSS` (a zero buffer, no room in the ELF) stay core.
+  `jal` reaches between the two. Each link of an MXOS program runs `tools/pinned-check.py`
+  (the link keeps its relocations, `--emit-relocs`, for it): what an `MX_CORE_FN` function (an
+  interrupt handler) or code after a `di` calls or reads must be core, else the link fails.
+  What it cannot see (a handler's argument, a DMA address) is checked when it is used:
+  `mx_irq_*` refuse a handler or argument in VM, and `mx_paddr_of`, `MX_UNCACHED` and
+  `MX_UCAB` of VM that is not pinned end the program with a report.
   A library linked as objects stays core when the program lists them in `MX_CORE_OBJS`
   (the link puts them in an archive of their own): Quake's `MX_CORE_OBJS = $(MXGL_OBJS)`.
 * `MX_VM_TEXT=core` (with `MX_MEMORY=vm`, `ee/ld/maxsdk-vm-coretext.ld`): the program's code

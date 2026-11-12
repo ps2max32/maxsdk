@@ -36,8 +36,8 @@ MX_CORE_FN static void core_vblank(void *arg) { ((struct counts *)arg)->vblank++
 static void vm_handler(void *arg) { (void)arg, vm_counts.timer++; }
 static void vm_server(int fno, void *arg) { (void)fno, (void)arg, vm_counts.vblank++; }
 
-static u32 refused;
-static const char *last;
+static u32 refused MX_CORE_BSS; /* the hook's (MX_CORE_FN): core */
+static const char *last MX_CORE_BSS;
 MX_CORE_FN static void hook(const void *p, const char *what) {
   (void)p;
   refused++;

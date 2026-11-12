@@ -1751,6 +1751,8 @@ void mx__paddr_fault(const void *p, u32 bytes) {
             "only through mx_vm_pin (<mx/dma.h>)\n",
             p, bytes);
   MX_TEST_END(255);
+  if (mx__crash_end)
+    mx__crash_end(255); /* in a kernel: the program's end */
   mx_exit(255);
 }
 
@@ -2041,6 +2043,10 @@ void mx__core_fault(const void *p, const char *what) {
             "(MX_CORE_FN, MX_CORE_DATA, pinned memory; <mx/cpu.h>, <mx/mem.h>)\n",
             what, p);
   MX_TEST_END(255);
+  /* in a kernel: the program's end, not the kernel's mx_exit (that hung the
+     PS2) */
+  if (mx__crash_end)
+    mx__crash_end(255);
   mx_exit(255);
 }
 

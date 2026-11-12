@@ -84,7 +84,7 @@ link_objs = $(filter-out $(MX_CORE_OBJS),$(2)) --whole-archive $(1:.elf=.core.a)
 link     = $(if $(filter vm,$(MX_MEMORY)),$(if $(MX_CORE_OBJS),rm -f $(1:.elf=.core.a) && \
              $(LLVM)/llvm-ar rcs $(1:.elf=.core.a) $(filter $(MX_CORE_OBJS),$(2)) && )) \
            $(LLVM)/ld.lld -m elf32ltsmipn32 -T$(MX_LD) -z max-page-size=128 \
-           --gc-sections -Map $(1:.elf=.map) -o $(1) \
+           --gc-sections $(if $(MX_PIN_CHECK),--emit-relocs) -Map $(1:.elf=.map) -o $(1) \
            $(if $(and $(filter vm,$(MX_MEMORY)),$(MX_CORE_OBJS)),$(call link_objs,$(1),$(2)),$(2)) \
            $(if $(MX_BIOS_CHECK),&& { $(MX_BIOS_CHECK) $(1) || { rm -f $(1); exit 1; }; }) \
            $(if $(MX_PIN_CHECK),&& { $(MX_PIN_CHECK) $(1) || { rm -f $(1); exit 1; }; })

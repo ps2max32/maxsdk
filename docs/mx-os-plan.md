@@ -482,6 +482,15 @@ Steps, each on the PS2 on its own:
       the calls (`jal`) from `MX_CORE_FN` functions and from after each `di` (until the `ei` or
       `mx_irq_restore`'s branch over it) and fails the link on one that is VM. Rodata, data and
       bss stay core in this step (some are sent by DMA). Quake's core 2.7 to 2.5 MiB.
+    - 4b step 2 done 2026-11-12 (PCSX2, PS2): the libraries' rodata, data and bss are VM too but
+      for the pinned objects' (the frame pipeline's, the DMA queue's, the debug screen's, ...).
+      `pinned-check.py` follows the data the roots read (the links keep their relocations), and
+      found glue.c's and Descent 3's cycle counters read under `di` from VM. `mx__phys` (so
+      `MX_UNCACHED`, `MX_UCAB`) of a VM address goes through the VM: pinned works, not pinned
+      ends the program; a refused handler argument or DMA address now ends only the program
+      (the kernel's own `mx_exit` ran before and hung the PS2: `tests/ps2/vm42_corefault.c`).
+      Quake's core 2.5 to 2.25 MiB; left: its 1 MiB main stack and libgl's bss (720 KiB, its
+      DMA buffers among it).
     - 4b, pinned in place of core: `MX_PINNED_FN` / `MX_PINNED_DATA` (the `MX_CORE_*` names
       kept as aliases), sections the kernel pins at the load; a pinned heap from the pool's
       frames in place of the core heap (`<mx/mem.h>`); stacks pinned in VM. Archives move to

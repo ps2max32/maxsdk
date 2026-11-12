@@ -20,8 +20,18 @@
 extern u32 mx__core_off;
 #define MX_CORE_LO 0x00100000u
 #define MX_CORE_HI 0x02000000u
+/* A VM address (0x0800_0000 - 0x0FFF_FFFF, the file and heap windows
+   0x4000_0000 - 0x5FFF_FFFF): its frame's physical address, when it is
+   pinned in one piece; otherwise the program ends with a report (since mx
+   OS plan 4b, so that MX_UNCACHED or MX_UCAB of library data now in VM
+   never reaches other memory). src/base/core.c. */
+u32 mx__phys_vm(uintptr_t a);
 MX_INLINE u32 mx__phys(uintptr_t a) {
-  return a - MX_CORE_LO < MX_CORE_HI - MX_CORE_LO ? (u32)a + mx__core_off : (u32)(a & 0x0FFFFFFFu);
+  if (a - MX_CORE_LO < MX_CORE_HI - MX_CORE_LO)
+    return (u32)a + mx__core_off;
+  if (__builtin_expect((a >> 27) == 1 || a - 0x40000000u < 0x20000000u, 0))
+    return mx__phys_vm(a);
+  return (u32)(a & 0x0FFFFFFFu);
 }
 #define MX_UNCACHED(p) ((__typeof__(&(p)[0]))(uintptr_t)(mx__phys((uintptr_t)(p)) | 0x20000000u))
 #define MX_UCAB(p) ((__typeof__(&(p)[0]))(uintptr_t)(mx__phys((uintptr_t)(p)) | 0x30000000u))
@@ -132,6 +142,9 @@ MX_INLINE mx_paddr mx_paddr_add(mx_paddr a, u32 bytes) { return (mx_paddr){a.v +
    a zero one). In a physical program they change nothing. */
 #define MX_CORE_FN __attribute__((section(".text.mx.core")))
 #define MX_CORE_DATA __attribute__((section(".data.mx.core")))
+/* As MX_CORE_DATA for a zero variable, without a place in the ELF (a
+   buffer the DMAC or the IOP reads or writes) */
+#define MX_CORE_BSS __attribute__((section(".bss.mx.core")))
 
 /* ---- Register access --------------------------------------------------- */
 

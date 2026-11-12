@@ -7,3 +7,8 @@
 #include <mx/cpu.h>
 
 u32 mx__core_off __attribute__((section(".data"))) = 0;
+
+/* <mx/cpu.h>'s mx__phys for a VM address: through the VM (pinned in one
+   piece, else a report and the end) */
+mx_paddr mx__vm_paddr(const void *p, u32 bytes);
+u32 mx__phys_vm(uintptr_t a) { return mx__vm_paddr((const void *)a, 1).v; }
