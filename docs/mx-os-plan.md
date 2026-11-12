@@ -455,6 +455,19 @@ Steps, each on the PS2 on its own:
       buffers, packets, handlers, the core heap), from its map file; mxlink's app, mxshell,
       Quake, the tests. The TLB's cost of paged code: refills now (Quake's timedemo on the PS2,
       code in core: 1.02 M refills, 178 k of code, about 610 ms).
+      Done 2026-11-12 (`tools/core-report.py <map>`): every game has about 2.7 MiB of core, a
+      3 MiB run (Half-Life 4): its 1 MiB main stack (Descent 3 512 KiB), libgl (`MX_CORE_OBJS`,
+      928 KiB: `mxgl.o`'s bss 720 KiB, its code 205 KiB) and libmxk (about 665 KiB: `vcache.c`
+      305 KiB, its bss 268 KiB; `snd.c` 95 KiB, its DMA lines 49 KiB; `frame.c`, `gs.c`,
+      `hires.c`, `vu.c` 25-37 KiB each; `trace.c`'s 32 KiB bss, the VM trace, in core for no
+      reason now), picolibc 44-127 KiB. mxlink's app: 224 KiB (its 128 KiB stack, libmxk 63
+      KiB, 32 KiB of `MX_CORE_DATA`), a 1 MiB run. mxshell: 1.6 MiB (1.3 MiB `MX_CORE_DATA`:
+      its pictures and font for the GS, its 128 KiB stack, libmxk 138 KiB), a 2 MiB run. The
+      games' VM: 0.5-28 MiB of bss, 0.5-3.6 MiB of code.
+      Stacks: `mx_thread_start` refuses a stack in VM because a fault on it comes where nothing
+      can wait (the kernel's thread switch, the VM's fault path, which runs in the faulting
+      thread on its stack). As Linux: each thread gets a small pinned kernel stack for its
+      exceptions, faults and switches, and its own stack is paged like the rest (4b).
     - 4b, pinned in place of core: `MX_PINNED_FN` / `MX_PINNED_DATA` (the `MX_CORE_*` names
       kept as aliases), sections the kernel pins at the load; a pinned heap from the pool's
       frames in place of the core heap (`<mx/mem.h>`); stacks pinned in VM. Archives move to
