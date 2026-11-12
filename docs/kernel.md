@@ -497,7 +497,11 @@ starts the program in `host:mxload.txt` (path and arguments, in words) from the 
 the ELF, as on the PS2, so programs end without a restart and start others (`launch`,
 `launch_beside`). Run it with `PCSX2_EE=interp`. PCSX2's TLB does not look at the ASID (of
 two entries at one address, the last written is used), so at a switch between processes this
-kernel writes the next one's entries again (`tlb_emu_asid`).
+kernel writes the next one's entries again (`tlb_emu_asid`). Since 2026-11-12 the kernel
+measures this at its start (`tlb.c`'s `tlb_ignores_asid`: two entries at one address under two
+ASIDs, read under the first), so the PS2 build does the same when it runs on PCSX2: from a
+card image (`make READY_END=1`; the runner's `PCSX2_MC`, `PCSX2_NET=sockets`) it runs
+`vm38_vmbeside` whole, programs beside each other included.
 
 ## Crashes
 

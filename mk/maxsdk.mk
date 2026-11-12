@@ -40,28 +40,28 @@ MX_NET_CFLAGS = -I$(MAXSDK)/ee/compat/net
 # MX_TARGET (docs/mx-os.md, docs/mx-os-plan.md step 2h):
 #   mxos (the default): an MXOS program: libmxk, its own objects linked into VM
 #     (docs/vm.md), started by mx-kernel (apps/mxos; on PCSX2 MX_LOADER)
-#   mxos-core: an MXOS program all in core, without VM: for now only for a program
-#     that stays while another runs (the shell, a service, one that starts others
-#     and waits): the kernel has one VM, the program in front's. Goes once every
-#     process has a VM of its own: in the end every MXOS program is VM
+#   (mxos-core, an MXOS program all in core without VM, went with mx OS plan 3d:
+#     a VM program may stay while another runs, in an address space of its own)
 #   standalone: a standalone ELF: libmx, the portability library, all in physical
 #     memory (at most 31 MiB, no VM), on the BIOS; started by mxboot, a legacy
 #     loader, PCSX2's -elf, not by mx-kernel
-# MX_MEMORY=vm and MX_MEMORY=phys still choose mxos and standalone, MX_KERNEL=1
-# with phys mxos-core.
+# MX_MEMORY=vm and MX_MEMORY=phys still choose mxos and standalone.
 ifeq ($(MX_KERNEL)$(MX_MEMORY),1phys)
-MX_TARGET ?= mxos-core
+$(error MX_KERNEL=1 with MX_MEMORY=phys: an MXOS program is VM (MX_TARGET=mxos); all in physical memory is a standalone ELF (MX_TARGET=standalone))
+endif
+ifeq ($(MX_TARGET),mxos-core)
+$(error MX_TARGET=mxos-core is gone: an MXOS program is VM (mxos), its DMA data in core (MX_CORE_DATA))
 endif
 ifndef MX_TARGET
 MX_TARGET := $(if $(filter phys,$(MX_MEMORY)),standalone,mxos)
 endif
-MX_MEMORY = $(if $(filter standalone mxos-core,$(MX_TARGET)),phys,vm)
+MX_MEMORY = $(if $(filter standalone,$(MX_TARGET)),phys,vm)
 # <mx/bios.h> is a standalone ELF's only: an MXOS program makes no BIOS calls (step
 # 2h-3c). Its ELF is checked for syscall instructions after the link
 # (tools/mxos-bios-check.sh).
 CFLAGS  += $(if $(filter standalone,$(MX_TARGET)),-DMX_BIOS_CALLS=1)
-MX_BIOS_CHECK = $(if $(filter mxos mxos-core,$(MX_TARGET)),$(MAXSDK)/tools/mxos-bios-check.sh $(LLVM))
-MX_LIB   = $(MAXSDK_OUT)/libmx$(if $(filter mxos mxos-core,$(MX_TARGET)),k).a
+MX_BIOS_CHECK = $(if $(filter mxos,$(MX_TARGET)),$(MAXSDK)/tools/mxos-bios-check.sh $(LLVM))
+MX_LIB   = $(MAXSDK_OUT)/libmx$(if $(filter mxos,$(MX_TARGET)),k).a
 MX_CRT0  = $(MAXSDK_OUT)/obj/crt0.o
 MX_LD_phys = $(MAXSDK)/ee/ld/maxsdk.ld
 # MX_VM_TEXT=core (with MX_MEMORY=vm): the program's code stays core

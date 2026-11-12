@@ -76,12 +76,11 @@ Retail PS2s have 32 MiB; never count on more.
    for syscall instructions (`tools/mxos-bios-check.sh`, from `$(call link)`). What a program
    needs of the BIOS is the kernel's: threads in `<mx/thread.h>` (`mx_thread_sleep`, `_wakeup`,
    `_rotate`), the board's video offsets in `mx_video_board_offset` (kernel version 23).
-   `MX_TARGET=mxos-core` (`MX_KERNEL=1` with `phys`): an MXOS program all in core, without VM,
-   for now for the programs that stay while another runs (the shell, a service, one that starts
-   others and waits). Since 2026-11-12 a VM program may stay too (`mx_loader_launch`,
-   `_beside`, `mx_proc_spawn`): its VM is an address space of its own on the kernel's frames
-   and swap file (plan phase 3a, `kernel.md`), so `mxos-core` goes once those programs are
-   moved (phase 3d): in the end every MXOS program is VM.
+   Every MXOS program is VM (`MX_TARGET=mxos`): one that stays while another runs (the shell,
+   a service, one that starts others and waits) has an address space of its own on the
+   kernel's frames and swap file (plan phase 3a, `kernel.md`); what the DMAC, the VUs or the
+   IOP read is in core (`MX_CORE_DATA`, `MX_CORE_FN`). `mxos-core` (all in core) went with
+   phase 3d; all in physical memory is a standalone ELF.
 2. **Paths are relative.** A path without a device is in the directory of the ELF, so one ELF runs
    from `host:` and `usb0:`. Never write `host:` or a device name in a game; make engine base
    directories `.`.

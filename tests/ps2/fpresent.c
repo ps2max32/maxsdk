@@ -6,7 +6,8 @@
 #include <mx/gs.h>
 #include <mx/video.h>
 
-static u8 ring[64 * 1024] MX_ALIGNED(64 * 1024);
+/* the MFIFO ring: core (under the kernel, k41_present, statics are VM) */
+static u8 ring[64 * 1024] MX_ALIGNED(64 * 1024) MX_CORE_DATA;
 
 static u64 *box(u64 *c, u32 x0, u32 y0, u32 x1, u32 y1, u32 rgb) {
   c = mx_e_ad_tag(c, 4, 1);
