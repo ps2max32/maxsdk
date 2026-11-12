@@ -466,8 +466,16 @@ Steps, each on the PS2 on its own:
       games' VM: 0.5-28 MiB of bss, 0.5-3.6 MiB of code.
       Stacks: `mx_thread_start` refuses a stack in VM because a fault on it comes where nothing
       can wait (the kernel's thread switch, the VM's fault path, which runs in the faulting
-      thread on its stack). As Linux: each thread gets a small pinned kernel stack for its
-      exceptions, faults and switches, and its own stack is paged like the rest (4b).
+      thread on its stack). Measured (`tests/ps2/vm40_stackdepth.c`, PCSX2, 2026-11-12):
+      interrupts and syscalls run on the kernel's stacks (`kirq_stack`, `ksys_stack`), the VM's
+      exception (refill, zero fill) on its own (`mx__vm_xstack`); only the slow path (eviction,
+      the swap file) runs on the faulting thread's stack, at most 2.1 KiB deep (zero fill 1.2
+      KiB, swap out 2.1, swap in 1.7, the test's own frame included). So no kernel stack per
+      thread (a pinned page and TLB entries for 2 KiB): a thread's stack is paged with 32 KiB
+      pages as the rest; only the page with its sp (and the one below when sp is within about 3
+      KiB of that page's start) must be resident while it runs: made so before it is switched
+      to (the scheduler waits for the page-in as for a semaphore), with a frame kept free for a
+      new stack page's zero fill in the exception.
     - 4b, pinned in place of core: `MX_PINNED_FN` / `MX_PINNED_DATA` (the `MX_CORE_*` names
       kept as aliases), sections the kernel pins at the load; a pinned heap from the pool's
       frames in place of the core heap (`<mx/mem.h>`); stacks pinned in VM. Archives move to
