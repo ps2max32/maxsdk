@@ -330,9 +330,17 @@ Steps, each on the PS2 on its own:
     Done 2026-11-12 for every restart but the first (which sheds the loader's state; 4e):
     tested on PCSX2 with the MXOS tests, `vm26_launch` and a chain of 20 `mx_loader_launch`es
     (the emu build follows a launch now). Left: `kirq_off` sets the poke by SetSyscall once a
-    restart.
+    restart (gone with 4d-1).
   - 4d, its own level 1 vectors (refill, common, interrupt) and tables, out of the BIOS's
     memory; the BIOS's kernel stack and save area its own.
+    4d-1 done 2026-11-12 on PCSX2 (`kernel.md`): the vectors and their tables are the kernel's,
+    the BIOS's tables are no longer written, `kirq_off` puts the BIOS's vector code back. The
+    MXOS tests pass on PCSX2 as before (k41_present and vm24_home stall in the frame pipeline
+    on PCSX2 with any kernel, and standalone too: PCSX2's). Not yet on the PS2: the first try
+    hung at the replace, with the instruction cache invalidated by kseg0 addresses (against the
+    hardware restrictions; now by index).
+    4d-2: the vectors' save area and the syscall entry's kernel stack the kernel's; the
+    interrupt lines and exception codes that are not the kernel's to its own handlers.
   - 4e, its threads without the BIOS's carrier thread, and its start without the BIOS's calls
     before `kirq_on` (the IOP's reset, the SIF's set-up).
 - *2h-5, the first MiB for the kernel.* The BIOS's memory (0x0 - 0x7_FFFF) is the kernel's

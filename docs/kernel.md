@@ -269,6 +269,19 @@ RPC's state) are the kernel's while it has the SIF (2h-4b, `src/base/sifdma.c`):
 BIOS's table (0x8002_12C0, `docs/bios.md`) at `mx__sif_dma_take` and written back at
 `mx__sif_dma_give`, before a restart, so the BIOS and the next start find them.
 
+The level 1 vectors are the kernel's (2026-11-12, plan step 2h-4d-1; `apps/mxos/ee/kvec.S`,
+`kirq.c`): `kirq_on` copies its own code over the BIOS's at the TLB refill (0x8000_0000), common
+(0x8000_0180) and interrupt (0x8000_0200) vectors. They do what the BIOS's do, through the
+kernel's tables (`kvec_exc_table` by ExcCode, `kvec_irq_table` by the highest pending line),
+which `kirq_on` fills from the BIOS's (0x8001_5340, 0x8001_5380) before pointing the syscall
+entry and the INTC and DMAC lines at the kernel's. The BIOS's tables are no longer written:
+`mx__kernel_handler_set` writes the kernel's. `kirq_off` (before a restart or a replace) puts
+the BIOS's vector code back (kept in `.kept`), so the BIOS's calls of the next start work as
+before. The poke writes the vectors in one syscall each, writes the lines back from the data
+cache and invalidates the whole instruction cache and BTAC by index: the instruction cache's
+CACHE operations must not get an address with bit 31 set (the hardware restrictions), so not
+the vector's kseg0 address. The poke's `SetSyscall` is now only at `kirq_on` (its bootstrap).
+
 Version 22: the video timing without the BIOS (plan step 2g; `apps/mxos/ee/kvideo.c`), and
 `iop_write` (below). maxsdk
 computes the CRTC registers (SMODE1 with the PLL, SYNCH1, SYNCH2, SYNCV, SRFSH, SMODE2) from a
