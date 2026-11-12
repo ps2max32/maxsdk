@@ -12,6 +12,7 @@ renderer (`Renderer = 13` in `[EmuCore/GS]` of the flatpak's `inis/PCSX2.ini`, s
 | DMA tag with an uncached (0x2…) address | crash | masked, works | `apps/llvm_bench/vudemo` |
 | Mapped VU memory writes + CMSAR1/VCALLMS start | wrong VU results | works | `apps/llvm_bench/vudemo` |
 | VIF0 chain with tags written uncached | does not start | runs | `apps/llvm_bench/vudemo` |
+| Video modes set by the GS's registers alone (the kernel's CRTC timing, `apps/mxos/ee/kvideo.c`, without SetGsCrt) | the mode's rate | NTSC, 480P right; PAL 576I and 288P give 60 vblanks a second, not 50: PCSX2 takes the rate from its handling of the SetGsCrt syscall, so the kernel keeps SetGsCrt on PCSX2 (2026-11-12) | `examples/display` under the emu kernel |
 | Debug output | SIF tty → ps2link → ps2client | SIF tty → IOP console, EE SIO → EE console (both go to stdout with `-earlyconsolelog`) | maxsdk `tests/ps2/hello.c` |
 | After `Exit` | back to ps2link | loads `rom0:OSDSYS`, fails, reboots the IOP | maxsdk `tests/ps2/hello.c` |
 | Stall control with the drain (VIF1) in **normal** mode | stalled (manual: normal-mode drains are stall controlled) | not stalled: the drain read the buffer before the source wrote it | maxsdk `tests/ps2/dma.c` (first version) |

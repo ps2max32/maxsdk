@@ -354,7 +354,18 @@ Steps, each on the PS2 on its own:
 - *2h-5, the first MiB for the kernel.* The BIOS's memory (0x0 - 0x7_FFFF) is the kernel's
   after its boot.
 - Then the address space plan's phase 3: VM in the kernel, one frame pool, one swap file
-  (`mc0:/MXOS/SWAP.CFG`, no swap without it).
+  (`mc0:/MXOS/SWAP.CFG`, no swap without it). Proposed steps (2026-11-12, not started):
+  - 3a, a VM per process: vm.c's and image.c's state (about 28 KiB in the kernel now, the front
+    program's only: resident.ld) becomes one instance per process, switched with the ASID
+    where `kproc.c` switches the rest of a process's state; the refill already writes the
+    process's ASID (G = 0). Test: a VM program beside another (`k31_beside` as `mxos`).
+  - 3b, one frame pool: frames from one pool for every process's VM, in place of each
+    process's own run below the core of the one beside.
+  - 3c, one swap file for all processes, from `mc0:/MXOS/SWAP.CFG`.
+  - 3d, every MXOS program VM: mxshell, mxlink's app and the kernel tests that start others
+    leave `MX_TARGET=mxos-core`, which goes.
+  To decide first: how frames are shared (a fixed share per process or one LRU over all), the
+  swap file's size, and whether a program in the background may go out entirely.
 
 - The kernel no longer restarts (ExecPS2) after each program: it cleans up per process
   (threads, files, sockets, pad, sound, GS memory, interrupt handlers, VM frames).
@@ -372,9 +383,9 @@ Steps, each on the PS2 on its own:
   only their ASID, G = 1 all); the ASID survives syscalls and interrupts but is the CPU's, not
   a thread's: the kernel sets it at each process switch. The BIOS keeps no VU0 register (VF,
   VI) at a thread switch, the FPU's it does: the kernel saves VU0's at a process switch.
-- Still to do: the VM's refill writes EntryHi with ASID 0 (`tlbwi` after setting EntryHi), so
-  its entries become per process only when it writes the process's ASID; the BIOS's TLB
-  entries for core memory are global and stay so for the kernel's memory below 1 MiB.
+- Done: the VM's refill writes the process's ASID (`tlb.S` keeps EntryHi's, `vm.c`'s
+  `tlb_write` ORs `mx__asid`; its entries G = 0); the BIOS's TLB entries for core memory are
+  global and stay so for the kernel's memory below 1 MiB.
 
 ### Step 3: windows
 
