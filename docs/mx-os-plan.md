@@ -368,7 +368,10 @@ Steps, each on the PS2 on its own:
     take the victim's space explicitly (a frame's space next to `page_of`; stamps per space,
     `refills` the VM's). Open: where a space's tables live. They are read by threads of every
     process (user mode: not through kseg0) and under every ASID, but now come from the
-    program's core heap, which is mapped per ASID.
+    program's core heap (`table()`: `mx__phys_alloc`), mapped per ASID at 0x10_0000 up; the
+    frames are what the kernel gives the program below its core (`exec.c`'s
+    `kernel_program`: LOW to `frames_hi`). So the tables need memory under a global (G = 1)
+    mapping, as the kernel's below 1 MiB, and the frames one pool for all (3b).
   - 3b, one frame pool: frames from one pool for every process's VM, in place of each
     process's own run below the core of the one beside.
   - 3c, one swap file for all processes, from `mc0:/MXOS/SWAP.CFG`.
