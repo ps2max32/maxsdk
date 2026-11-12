@@ -1,12 +1,15 @@
 /* Linker script for maxsdk programs linked into VM (MX_MEMORY=vm in
    mk/maxsdk.mk, docs/vm.md). Started by mxlink only.
 
-   Core (from 0x100000, physical, loaded by mxlink): crt0, every archive
-   member (libmx, libmxc, picolibc, compiler-rt), libmxc's glue, the VU
+   Core (from 0x100000, physical, loaded by mxlink): crt0, the libraries'
+   code that runs with interrupts off or before the VM is on (listed below,
+   checked by tools/pinned-check.py at each link), the libraries' rodata,
+   data and bss (archive members), libmxc's glue, the VU
    and HLSL objects (in directories vu/ and hlsl/), and what the program marks
    MX_CORE_FN / MX_CORE_DATA (<mx/cpu.h>); VU microcode, constructors,
    packets and MX_DMA_LINES buffers wherever they come from.
-   VM (from MX_VM_BASE, 0x0800_0000): the rest of the program's own objects,
+   VM (from MX_VM_BASE, 0x0800_0000): the rest of the libraries' code (mx OS
+   plan 4b) and of the program's own objects,
    text and rodata in one segment, data and bss in another, each starting
    on a page (32 KiB). The program's start-up (ee/src/vm/image.c) turns VM on
    and reads them from the ELF (argv[0]); the VM heap starts after them.
@@ -33,7 +36,33 @@ SECTIONS {
     __text_start = .;
     KEEP(*(.text.start))
     *crt0.o(.text .text.*)
-    *.a:*(.text .text.*)
+    /* phase 4b: of the libraries only the start-up (before the VM is on)
+       and what runs with interrupts off; the rest is VM (MX_PIN_OBJS) */
+    *libmxk.a:start.c.o(.text .text.*)
+    *libmxk.a:kstubs.c.o(.text .text.*)
+    *libmxk.a:ksys.c.o(.text .text.*)
+    *libmxk.a:runtime.c.o(.text .text.*)
+    *libmxk.a:core.c.o(.text .text.*)
+    *libmxk.a:cache.c.o(.text .text.*)
+    *libmxk.a:irq.c.o(.text .text.*)
+    *libmxk.a:timer.c.o(.text .text.*)
+    *libmxk.a:sif.c.o(.text .text.*)
+    *libmxk.a:thread.c.o(.text .text.*)
+    /* called with interrupts off (tools/pinned-check.py) */
+    *libmxk.a:dma.c.o(.text .text.*)
+    *libmxk.a:pkt.c.o(.text .text.*)
+    *libmxk.a:vu.c.o(.text .text.*)
+    *libmxk.a:gs.c.o(.text .text.*)
+    *libmxk.a:display.c.o(.text .text.*)
+    *libmxk.a:hires.c.o(.text .text.*)
+    *libmxk.a:dbgscreen.c.o(.text .text.*)
+    *libmxk.a:debug.c.o(.text .text.*)
+    *libmxk.a:printf.c.o(.text .text.*)
+    *libmxk.a:string.c.o(.text .text.*)
+    *libc.a:libc_machine_mips_mem*.o(.text .text.*)
+    *libc.a:libc_string_*.o(.text .text.*)
+    *libc.a:libc_machine_mips_str*.o(.text .text.*)
+    *.core.a:*(.text .text.*)
     *glue.c.o(.text .text.*)
     */vu/*.o(.text .text.*)
     */hlsl/*.o(.text .text.*)

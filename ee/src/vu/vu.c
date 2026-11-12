@@ -339,7 +339,8 @@ static int k_dbuf(const struct mx_vuq *q) { return q->dbuf_mode; }
 
 /* The VIF stopped at the i-bit before batch seq's MSCAL: go on at once if
    the previous batch's results have been read, else hold until they are. */
-static void vif_ibit_irq(void *arg) {
+/* an interrupt handler: pinned (mx OS plan 4b) */
+static MX_CORE_FN void vif_ibit_irq(void *arg) {
   struct mx_vuq *q = arg;
   u32 seq = ++q->stalls;
   u32 prev = q->prev_of[seq % MX_VUQ_SLOTS];

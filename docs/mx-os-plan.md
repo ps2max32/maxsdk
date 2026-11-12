@@ -476,6 +476,12 @@ Steps, each on the PS2 on its own:
       KiB of that page's start) must be resident while it runs: made so before it is switched
       to (the scheduler waits for the page-in as for a semaphore), with a frame kept free for a
       new stack page's zero fill in the exception.
+    - 4b step 1 done 2026-11-12 (PCSX2, PS2): the libraries' code is VM but for the objects that run
+      with interrupts off or before the VM is on (`ee/ld/maxsdk-vm.ld`'s list; libmxk's eight
+      interrupt handlers `MX_CORE_FN`). `tools/pinned-check.py`, run at each MXOS link, follows
+      the calls (`jal`) from `MX_CORE_FN` functions and from after each `di` (until the `ei` or
+      `mx_irq_restore`'s branch over it) and fails the link on one that is VM. Rodata, data and
+      bss stay core in this step (some are sent by DMA). Quake's core 2.7 to 2.5 MiB.
     - 4b, pinned in place of core: `MX_PINNED_FN` / `MX_PINNED_DATA` (the `MX_CORE_*` names
       kept as aliases), sections the kernel pins at the load; a pinned heap from the pool's
       frames in place of the core heap (`<mx/mem.h>`); stacks pinned in VM. Archives move to

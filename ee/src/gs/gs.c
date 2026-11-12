@@ -156,7 +156,8 @@ static int present_release(void) {
   return 1;
 }
 
-static void gs_irq(void *arg) {
+/* an interrupt handler: pinned (mx OS plan 4b) */
+static MX_CORE_FN void gs_irq(void *arg) {
   u64 csr = CSR;
   if (csr & MX_BIT(GS_CSR_SIGNAL)) {
     mx_gs.last_sigid = (u32)MX_R64(MX_GS_SIGLBLID);
@@ -189,7 +190,8 @@ static void gs_irq(void *arg) {
 
 void (*mx__vsync_hook)(void);
 
-static void vsync_irq(void *arg) {
+/* an interrupt handler: pinned (mx OS plan 4b) */
+static MX_CORE_FN void vsync_irq(void *arg) {
   mx_gs.vsync++;
   mx_gs.vsync_at = mx_count();
   if (mx__vsync_hook)

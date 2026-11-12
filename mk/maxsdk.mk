@@ -61,6 +61,9 @@ MX_MEMORY = $(if $(filter standalone,$(MX_TARGET)),phys,vm)
 # (tools/mxos-bios-check.sh).
 CFLAGS  += $(if $(filter standalone,$(MX_TARGET)),-DMX_BIOS_CALLS=1)
 MX_BIOS_CHECK = $(if $(filter mxos,$(MX_TARGET)),$(MAXSDK)/tools/mxos-bios-check.sh $(LLVM))
+# and what runs with interrupts off (handlers, code under mx_di) reaches only
+# pinned code (tools/pinned-check.py, mx OS plan 4b)
+MX_PIN_CHECK = $(if $(filter mxos,$(MX_TARGET)),LLVM=$(LLVM) python3 $(MAXSDK)/tools/pinned-check.py)
 MX_LIB   = $(MAXSDK_OUT)/libmx$(if $(filter mxos,$(MX_TARGET)),k).a
 MX_CRT0  = $(MAXSDK_OUT)/obj/crt0.o
 MX_LD_phys = $(MAXSDK)/ee/ld/maxsdk.ld
@@ -83,7 +86,8 @@ link     = $(if $(filter vm,$(MX_MEMORY)),$(if $(MX_CORE_OBJS),rm -f $(1:.elf=.c
            $(LLVM)/ld.lld -m elf32ltsmipn32 -T$(MX_LD) -z max-page-size=128 \
            --gc-sections -Map $(1:.elf=.map) -o $(1) \
            $(if $(and $(filter vm,$(MX_MEMORY)),$(MX_CORE_OBJS)),$(call link_objs,$(1),$(2)),$(2)) \
-           $(if $(MX_BIOS_CHECK),&& { $(MX_BIOS_CHECK) $(1) || { rm -f $(1); exit 1; }; })
+           $(if $(MX_BIOS_CHECK),&& { $(MX_BIOS_CHECK) $(1) || { rm -f $(1); exit 1; }; }) \
+           $(if $(MX_PIN_CHECK),&& { $(MX_PIN_CHECK) $(1) || { rm -f $(1); exit 1; }; })
 
 ifneq ($(MAXSDK_OUT),$(OUT))
 # one make of maxsdk for both, not two at once under -j: a grouped target

@@ -28,10 +28,15 @@ virtual memory at 0x0800_0000, in 32 KiB pages held in the physical memory left 
 ### Programs linked into VM
 
 * `MX_MEMORY=vm` (`mk/maxsdk.mk`) links with `ee/ld/maxsdk-vm.ld`: the program's own objects
-  (text and rodata, then data and bss, each from a page) at 0x0800_0000; crt0, every archive
-  member (libmx, libmxc, picolibc, compiler-rt), libmxc's glue, the VU and HLSL objects, VU
-  microcode, constructors, packets, `MX_DMA_LINES` buffers, `mx_vm_config`, and what the
-  program marks `MX_CORE_FN` / `MX_CORE_DATA` stay core. `jal` reaches between the two.
+  (text and rodata, then data and bss, each from a page) at 0x0800_0000, and the libraries'
+  code (since 2026-11-12, mx OS plan 4b); crt0, the libraries' code that runs with interrupts
+  off or before the VM is on (the objects listed in the script: libmxk's start-up, interrupt,
+  SIF, DMA, GS, VU, debug and string code; picolibc's `mem*`, `str*`), the libraries' rodata,
+  data and bss, libmxc's glue, the VU and HLSL objects, VU microcode, constructors, packets,
+  `MX_DMA_LINES` buffers, `mx_vm_config`, and what the program marks `MX_CORE_FN` /
+  `MX_CORE_DATA` stay core. `jal` reaches between the two. Each link of an MXOS program runs
+  `tools/pinned-check.py`: what an `MX_CORE_FN` function (an interrupt handler) or code after
+  a `di` calls must be core, else the link fails.
   A library linked as objects stays core when the program lists them in `MX_CORE_OBJS`
   (the link puts them in an archive of their own): Quake's `MX_CORE_OBJS = $(MXGL_OBJS)`.
 * `MX_VM_TEXT=core` (with `MX_MEMORY=vm`, `ee/ld/maxsdk-vm-coretext.ld`): the program's code

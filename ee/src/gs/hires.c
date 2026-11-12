@@ -207,7 +207,8 @@ static void kick(u32 k) {
 
 /* The beam starts strip j: pass j + 1 (j the last: pass 0, for the next
    field). */
-static void timer_irq(void *arg) {
+/* an interrupt handler: pinned (mx OS plan 4b) */
+static MX_CORE_FN void timer_irq(void *arg) {
   (void)arg;
   TMR_MODE = TMR_MODE | (u32)MX_BIT(TIMER_MODE_EQUF);
   u32 j = h.next_line;

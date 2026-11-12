@@ -131,7 +131,8 @@ static void arm(void) {
             MX_BIT(TIMER_MODE_EQUF) | MX_BIT(TIMER_MODE_OVFF));
 }
 
-static void tick(void *arg) {
+/* an interrupt handler: pinned (mx OS plan 4b) */
+static MX_CORE_FN void tick(void *arg) {
   (void)arg;
   u32 now = mx_count();
   for (int i = 0; i < SLOTS; i++) {

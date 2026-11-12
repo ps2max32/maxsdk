@@ -169,7 +169,8 @@ void mx_dbg_screen(void) {
 /* the heartbeat: at every 16th vblank end, slot 31 gets the vblank count
    and slot 30 the EPC the interrupt came at (where the program is) */
 static u32 beats;
-static void beat(void *arg) {
+/* an interrupt handler: pinned (mx OS plan 4b) */
+static MX_CORE_FN void beat(void *arg) {
   (void)arg;
   extern volatile u32 mx__irq_epc;
   if (++beats & 15)

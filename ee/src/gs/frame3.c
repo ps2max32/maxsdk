@@ -108,7 +108,8 @@ static void report(void) {
                 p.rec[i].opened, p.rec[i].complete, p.rec[i].joined, p.rec[i].last_seq);
 }
 
-static void vif1_irq(void *arg) {
+/* an interrupt handler: pinned (mx OS plan 4b) */
+static MX_CORE_FN void vif1_irq(void *arg) {
   (void)arg;
   release();
 }

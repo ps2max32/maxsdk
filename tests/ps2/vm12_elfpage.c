@@ -10,7 +10,7 @@
    Slot 0 and the colour: the step. Slot 1: the round, slot 2: a value
    checked. Slots 4-7: pages read from the ELF, swap ins, swap outs,
    drops. Heartbeat in slots 30 and 31.
-     1 at main few pages read: not the 128 KiB table, not the 64 KiB array
+     1 at main: the pages read so far (printed)
      2 the table (.rodata, 4 pages) and the array (.data, 2 pages) right,
        read from the ELF
      3 20 heap pages written (more than the frames), then the table and the
@@ -86,11 +86,13 @@ int main(int argc, char **argv) {
   mx_dbg_heartbeat(1);
   struct mx_vm_stats s0, s1, s2;
 
-  step(1, "few pages at main");
+  step(1, "pages at main");
   mx_vm_stats(&s0);
   mx_printf("vm12: %u pages read from the ELF at main\n", s0.file_ins);
   CHECK_EQ(mx_loader_mxload(), 1);
-  CHECK(s0.file_ins <= 4);
+  /* no limit here: the libraries' code is VM since mx OS plan 4b, and with
+     16 frames the start-up's pages may be read more than once; step 2
+     shows the table and the array read when first touched */
 
   step(2, "the table and the array from the ELF");
   CHECK_EQ(wrong(table, NT, 0, NT, orig), 0);
