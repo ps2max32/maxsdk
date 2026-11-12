@@ -96,6 +96,8 @@ struct vm_space {
   } seg[NSEG];
   u32 nmap, map_next; /* pages of the file window, the next one not given out */
   u32 nheap, heap_next; /* pages of the heap window, the next one not given out */
+  u32 max_frames; /* 0, or the most frames it holds (its mx_vm_config.frames
+                     beside another space): above, one of its own pages goes */
 };
 static struct vm_space space0;
 static struct vm_space *vs = &space0; /* the running thread's (mx__vm_space_switch) */
@@ -617,6 +619,31 @@ void mx__vm_space_switch(struct vm_space *n) {
 
 struct vm_space *mx__vm_space_now(void) { return vs; }
 
+/* A space's program asks for a swap file while the VM has none (a program
+   without one turned it on): that one, for all spaces, from now (mx OS plan
+   3c; mxlink's mx__loader_swap in place of it, as at mx_vm_init). 0, or -1
+   when it cannot be opened. */
+int mx__vm_swap_open(const char *cfg_swap) {
+  if (!vm.active || vm.fd >= 0 || !cfg_swap || !cfg_swap[0])
+    return 0;
+  extern const char *mx__loader_swap;
+  const char *swap = mx__loader_swap ? mx__loader_swap : cfg_swap;
+  int fd = mx_fio_open(swap, 3 /* RDWR */ | MX_FIO_CREAT);
+  if (fd < 0) {
+    mx_printf("mx_vm_init: cannot open the swap file %s (%d)\n", swap, fd);
+    return -1;
+  }
+  vm.fd = fd;
+  return 0;
+}
+
+/* The most frames space s holds (0: no limit): a program's
+   mx_vm_config.frames, when its space shares the frames (mx OS plan 3b) */
+void mx__vm_space_limit(struct vm_space *s, u32 bytes) {
+  if (s)
+    s->max_frames = (bytes + PAGE - 1) / PAGE;
+}
+
 /* A program's exception handlers were set (the kernel's mx_exception_init
    for the next program, while another's VM runs): the VM's in front of them
    again, which go on to them for what is not the VM's */
@@ -1097,7 +1124,7 @@ static void unlock(void);
    page) */
 #define OUT_SPACE(o) spaces[(o) >> 16]
 #define OUT_PAGE(o) ((o) & 0xFFFFu)
-static u32 oldest(u32 k, u32 *out) {
+static u32 oldest_of(u32 k, u32 *out, struct vm_space *only) {
   u32 n = 0, age[16];
   if (k > 16)
     k = 16;
@@ -1108,7 +1135,7 @@ static u32 oldest(u32 k, u32 *out) {
     if (q < 0)
       continue;
     struct vm_space *s = space_in(f);
-    if (s->pins[q] || (s->flags[q] & PG_BUSY))
+    if ((only && s != only) || s->pins[q] || (s->flags[q] & PG_BUSY))
       continue;
     u32 a = F.refills - s->stamp[q], i = n < k ? n++ : k;
     if (i == k && a <= age[k - 1])
@@ -1121,6 +1148,7 @@ static u32 oldest(u32 k, u32 *out) {
   }
   return n;
 }
+static u32 oldest(u32 k, u32 *out) { return oldest_of(k, out, 0); }
 
 /* A dirty page to write ahead: of the pages eviction takes next (as many
    as clean_frames, less the free frames), the oldest dirty one; -1 if
@@ -1208,18 +1236,18 @@ static void writer_start(u32 clean) {
    first, Quake III's loading went to frames of 10 s on the PS2
    (2026-11-01). In Quake III's trace (tools/vmsim.py) LRU paged a third of
    what the clock paged that came before. */
-static u32 evict(void) {
+static u32 evict_of(struct vm_space *only) {
   mx_vm_unpin_done();
   if (vm.wsema >= 0)
     mx_bios_signal_sema(vm.wsema); /* a frame goes: the writer cleans the next ones */
   int was = mx_di();
-  int f = frame_take(); /* freed meanwhile */
+  int f = only ? -1 : frame_take(); /* freed meanwhile */
   if (f >= 0) {
     mx_irq_restore(was);
     return (u32)f;
   }
   u32 o;
-  if (!oldest(1, &o)) {
+  if (!oldest_of(1, &o, only)) {
     mx_irq_restore(was);
     vm_fatal("out of memory: every frame is pinned", 0);
   }
@@ -1236,6 +1264,25 @@ static u32 evict(void) {
   vm.page_of[fr] = FRAME_TAKEN;
   mx_irq_restore(was);
   return fr;
+}
+static u32 evict(void) { return evict_of(0); }
+
+/* The frames that hold pages of space s */
+static u32 resident(struct vm_space *s) {
+  u32 n = 0;
+  for (u32 f = 0; f < vm.nframes; f++)
+    n += page_in(f) >= 0 && space_in(f) == s;
+  return n;
+}
+/* A frame for a page of the current space, taken: at its limit one of its
+   own pages goes; else a free one, or the LRU's over all spaces. */
+static u32 frame_for_vs(void) {
+  if (vs->max_frames && resident(vs) >= vs->max_frames)
+    return evict_of(vs);
+  int was = mx_di();
+  int f = frame_take();
+  mx_irq_restore(was);
+  return f >= 0 ? (u32)f : evict();
 }
 
 /* Make page pg resident at frame f (a free frame, taken), then map it. The
@@ -1271,9 +1318,8 @@ static void fault_in(u32 pg, int write) {
     mx_irq_restore(was);
     return;
   }
-  int f = frame_take();
   mx_irq_restore(was);
-  place(pg, f >= 0 ? (u32)f : evict(), write);
+  place(pg, frame_for_vs(), write);
 }
 
 static int lock_owner; /* the thread that has it (vm_fatal gives it up) */

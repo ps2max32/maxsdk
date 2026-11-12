@@ -180,7 +180,12 @@ those frames (MiB-aligned, pinned), and its end gives back both (`exec.c`'s `kvm
 entries go at each switch). The VM's state in the kernel (resident.ld's `__vm_*`: vm.c,
 image.c) is not set back, saved or loaded with the rest of a program's while such a program is
 parked (`end.c`). The VM's tables are read through `MX_PHYS_WIN` (a global entry), so every
-process's threads and the kernel may use them. `tests/ps2/vm38_vmbeside.c`.
+process's threads and the kernel may use them. `tests/ps2/vm38_vmbeside.c`. A program's
+`mx_vm_config.frames` is the most frames its space holds then (`mx__vm_space_limit`: above it,
+one of its own pages goes; otherwise one LRU over all), and its swap file is opened for all
+spaces if the VM has none yet (`mx__vm_swap_open`: a service without one turned it on). A
+program without VM that takes all memory (no core heap) does not start while a program with VM
+is parked: `k40_frame` and `k41_present` have a core heap for that.
 
 One swap file for MXOS (2026-11-12, plan phase 3c; `apps/mxos/ee/main.c`'s `kswap_path`):
 `mc0:/MXOS/SWAP.CFG` (on PCSX2 `host:swap.txt`) names it and, optionally, its size in MiB (64 by

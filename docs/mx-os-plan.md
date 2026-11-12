@@ -393,8 +393,9 @@ Steps, each on the PS2 on its own:
     frames of it); the `mxos-core` programs keep their own run below the cores until 3d.
   - 3c done 2026-11-12 (PCSX2, `kernel.md`): `mc0:/MXOS/SWAP.CFG`, its size (64 MiB by
     default) a limit on the VM's slots, which a freed space gives back.
-  - 3d begun 2026-11-12: the kernel tests that stay beside another (k29-k36, k38, k42) are VM
-    programs and pass on PCSX2 with and without a service; mxshell and mxlink's app next.
+  - 3d begun 2026-11-12: the kernel tests that stay beside another (k29-k36, k38, k42) and
+    mxlink's app (the service) are VM programs and pass on PCSX2 with and without the service.
+    Left: mxshell (its DMA buffers to core; to be seen on a TV), then `mxos-core` goes.
   - 3b, one frame pool: frames from one pool for every process's VM, in place of each
     process's own run below the core of the one beside.
   - 3c, one swap file for all processes, from `mc0:/MXOS/SWAP.CFG`.
