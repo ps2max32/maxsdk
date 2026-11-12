@@ -92,6 +92,7 @@ u32 mx__phys_used(void);
 /* vm.c for mem.c: runs of frames out of the VM's pool (pinned memory),
    pointers in the physical window; VA for heaps of pages */
 void *mx__vm_frames_take(u32 bytes);
+void *mx__vm_frames_take_aligned(u32 bytes, u32 align);
 void mx__vm_frames_give(void *p, u32 bytes);
 u32 mx__vm_va_take(u32 bytes);
 void mx__vm_prefetch(const void *p, u32 bytes);

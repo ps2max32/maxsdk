@@ -172,6 +172,15 @@ service beside); the service's `MX_EVENT_END` is for the program it started. One
 takes all memory does not start while two are parked (the service's core is not its to give).
 Before, with mxlink's app as the service on the card, such a start failed (-1): `k31`-`k36` and
 `k42` failed on the PS2.
+Since 2026-11-12 (mx OS plan, phase 3a) a program with VM may also be parked: its VM stays on,
+and the next program's `mx_vm_init` gives it an address space of its own (vm.c's
+`mx__vm_space_new`) on the same frames and swap file, one LRU over both; its core is a run of
+those frames (MiB-aligned, pinned), and its end gives back both (`exec.c`'s `kvm_init`,
+`kvm_shutdown`, `kvm_front_gone`). `kproc.c` switches the space with the ASID (the VM's TLB
+entries go at each switch). The VM's state in the kernel (resident.ld's `__vm_*`: vm.c,
+image.c) is not set back, saved or loaded with the rest of a program's while such a program is
+parked (`end.c`). The VM's tables are read through `MX_PHYS_WIN` (a global entry), so every
+process's threads and the kernel may use them. `tests/ps2/vm38_vmbeside.c`.
 
 Version 19: timers are the kernel's service (`<mx/timer.h>`, `src/irq/timer.c`; the kernel
 builds its maxsdk with `MX_SOFT_TIMER=1`). Software timers (`mx_timer_add`, once or every

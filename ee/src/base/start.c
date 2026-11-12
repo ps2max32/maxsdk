@@ -173,8 +173,13 @@ int mx_loader_launch(int argc, const char *args, u32 args_len, const char *swap)
     swap_copy[n] = swap[n];
   swap_copy[n] = 0;
   mx_debug_flush();
+#ifndef MX_KERNEL
   mx__vm_shutdown();
   mx__vm_swap_close();
+#endif
+  /* libmxk: the kernel's launch; the program waits (its VM stays, an address
+     space of its own, mx OS plan 3a), or the kernel ends its VM before it
+     starts the other in its place */
   return loader_launch(argc, args_copy, args_len, swap ? swap_copy : 0);
 }
 

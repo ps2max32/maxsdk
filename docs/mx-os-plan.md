@@ -376,8 +376,21 @@ Steps, each on the PS2 on its own:
     space; a switch clears the VM's TLB entries and points `tlb.S`'s fast refill at the new
     space. `tests/ps2/vm37_spaces.c`: two spaces over the same addresses on 20 frames, every
     word right after each switch (744 pages out, 680 in), a third space made and freed,
-    `mx__vm_check` consistent. Next (step 3): the kernel gives each VM program a space of its
-    own and switches it with the ASID (`kproc.c`), so a VM program may stay beside another.
+    `mx__vm_check` consistent.
+    Step 3 done 2026-11-12 (PCSX2, `kernel.md`): a VM program may wait for or run beside
+    another VM program. The kernel keeps its VM (`exec.c`'s `vm_kept`; `end.c` leaves
+    resident.ld's `__vm_*` as they are), the next program's `mx_vm_init` makes it a space of its
+    own (`kvm_init`), its core is a MiB-aligned run of the pool's frames, pinned, and `kproc.c`
+    switches the space with the ASID. `tests/ps2/vm38_vmbeside.c`: 2 MiB of a pattern in VM,
+    the same program started as a child that writes the same addresses, waited for and beside:
+    the pattern intact after each. Found on the way: `mx_loader_launch` of libmxk shut its VM
+    down before the kernel's launch (now the kernel does, only when it starts the other in its
+    place); the kernel's `tlb_restore` at a program's end undid the VM's TLB (`mx__vm_tlb_again`
+    after it); a core mapped while the VM is on lay in the VM's ring of TLB entries
+    (`mx__vm_tlb_fix`); a child's `mx_exception_init` took the VM's handlers
+    (`mx__vm_handlers_again`). Next: 3b (the frames of every process one pool: done for VM
+    programs side by side, open for core programs), 3c (the swap file, `mc0:/MXOS/SWAP.CFG`,
+    64 MiB by default), 3d (the `mxos-core` programs VM).
   - 3b, one frame pool: frames from one pool for every process's VM, in place of each
     process's own run below the core of the one beside.
   - 3c, one swap file for all processes, from `mc0:/MXOS/SWAP.CFG`.

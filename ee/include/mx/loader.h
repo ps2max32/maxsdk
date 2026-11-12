@@ -53,15 +53,16 @@ int mx_loader_mxload(void);
    one after the other, the first the path of its ELF; swap (or 0) is the
    swap file all programs share, used in place of the one they ask for.
    This program ends, or, under a kernel of version 9 with its core at a run
-   of its own (MX_CORE_HEAP) and without VM, stays: the call returns the other
+   of its own (MX_CORE_HEAP; with VM too since 2026-11-12: its VM is an
+   address space of its own then, mx OS plan 3a), stays: the call returns the other
    program's exit status (0-255) when it has ended; GS memory, the display,
    the pad's ports and open files are to be set up again then. Returns -1 if
    the program was not started by an mxlink that can do this, or the other
    could not be started (this one staying). */
 int mx_loader_launch(int argc, const char *args, u32 args_len, const char *swap);
 
-/* As mx_loader_launch for a program with its core at a run of its own and
-   without VM, under a kernel of version 12: the calling thread waits for the
+/* As mx_loader_launch for a program with its core at a run of its own (with
+   or without VM), under a kernel of version 12: the calling thread waits for the
    other's end as there, and this program's other threads go on running
    beside it, in their own address space (docs/mx-os-apps-plan.md, step
    2e-2). While the other runs they may not end the program (mx_exit), nor

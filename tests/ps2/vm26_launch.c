@@ -1,7 +1,7 @@
-/* mx_loader_launch, then the end without the restart: the launched program
-   starts after mxlink's restart, before mxlink's own clients have called
-   the IOP, so what they make then comes after the program's start. Its end
-   must leave the kernel working (the next run shows it).
+/* mx_loader_launch: the launched program runs while this one waits (an
+   address space of its own, mx OS plan 3a; before, it started after
+   mxlink's restart in this one's place), and its exit status comes back.
+   Its end must leave the kernel working (the next run shows it).
    vm26_launch.elf: it launches itself with "child".
    vm26_launch.elf launch <swap or -> <path> [args]: launches that, as the
    shell starts a game (mxlink/shell/games.c).
@@ -54,7 +54,14 @@ int main(int argc, char **argv) {
     count++;
   }
   mx_printf("vm26_launch: launching %s (%d words, swap %s)\n", args, count, swap ? swap : "-");
-  mx_loader_launch(count, args, n, swap);
+  /* a VM program waits for it since mx OS plan 3a (an address space of its
+     own): its exit status; before, it ended here and the other started in
+     its place */
+  int st = mx_loader_launch(count, args, n, swap);
+  if (st >= 0) {
+    mx_printf("vm26_launch: back from it, status %d\n", st);
+    return st;
+  }
   mx_printf("vm26_launch: no launch\n");
   return 1;
 }
