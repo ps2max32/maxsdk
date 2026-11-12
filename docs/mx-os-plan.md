@@ -423,6 +423,55 @@ Steps, each on the PS2 on its own:
   the most by itself, the background shrinks); one swap file for MXOS, its size configurable,
   64 MiB by default.
 
+- Then the address space plan's phase 4: no core. Decided (user, 2026-11-12): all programs are
+  equal, as on Linux: the shell and mxlink's app too run at the same addresses on the same VM,
+  a program that starts another waits for it (done for VM programs, `kernel.md`), and all
+  memory is swappable but some of the kernel's.
+  - Now: a program is two parts at the same virtual addresses in every process. Its core, from
+    0x0010_0000 (`ee/ld/maxsdk-vm.ld`): crt0, every archive member (libmx, libmxc, picolibc,
+    compiler-rt), the VU and HLSL objects, what is marked `MX_CORE_FN` / `MX_CORE_DATA`,
+    packets, `MX_DMA_LINES` buffers, the main stack and the core heap; a MiB-aligned run of the
+    pool's frames, pinned for the program's life (mxlink's app 1 MiB, mxshell 2-3 MiB, Quake 3
+    MiB). Its VM, from 0x0800_0000: the program's own objects, 32 KiB pages, read from its ELF
+    or zero filled, evicted by the one LRU to the one swap file. A parked program keeps its
+    whole core in physical memory.
+  - Why the core is there, and what takes its place:
+    - DMA sees physical memory only (no IOMMU). In place: pinned pages, which the VM has
+      already (`mx_vm_pin`, `mx_vm_lock`: resident, one physical run, `mx_paddr_of`). Packets,
+      `MX_DMA_LINES` buffers and the IOP's RPC buffers become pinned at the load.
+    - Code that runs with interrupts off (interrupt handlers, their callees, code under
+      `mx_di`) may only touch resident pages: a fault there that needs the swap file ends the
+      program. In place: such code and its data pinned (`MX_CORE_FN` / `MX_CORE_DATA` become
+      "pinned"), pinned by the kernel at the load.
+    - Thread stacks (the rule in `mx_thread_start`) and the main stack: pinned pages, pinned
+      when the thread is made, unpinned at its end.
+    - The libraries were core because the VM's own code ran in the program. The VM is the
+      kernel's now (resident.ld's `__vm_*`), so libraries may be paged but for what the points
+      above pin.
+  - Kept fixed: the kernel below 1 MiB (code, data, vectors, its TLB entries), each address
+    space's tables (pinned frames, read through `MX_PHYS_WIN`), and pages in a transfer.
+  - Proposed steps (2026-11-12, not started):
+    - 4a, measure: what each program has in core and why, by kind (libraries, stacks, DMA
+      buffers, packets, handlers, the core heap), from its map file; mxlink's app, mxshell,
+      Quake, the tests. The TLB's cost of paged code: refills now (Quake's timedemo on the PS2,
+      code in core: 1.02 M refills, 178 k of code, about 610 ms).
+    - 4b, pinned in place of core: `MX_PINNED_FN` / `MX_PINNED_DATA` (the `MX_CORE_*` names
+      kept as aliases), sections the kernel pins at the load; a pinned heap from the pool's
+      frames in place of the core heap (`<mx/mem.h>`); stacks pinned in VM. Archives move to
+      VM in `maxsdk-vm.ld` but for the pinned sections. Test: every k/vm test, Quake's timedemo
+      against 4a.
+    - 4c, the core gone: the kernel's loader maps every segment as pages (from the ELF or zero
+      filled) in place of `core_place`; crt0's first page is made resident before the jump; the
+      virtual range from 0x0010_0000 is VM too. A program's physical memory is its pinned pages
+      and the frames the LRU leaves it.
+    - 4d, the background shrinks: a parked program keeps only what must stay (its handlers'
+      code and data, buffers in a transfer); its packets and stacks of held threads may go.
+  - Open: whether a program's code is paged while it is in front (more refills: 24 VM TLB
+    entries of 32 KiB) or kept resident in front and paged only in the background; a check that
+    finds code reached with interrupts off that is not pinned (a fault there is a crash, not a
+    wait); VU microcode (`.vutext`) is sent by DMA: pinned or locked for the upload; programs
+    without VM (only old binaries now) leave the kernel with this phase.
+
 - The kernel no longer restarts (ExecPS2) after each program: it cleans up per process
   (threads, files, sockets, pad, sound, GS memory, interrupt handlers, VM frames).
 - Each `libmxk` program gets an ASID; its core memory (now at the BIOS's fixed mappings from
