@@ -178,7 +178,8 @@ too. `apps/mxshell/package-games.sh` writes this layout.
   look for `open name host:` in the run's log, it must be absent.
 - A run ends when the program comes back to the kernel, however it ended: the kernel (or the host link's app beside it) prints the end marker
   (`@@PS2TEST_END@@ status=N`) with its exit status. A game prints no marker of its own: the host
-  would go away while the game still ends. `MX_TEST_END` is silent under the kernel.
+  would go away while the game still ends. `MX_TEST_END` is silent under the kernel. A program the kernel
+  refuses (not an MXOS program) ends the run with status 127.
 - Quit must return to the shell with status 0. A crash ends with status 255, and the shell
   shows the kernel's report (`kernel.md`, Crashes).
 - Run on the real PS2 at 32 MiB (`/ps2-hw-test`). PCSX2 needs `PCSX2_EE=interp` for VM.
