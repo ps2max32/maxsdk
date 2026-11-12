@@ -395,7 +395,9 @@ Steps, each on the PS2 on its own:
     default) a limit on the VM's slots, which a freed space gives back.
   - 3d begun 2026-11-12: the kernel tests that stay beside another (k29-k36, k38, k42) and
     mxlink's app (the service) are VM programs and pass on PCSX2 with and without the service.
-    Left: mxshell (its DMA buffers to core; to be seen on a TV), then `mxos-core` goes.
+    mxshell too (its DMA and IOP buffers in core): on PCSX2 it starts and reaches its game list
+    as the core build did; to be seen on a TV before it goes on the card. `mxos-core` is left
+    for `k40_frame` and `k41_present` only, which test the frame pipeline without VM.
   - 3b, one frame pool: frames from one pool for every process's VM, in place of each
     process's own run below the core of the one beside.
   - 3c, one swap file for all processes, from `mc0:/MXOS/SWAP.CFG`.
