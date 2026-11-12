@@ -409,7 +409,14 @@ Each such program ends in the kernel's restart. The first start (from mxboot or 
 restarts by `ExecPS2`, which sheds the loader's threads and handlers; every restart after it
 jumps to `mxlink_start` itself (2026-11-12, plan step 2h-4c; `apps/mxos/ee/main.c`'s `restart`),
 in user mode with interrupts off on the BIOS thread it runs on: the kernel's threads,
-semaphores and interrupt handlers are its own, so there is nothing of the BIOS's to drop. Either
+semaphores and interrupt handlers are its own, so there is nothing of the BIOS's to drop.
+Since plan step 2h-4e-1 that restart keeps the kernel's vectors and tables (`kirq_keep`, not
+`kirq_off`; the tables, the syscall handlers and their flags in `.kept`), with every INTC cause
+and DMAC channel masked off until the kernel's handlers turn theirs on again (the BIOS has no
+handler of the kernel's vblank). The start-up then sets its exception and syscall handlers in
+the kernel's tables and skips the BIOS's SetupThread and SetupHeap (`start.c`'s weak
+`mx__kernel_kept`): the restart calls no BIOS, and what the kernel still calls is counted since
+its boot (on PCSX2 only SetGsCrt). Either
 way the kernel is not loaded again: `.bss`
 is cleared by the start-up, and `.data` is restored from a copy by `mxlink_start`
 (`ee/hook.S`, which fills its branches' delay slots by hand: under the assembler's reorder

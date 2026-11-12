@@ -346,6 +346,11 @@ Steps, each on the PS2 on its own:
     to the kernel's crash report.
   - 4e, its threads without the BIOS's carrier thread, and its start without the BIOS's calls
     before `kirq_on` (the IOP's reset, the SIF's set-up).
+    4e-1 done 2026-11-12 on PCSX2 (`kernel.md`): the kernel's own restart keeps its vectors and
+    tables and calls no BIOS (SetupThread, SetupHeap, the handler and syscall sets, DisableDmac
+    gone). Left: the first start (from mxboot: the BIOS's calls until `kirq_on`, then the
+    ExecPS2 that sheds the loader's threads and handlers), and the BIOS thread the kernel's
+    threads still run on (nothing calls the BIOS's scheduler after `kirq_on`).
 - *2h-5, the first MiB for the kernel.* The BIOS's memory (0x0 - 0x7_FFFF) is the kernel's
   after its boot.
 - Then the address space plan's phase 3: VM in the kernel, one frame pool, one swap file

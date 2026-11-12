@@ -93,6 +93,9 @@ static void report(void) {
 
 /* defined by the kernel (mxlink): its own fatal ends print no marker either */
 extern const int mx__kernel_self __attribute__((weak));
+/* A kernel's (weak): non-zero when it starts again on its own vectors,
+   without the BIOS's thread set-up (apps/mxos, mx OS plan 2h-4e-1) */
+int mx__kernel_kept(void) __attribute__((weak));
 
 /* The end marker. mxlink prints it when the program is back: here a host
    would stop at it and go away while the program still ends, with its files on
@@ -222,7 +225,12 @@ void mx__main(void) {
     heap_end = st < end ? (void *)MX_CORE_HI : (void *)st;
   }
 #ifndef MX_KERNEL
-  else {
+  else if (mx__kernel_kept && mx__kernel_kept()) {
+    /* a kernel's own restart on its own vectors: no BIOS thread or heap
+       set-up (its stack is crt0's, its arguments its own) */
+    uintptr_t st = (uintptr_t)__stack, end = (uintptr_t)_end;
+    heap_end = st < end ? (void *)MX_CORE_HI : (void *)st;
+  } else {
     extern char _gp[];
     mx_bios_setup_thread(_gp, __stack, (int)(uintptr_t)__stack_size, &mx__kernel_args,
                          mx_bios_exit_thread);
