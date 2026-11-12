@@ -122,15 +122,17 @@ $(VM_TESTS:%=$(OUT)/tests/%.elf): MX_TARGET = mxos
 $(VM_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
 
 # tests of the kernel's services: MXOS programs (linked into VM, code in core); those
-# that stay while another program runs (they start it, or run beside it) all in core
-# (mxos-core: the kernel has one VM, the program in front's), and k40/k41, the frame
-# pipeline without VM (vm24_home has it with VM)
+# that stay while another program runs (they start it, or run beside it) VM too since
+# the kernel gives each VM program an address space of its own (mx OS plan 3a); and
+# k40/k41 all in core: the frame pipeline without VM (vm24_home has it with VM)
 K_TESTS = k37_iopchan k43_phys k44_read k45_alldir
-K_CORE_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k38_service k42_timers \
-               k40_frame k41_present
+K_STAY_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k38_service k42_timers
+K_CORE_TESTS = k40_frame k41_present
 $(K_TESTS:%=$(OUT)/tests/%.elf): MX_TARGET = mxos
 $(K_TESTS:%=$(OUT)/tests/%.elf): MX_VM_TEXT = core
 $(K_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
+$(K_STAY_TESTS:%=$(OUT)/tests/%.elf): MX_TARGET = mxos
+$(K_STAY_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
 $(K_CORE_TESTS:%=$(OUT)/tests/%.elf): MX_TARGET = mxos-core
 $(K_CORE_TESTS:%=$(OUT)/tests/%.elf): $(LIBK)
 # the display example, an MXOS program: the video modes through mx-kernel (version 22:

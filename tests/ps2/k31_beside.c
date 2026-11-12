@@ -16,9 +16,10 @@ MX_CORE_HEAP(512 << 10);
 
 #define N 4096
 static u32 pattern[N];
-static volatile u32 vblanks, rounds, bad_mem, bad_vu, bad_asid, stop, done;
+static volatile u32 vblanks MX_CORE_DATA; /* the vblank handler's: core */
+static volatile u32 rounds, bad_mem, bad_vu, bad_asid, stop, done;
 static u32 my_asid;
-static u8 stack[16 << 10] MX_ALIGNED(16);
+static u8 stack[16 << 10] MX_ALIGNED(16) MX_CORE_DATA; /* a stack: core */
 
 static u32 asid(void) {
   u32 v;
@@ -26,7 +27,7 @@ static u32 asid(void) {
   return v & 0xFFu;
 }
 
-static void vblank(void *arg) {
+MX_CORE_FN static void vblank(void *arg) {
   (void)arg;
   vblanks++;
 }

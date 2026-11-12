@@ -18,7 +18,8 @@ MX_CORE_HEAP(512 << 10);
 static int port;
 static volatile u32 served, bad_from, stop;
 static int other = -1;
-static u8 stack[16 << 10] MX_ALIGNED(16), stack2[8 << 10] MX_ALIGNED(16);
+/* stacks: core (a VM program's too) */
+static u8 stack[16 << 10] MX_ALIGNED(16) MX_CORE_DATA, stack2[8 << 10] MX_ALIGNED(16) MX_CORE_DATA;
 static volatile int asked = 1, asked_done;
 
 /* to the other's port, once it is there: it ends without a reply */
