@@ -354,8 +354,13 @@ Steps, each on the PS2 on its own:
     `mxboot-install-mxos` (format, copydir), PCSX2's sockets network for mxeth; it boots to
     ready and runs a program from the card (`vm38_vmbeside`'s waiting part; its part beside
     another fails there with and without 4e-2: the PS2 build relies on ASIDs, which PCSX2's
-    TLB ignores). Left: the BIOS's calls before the first `kirq_on` (start.c's SetupThread,
-    the handler sets, the IOP's reset), and the BIOS thread the kernel's threads run on.
+    TLB ignores; since the kernel measures that at its start, the PS2 build runs it whole on
+    PCSX2). The first start reads its configuration after `kirq_on` and `ksched_init`, and its
+    restart keeps the vectors: after the first `kirq_on` the kernel calls the BIOS only for
+    the board's offsets (once) and, on PCSX2, SetGsCrt (measured with the PS2 build from a
+    card image). Left: the first start's own bootstrap before it (start.c's SetupThread and
+    SetupHeap, the handler sets, the poke's SetSyscall), and the BIOS thread the kernel's
+    threads run on.
 - *2h-5, the first MiB for the kernel.* The BIOS's memory (0x0 - 0x7_FFFF) is the kernel's
   after its boot.
 - Then the address space plan's phase 3: VM in the kernel, one frame pool, one swap file
