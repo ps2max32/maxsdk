@@ -444,9 +444,11 @@ A program that changed the IOP (loaded modules), an IOP that does not answer,
 those before version 8, which did not tell the kernel their interrupt slots, took it too until
 2h-2 refused them):
 
-Each such program ends in the kernel's restart. The first start (from mxboot or a loader) still
-restarts by `ExecPS2`, which sheds the loader's threads and handlers; every restart after it
-jumps to `mxlink_start` itself (2026-11-12, plan step 2h-4c; `apps/mxos/ee/main.c`'s `restart`),
+Each such program ends in the kernel's restart. Since 2026-11-12 (plan step 2h-4e-2) the first
+start's restart, too, is the kernel's own: mxboot (or PCSX2) started the kernel by `ExecPS2`, so
+there is nothing of a loader's to shed (before, it restarted by `ExecPS2` again; tested on
+PCSX2 with the PS2 build from a card image: `make READY_END=1`, the runner's `PCSX2_MC` and
+`PCSX2_NET=sockets`). Every restart jumps to `mxlink_start` itself (2026-11-12, plan step 2h-4c; `apps/mxos/ee/main.c`'s `restart`),
 in user mode with interrupts off on the BIOS thread it runs on: the kernel's threads,
 semaphores and interrupt handlers are its own, so there is nothing of the BIOS's to drop.
 Since plan step 2h-4e-1 that restart keeps the kernel's vectors and tables (`kirq_keep`, not

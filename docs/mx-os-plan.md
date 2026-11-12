@@ -348,9 +348,14 @@ Steps, each on the PS2 on its own:
     before `kirq_on` (the IOP's reset, the SIF's set-up).
     4e-1 done 2026-11-12 on PCSX2 (`kernel.md`): the kernel's own restart keeps its vectors and
     tables and calls no BIOS (SetupThread, SetupHeap, the handler and syscall sets, DisableDmac
-    gone). Left: the first start (from mxboot: the BIOS's calls until `kirq_on`, then the
-    ExecPS2 that sheds the loader's threads and handlers), and the BIOS thread the kernel's
-    threads still run on (nothing calls the BIOS's scheduler after `kirq_on`).
+    gone). 4e-2 done 2026-11-12: the first start's restart is the kernel's own jump too, no
+    ExecPS2 (only the kernel's replace still uses it). Tested on PCSX2 with the PS2 build
+    itself (not the emu build): a card image with `mc0:/MXOS`'s modules written by
+    `mxboot-install-mxos` (format, copydir), PCSX2's sockets network for mxeth; it boots to
+    ready and runs a program from the card (`vm38_vmbeside`'s waiting part; its part beside
+    another fails there with and without 4e-2: the PS2 build relies on ASIDs, which PCSX2's
+    TLB ignores). Left: the BIOS's calls before the first `kirq_on` (start.c's SetupThread,
+    the handler sets, the IOP's reset), and the BIOS thread the kernel's threads run on.
 - *2h-5, the first MiB for the kernel.* The BIOS's memory (0x0 - 0x7_FFFF) is the kernel's
   after its boot.
 - Then the address space plan's phase 3: VM in the kernel, one frame pool, one swap file
