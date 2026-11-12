@@ -445,7 +445,10 @@ command thread and sleeps; the command thread then does what ExecPS2 did:
   `.bss` of the VM, heaps, exceptions, threads, the pad and the home menu, apart in
   `ee/resident.ld`) is set back as linked, and the screen comes back with its log.
 A program that changed the IOP (loaded modules), an IOP that does not answer,
-`mx_loader_launch` and the host's reset still take the restart (programs not on `libmxk`, and
+`mx_loader_launch` and the host's reset still take the restart. Changed means since the last
+start: a program that waits (`mx_loader_launch`) makes the modules it loaded (the shell's USB
+drivers) the IOP as it was for the other's end (since 2026-11-12; before, a game the shell
+started from USB ended in the restart, and the shell and the service with it) (programs not on `libmxk`, and
 those before version 8, which did not tell the kernel their interrupt slots, took it too until
 2h-2 refused them):
 
