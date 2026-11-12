@@ -466,8 +466,10 @@ Steps, each on the PS2 on its own:
       and the frames the LRU leaves it.
     - 4d, the background shrinks: a parked program keeps only what must stay (its handlers'
       code and data, buffers in a transfer); its packets and stacks of held threads may go.
-  - Open: whether a program's code is paged while it is in front (more refills: 24 VM TLB
-    entries of 32 KiB) or kept resident in front and paged only in the background; a check that
+  - Decided (user, 2026-11-12): all of it is paged, code too and in front too; what is used
+    often stays in memory by itself (the one LRU). The TLB's refills it costs are measured
+    (4a, 4b), not avoided by pinning.
+  - Open: a check that
     finds code reached with interrupts off that is not pinned (a fault there is a crash, not a
     wait); VU microcode (`.vutext`) is sent by DMA: pinned or locked for the upload; programs
     without VM (only old binaries now) leave the kernel with this phase.
