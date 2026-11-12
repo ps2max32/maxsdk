@@ -358,9 +358,10 @@ Steps, each on the PS2 on its own:
     PCSX2). The first start reads its configuration after `kirq_on` and `ksched_init`, and its
     restart keeps the vectors: after the first `kirq_on` the kernel calls the BIOS only for
     the board's offsets (once) and, on PCSX2, SetGsCrt (measured with the PS2 build from a
-    card image). Left: the first start's own bootstrap before it (start.c's SetupThread and
-    SetupHeap, the handler sets, the poke's SetSyscall), and the BIOS thread the kernel's
-    threads run on.
+    card image). The vectors go on in the start-up itself (start.c's weak `mx__kernel_early`,
+    before `mx_exception_init`, in place of SetupHeap): the kernel's bootstrap is two BIOS
+    calls, SetupThread (its arguments, the boot path) and the poke's SetSyscall (its way into
+    kernel mode). Left: those two, and the BIOS thread the kernel's threads run on.
 - *2h-5, the first MiB for the kernel.* The BIOS's memory (0x0 - 0x7_FFFF) is the kernel's
   after its boot.
 - Then the address space plan's phase 3: VM in the kernel, one frame pool, one swap file

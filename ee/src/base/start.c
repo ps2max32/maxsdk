@@ -96,6 +96,10 @@ extern const int mx__kernel_self __attribute__((weak));
 /* A kernel's (weak): non-zero when it starts again on its own vectors,
    without the BIOS's thread set-up (apps/mxos, mx OS plan 2h-4e-1) */
 int mx__kernel_kept(void) __attribute__((weak));
+/* A kernel's (weak): its own vectors on, before the start-up sets its
+   exception handlers (into the kernel's tables then, not the BIOS's: mx OS
+   plan 2h-4e-2) and in place of the BIOS's SetupHeap */
+void mx__kernel_early(void) __attribute__((weak));
 
 /* The end marker. mxlink prints it when the program is back: here a host
    would stop at it and go away while the program still ends, with its files on
@@ -239,9 +243,15 @@ void mx__main(void) {
     extern char _gp[];
     mx_bios_setup_thread(_gp, __stack, (int)(uintptr_t)__stack_size, &mx__kernel_args,
                          mx_bios_exit_thread);
-    heap_end = mx_bios_setup_heap(_end, -1);
-    if ((char *)heap_end < _end)
-      heap_end = (void *)MX_CORE_HI;
+    if (mx__kernel_early) {
+      mx__kernel_early();
+      uintptr_t st = (uintptr_t)__stack, end = (uintptr_t)_end;
+      heap_end = st < end ? (void *)MX_CORE_HI : (void *)st;
+    } else {
+      heap_end = mx_bios_setup_heap(_end, -1);
+      if ((char *)heap_end < _end)
+        heap_end = (void *)MX_CORE_HI;
+    }
   }
 #endif
   mx_dcache_flush_all();

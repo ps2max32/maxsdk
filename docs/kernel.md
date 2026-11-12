@@ -457,7 +457,9 @@ and DMAC channel masked off until the kernel's handlers turn theirs on again (th
 handler of the kernel's vblank). The start-up then sets its exception and syscall handlers in
 the kernel's tables and skips the BIOS's SetupThread and SetupHeap (`start.c`'s weak
 `mx__kernel_kept`): the restart calls no BIOS, and what the kernel still calls is counted since
-its boot (on PCSX2 only SetGsCrt). Either
+its boot (on PCSX2 only SetGsCrt). The first start, too, turns the vectors on in its start-up
+(`mx__kernel_early`, before `mx_exception_init`) and reads its configuration after `ksched_init`:
+its only BIOS calls before the vectors are SetupThread (the boot path) and the poke's SetSyscall. Either
 way the kernel is not loaded again: `.bss`
 is cleared by the start-up, and `.data` is restored from a copy by `mxlink_start`
 (`ee/hook.S`, which fills its branches' delay slots by hand: under the assembler's reorder
