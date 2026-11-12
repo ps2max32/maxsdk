@@ -311,8 +311,8 @@ Steps, each on the PS2 on its own:
   2h-3c done 2026-11-12: an MXOS program does not build when it calls the BIOS (`kernel.md`):
   `<mx/bios.h>` only for standalone ELFs, no BIOS stubs in `libmxk`, the link checks the ELF
   for syscalls. What apps took from the BIOS: `<mx/thread.h>`'s sleep, wakeup and rotate (the
-  kernel's threads), `mx_video_board_offset` through the kernel (version 23; it calls
-  GetGsDxDyOffset itself for now, until the kernel has the BIOS's table of offsets).
+  kernel's threads), `mx_video_board_offset` through the kernel (version 23; the kernel asks
+  the BIOS's GetGsDxDyOffset for every mode code once at its start and answers from that).
 - *2h-4, the kernel without the BIOS.* Its own vectors (refill, common, interrupt) and syscall
   entry, its threads without the BIOS's carrier thread, the SIF's software registers its own.
   In parts, each tested alone (the kernel counts what still goes into the BIOS, `kernel.md`):
