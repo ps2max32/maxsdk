@@ -24,7 +24,7 @@ static const u8 hud_glyphs[][7] = {
     {1, 2, 2, 4, 8, 8, 16},       {0, 0, 0, 31, 0, 0, 0}};
 // clang-format on
 
-static u32 hud_tex[256 * 8] MX_ALIGNED(64);
+static u32 hud_tex[256 * 8] MX_ALIGNED(64) MX_CORE_BSS; /* sent by DMA */
 static u32 hud_tbp, hud_lines = 224;
 
 void mx_hud_init(u32 tbp, u32 lines) {
