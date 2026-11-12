@@ -105,6 +105,10 @@ static struct vm_space *vs = &space0; /* the running thread's (mx__vm_space_swit
    all of them: oldest, evict, the writer) */
 #define MAX_SPACES 4
 static struct vm_space *spaces[MAX_SPACES] = {&space0};
+/* the swap file's slots, taken (slot_take, below) */
+#define MAX_SLOTS 8192u /* 256 MiB */
+static u32 slot_bits[MAX_SLOTS / 32];
+int mx__vm_uses_fd(int fd);
 
 static struct {
   int active;
@@ -516,6 +520,9 @@ u32 mx__vm_tlb_entries(void) {
    written; the entries kept never changed, so the code running here stays
    mapped. VM is off after it: nothing of it may be touched. */
 static int swap_left = -1; /* the swap file, for mx__vm_swap_close */
+/* the space whose program brought the swap file (mx__vm_swap_open), 0:
+   the VM's own or MXOS's */
+static struct vm_space *swap_owner;
 void mx__vm_shutdown(void) {
   if (!tlb_saved)
     return;
@@ -634,6 +641,9 @@ int mx__vm_swap_open(const char *cfg_swap) {
     return -1;
   }
   vm.fd = fd;
+  /* the program's own file (not MXOS's): it goes with the program's space
+     (on the PS2 a host: file goes with the host's run) */
+  swap_owner = mx__loader_swap ? 0 : vs;
   return 0;
 }
 
@@ -723,9 +733,54 @@ void mx__vm_space_free(struct vm_space *n) {
   for (u32 pg = 0; pg < n->npages + n->nmap + n->nheap; pg++)
     slot_give(n->slot_of[pg]);
   spaces[n->id] = 0;
+  /* the swap file its program brought: closed with it when no other space
+     has a page in it (a host: file is gone with the host's run on the PS2,
+     and the next one's descriptors take its number) */
+  int swap_close = -1;
+  if (n == swap_owner) {
+    swap_owner = 0;
+    u32 used = 0;
+    for (u32 i = 0; i < MAX_SLOTS / 32; i++)
+      used |= slot_bits[i];
+    if (!used) {
+      swap_close = vm.fd;
+      vm.fd = -1;
+      vm.nslots = 0;
+    } else
+      mx_printf("VM: the swap file of a program that ended keeps pages of others\n");
+  }
   mx_irq_restore(was);
   unlock();
+  if (swap_close >= 0)
+    mx_fio_close(swap_close);
+  /* its ELF and mapped files: the space's own (the kernel's end of a
+     program no longer closes every descriptor, mx__vm_uses_fd) */
+  for (u32 i = 0; i < n->nseg; i++)
+    if (n->seg[i].fd >= 0) {
+      int fd = n->seg[i].fd;
+      n->seg[i].fd = -1;
+      if (!mx__vm_uses_fd(fd))
+        mx_fio_close(fd);
+    }
   mx__vm_frames_give(n, n->bytes);
+}
+
+/* fd is the VM's: its swap file, or a file of a space's pages (its ELF, a
+   mapped file). The kernel's end of a program closes the program's
+   descriptors but these: they serve the programs that go on (a service,
+   one that waits; mx OS plan 4b). */
+int mx__vm_uses_fd(int fd) {
+  if (fd < 0 || !vm.active)
+    return 0;
+  if (fd == vm.fd)
+    return 1;
+  for (int k = 0; k < MAX_SPACES; k++) {
+    struct vm_space *sp = spaces[k];
+    for (u32 i = 0; sp && i < sp->nseg; i++)
+      if (sp->seg[i].fd == fd)
+        return 1;
+  }
+  return 0;
 }
 
 /* After mx__vm_shutdown, at a normal end: on FAT and exFAT a file that is not
@@ -1075,8 +1130,6 @@ u32 mx_vm_unpin_done(void);
    the kernel's, mx__vm_swap_size): which are taken, up to the size; a
    space's go back with it (mx__vm_space_free), so the file does not grow
    with each program. */
-#define MAX_SLOTS 8192u /* 256 MiB */
-static u32 slot_bits[MAX_SLOTS / 32];
 static u32 slot_limit = MAX_SLOTS;
 void mx__vm_swap_size(u32 bytes) {
   u32 n = bytes / PAGE;

@@ -188,7 +188,13 @@ parked (`end.c`). The VM's tables are read through `MX_PHYS_WIN` (a global entry
 process's threads and the kernel may use them. `tests/ps2/vm38_vmbeside.c`. A program's
 `mx_vm_config.frames` is the most frames its space holds then (`mx__vm_space_limit`: above it,
 one of its own pages goes; otherwise one LRU over all), and its swap file is opened for all
-spaces if the VM has none yet (`mx__vm_swap_open`: a service without one turned it on). A
+spaces if the VM has none yet (`mx__vm_swap_open`: a service without one turned it on). Such a
+file is the program's own (not MXOS's `SWAP.CFG`): when its space is freed and no other space
+has a page in it, the VM closes it and has none again (since 2026-11-12: on the PS2 a `host:`
+file goes with the host's run, and the next run's descriptors took its number, so the next
+program wrote its pages into its own ELF). At a program's end the kernel closes the program's
+descriptors but the VM's (`mx__vm_uses_fd`: the swap file, the ELF and mapped files of the
+spaces that go on); a space closes its own files when it is freed. A
 program without VM that takes all memory (no core heap) does not start while a program with VM
 is parked: `k40_frame` and `k41_present` have a core heap for that.
 
