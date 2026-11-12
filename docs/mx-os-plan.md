@@ -364,8 +364,9 @@ Steps, each on the PS2 on its own:
   - 3c, one swap file for all processes, from `mc0:/MXOS/SWAP.CFG`.
   - 3d, every MXOS program VM: mxshell, mxlink's app and the kernel tests that start others
     leave `MX_TARGET=mxos-core`, which goes.
-  To decide first: how frames are shared (a fixed share per process or one LRU over all), the
-  swap file's size, and whether a program in the background may go out entirely.
+  Decided (user, 2026-11-12): one LRU over the frames of all processes (the one in front gets
+  the most by itself, the background shrinks); one swap file for MXOS, its size configurable,
+  64 MiB by default.
 
 - The kernel no longer restarts (ExecPS2) after each program: it cleans up per process
   (threads, files, sockets, pad, sound, GS memory, interrupt handlers, VM frames).
