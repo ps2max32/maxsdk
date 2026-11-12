@@ -282,6 +282,18 @@ cache and invalidates the whole instruction cache and BTAC by index: the instruc
 CACHE operations must not get an address with bit 31 set (the hardware restrictions), so not
 the vector's kseg0 address. The poke's `SetSyscall` is now only at `kirq_on` (its bootstrap).
 
+Since plan step 2h-4d-2 the interrupt vector and the syscall entry keep the interrupted (or
+calling) thread's sp, ra and at in the kernel's save area (`kvec_save`, not the BIOS's at
+0x8000_10C0), and the kernel's own positive syscalls run on its own stack (`ksys_stack`, not the
+BIOS's at 0x8001_8E70), with the BIOS's frame (ra, the caller's sp, EPC + 4). The interrupt
+lines that are not the kernel's but have a BIOS handler (only 7, the COP0 timer) go through
+`kvec_irq_bios`, which copies the three registers into the BIOS's save area for that handler and
+counts them (`(N others to the BIOS)` in the log at a program's end; 0 on PCSX2). Exception codes
+0, 11 (coprocessor unusable) and 14, 15, which the BIOS leaves to its default handler (a message
+and a break), go to the kernel's crash report. The BIOS's save area and stack are still used by
+what goes on into the BIOS: its syscalls (`ksys_orig`) and its INTC and DMAC handlers before the
+kernel's threads run.
+
 Version 22: the video timing without the BIOS (plan step 2g; `apps/mxos/ee/kvideo.c`), and
 `iop_write` (below). maxsdk
 computes the CRTC registers (SMODE1 with the PLL, SYNCH1, SYNCH2, SYNCV, SRFSH, SMODE2) from a
@@ -444,7 +456,10 @@ kernel writes the next one's entries again (`tlb_emu_asid`).
 The kernel's exception vector stays installed while a program runs. It reports what the
 VM cannot handle: registers, stack and the `trace:` line go to the host, on the kernel's
 stack. A crash inside a file call does not block the report: the file lock is given up.
-The program ends with status 255 and the kernel restarts.
+The program ends with status 255 and the kernel restarts: after the report, exception.c calls
+the kernel's `mx__crash_end`, which takes the program's way back (`mxlink_return`) while a
+program runs (before 2026-11-12 the report went on into the kernel's own `mx_exit`, which has
+no way back when PCSX2 started the kernel: the BIOS's `Exit`, a reset, and no status).
 
 The report survives the restart in the kernel's `.data`. `mx_crash_last` gives it to
 the next program (the shell shows it, `libmxk` in core), and the text screen shows it. It

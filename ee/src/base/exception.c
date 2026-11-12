@@ -79,6 +79,10 @@ static int return_address(u32 addr) {
   return (call >> 26) == 3 || ((call >> 26) == 0 && (call & 0x3f) == 9);
 }
 
+/* A kernel's (weak): ends the crashed program when it was one of its
+   programs (returns otherwise: mx_exit then). */
+void mx__crash_end(int status) __attribute__((weak));
+
 void mx__exception_report(void) {
   /* a fault in the report itself: no report of that */
   static int reporting;
@@ -141,6 +145,10 @@ void mx__exception_report(void) {
     mx_printf(" %08x", c.trace[i]);
   mx_printf("\n");
   MX_TEST_END(255);
+  /* a kernel's report of its program's crash: the program's way back, not
+     the kernel's own end */
+  if (mx__crash_end)
+    mx__crash_end(255);
   mx_exit(255);
 }
 

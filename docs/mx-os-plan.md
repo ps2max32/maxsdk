@@ -339,8 +339,11 @@ Steps, each on the PS2 on its own:
     on PCSX2 with any kernel, and standalone too: PCSX2's). Not yet on the PS2: the first try
     hung at the replace, with the instruction cache invalidated by kseg0 addresses (against the
     hardware restrictions; now by index).
-    4d-2: the vectors' save area and the syscall entry's kernel stack the kernel's; the
-    interrupt lines and exception codes that are not the kernel's to its own handlers.
+    4d-2 done 2026-11-12 on PCSX2 (`kernel.md`): the vectors' save area and the syscall
+    entry's stack are the kernel's; line 7 (the COP0 timer) still goes to the BIOS's handler,
+    through a stub that gives it the BIOS's save area and counts it (0 on PCSX2: to check on
+    the PS2, then a handler of the kernel's or the line off); exception codes 0, 11, 14 and 15
+    to the kernel's crash report.
   - 4e, its threads without the BIOS's carrier thread, and its start without the BIOS's calls
     before `kirq_on` (the IOP's reset, the SIF's set-up).
 - *2h-5, the first MiB for the kernel.* The BIOS's memory (0x0 - 0x7_FFFF) is the kernel's
