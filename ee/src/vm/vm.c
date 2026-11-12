@@ -547,6 +547,7 @@ static void unlock(void);
 static void *table(u32 bytes);
 static int page_in(u32 f);
 static struct vm_space *space_in(u32 f);
+static void slot_give(u32 slot);
 
 /* Another address space: the same windows as the first (VM, the file
    window, the heap window), every page new (zero) and none from a file,
@@ -692,6 +693,8 @@ void mx__vm_space_free(struct vm_space *n) {
       vm.page_of[f] = 0;
       vm.nfree++;
     }
+  for (u32 pg = 0; pg < n->npages + n->nmap + n->nheap; pg++)
+    slot_give(n->slot_of[pg]);
   spaces[n->id] = 0;
   mx_irq_restore(was);
   unlock();
@@ -876,9 +879,18 @@ static int to_thread(struct mx__vm_x *x) {
 /* ---- the swap file ------------------------------------------------------------- */
 
 static void vm_fatal(const char *what, u32 pg) __attribute__((noreturn));
+void mx__crash_end(int status) __attribute__((weak)); /* a kernel's (exception.c) */
+static int lock_owner;
 static void vm_fatal(const char *what, u32 pg) {
   mx_printf("\nVM: %s (page %u at %p)\n", what, pg, (void *)(uintptr_t)page_va(pg));
   MX_TEST_END(255);
+  /* in a kernel, for its program: the program's way back, the VM's lock
+     given up (the end cleans up with it) */
+  if (mx__crash_end) {
+    if (lock_owner && lock_owner == mx_thread_self())
+      unlock();
+    mx__crash_end(255);
+  }
   mx_exit(255);
 }
 
@@ -1032,6 +1044,32 @@ int mx__vm_file_pages(int fd, u32 va, u32 filesz, u32 offset) {
 
 u32 mx_vm_unpin_done(void);
 
+/* The swap file's slots (mx OS plan 3c: one swap file for MXOS, its size
+   the kernel's, mx__vm_swap_size): which are taken, up to the size; a
+   space's go back with it (mx__vm_space_free), so the file does not grow
+   with each program. */
+#define MAX_SLOTS 8192u /* 256 MiB */
+static u32 slot_bits[MAX_SLOTS / 32];
+static u32 slot_limit = MAX_SLOTS;
+void mx__vm_swap_size(u32 bytes) {
+  u32 n = bytes / PAGE;
+  slot_limit = n && n < MAX_SLOTS ? n : MAX_SLOTS;
+}
+static u16 slot_take(u32 pg) {
+  for (u32 i = 0; i < slot_limit; i++)
+    if (!(slot_bits[i / 32] >> (i % 32) & 1)) {
+      slot_bits[i / 32] |= 1u << (i % 32);
+      if (i + 1 > vm.nslots)
+        vm.nslots = i + 1;
+      return (u16)(i + 1);
+    }
+  vm_fatal("the swap file is full (its size: mc0:/MXOS/SWAP.CFG)", pg);
+}
+static void slot_give(u32 slot) {
+  if (slot && slot <= MAX_SLOTS)
+    slot_bits[(slot - 1) / 32] &= ~(1u << ((slot - 1) % 32));
+}
+
 /* Write page pg (busy, unmapped) out of frame f if it is dirty. */
 static void write_out_s(struct vm_space *s, u32 pg, u32 f) {
   if (!(s->flags[pg] & PG_DIRTY)) {
@@ -1041,7 +1079,7 @@ static void write_out_s(struct vm_space *s, u32 pg, u32 f) {
   if (vm.fd < 0)
     vm_fatal("out of memory: all frames in use and no swap file", pg);
   if (!s->slot_of[pg])
-    s->slot_of[pg] = (u16)++vm.nslots;
+    s->slot_of[pg] = slot_take(pg);
   swap_io_s(s, pg, f, 1);
   vm.st.swap_outs++;
   s->flags[pg] |= PG_SWAP;
@@ -1125,7 +1163,7 @@ static void writer(void *arg) {
         unmap_s(s, pg);
       mx_irq_restore(was);
       if (!s->slot_of[pg])
-        s->slot_of[pg] = (u16)++vm.nslots;
+        s->slot_of[pg] = slot_take(pg);
       unlock();
       swap_io_s(s, pg, f, 1);
       lock();
@@ -1238,12 +1276,17 @@ static void fault_in(u32 pg, int write) {
   place(pg, f >= 0 ? (u32)f : evict(), write);
 }
 
+static int lock_owner; /* the thread that has it (vm_fatal gives it up) */
 static void lock(void) {
   u32 t0 = mx_count();
   mx_bios_wait_sema(vm.lock);
+  lock_owner = mx_thread_self();
   vm.st.us_lock += (mx_count() - t0) / (MX_EE_HZ / 1000000u);
 }
-static void unlock(void) { mx_bios_signal_sema(vm.lock); }
+static void unlock(void) {
+  lock_owner = 0;
+  mx_bios_signal_sema(vm.lock);
+}
 
 /* Debugging (the same): where the slow path is: 1 entered, 2 has the
    lock, 3 done, 0 resumed. */
@@ -2065,6 +2108,8 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   if (vm.active)
     return -1;
   vm.lock = vm.swapsema = -1;
+  __builtin_memset(slot_bits, 0, sizeof slot_bits);
+  vm.nslots = 0;
   u32 size = cfg->size ? cfg->size : 128u << 20;
   if (size > MX_VM_LIMIT - MX_VM_BASE)
     size = MX_VM_LIMIT - MX_VM_BASE;

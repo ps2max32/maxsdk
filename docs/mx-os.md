@@ -97,6 +97,10 @@ Retail PS2s have 32 MiB; never count on more.
    (`<mx/irq.h>`): the kernel removes those when the program ends, not ones added to the BIOS directly.
 6. **Swap.** Set `mx_vm_config.swap` to a relative name; the shell's shared
    `<device>/PS2MAX/swap.bin` replaces it. Never truncate or assume its size.
+   With `mc0:/MXOS/SWAP.CFG` (a path, then the size in MiB, 64 by default) the kernel gives
+   every program that one file in place of its own, shared by all address spaces, and the VM
+   uses at most that size: a program that needs more ends with "the swap file is full"
+   (plan phase 3c).
 7. **DMA.** Tags, chains, DMA buffers, thread stacks and interrupt handler data must be core or
    pinned (`mx_vm_lock`, `mx_vm_pin`, `MX_CORE_FN`, `MX_CORE_DATA`), never plain VM. A physical
    address only from `mx_paddr_of` / `mx_paddr_range`, an uncached view only from `MX_UNCACHED` /

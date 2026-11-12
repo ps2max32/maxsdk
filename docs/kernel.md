@@ -182,6 +182,17 @@ image.c) is not set back, saved or loaded with the rest of a program's while suc
 parked (`end.c`). The VM's tables are read through `MX_PHYS_WIN` (a global entry), so every
 process's threads and the kernel may use them. `tests/ps2/vm38_vmbeside.c`.
 
+One swap file for MXOS (2026-11-12, plan phase 3c; `apps/mxos/ee/main.c`'s `kswap_path`):
+`mc0:/MXOS/SWAP.CFG` (on PCSX2 `host:swap.txt`) names it and, optionally, its size in MiB (64 by
+default); read once, when the card is ready. A program whose launch gave no swap file gets it
+(`largs.swap`, in place of its `mx_vm_config.swap`), and the kernel tells vm.c the size before
+the program's `mx_vm_init` (`mx__vm_swap_size`). The VM's slots are a bitmap up to that size
+(at most 256 MiB): a space's go back when it is freed, so the file does not grow with each
+program; a page that finds none ends the program ("the swap file is full", through
+`mx__crash_end`, its lock given up). Without the file the programs' own swap files are used
+as before. `tests/ps2/vm39_swapcfg.c` (with `host:swap.txt` of 4 MiB it passes on that file,
+with 1 MiB it ends at page 32).
+
 Version 19: timers are the kernel's service (`<mx/timer.h>`, `src/irq/timer.c`; the kernel
 builds its maxsdk with `MX_SOFT_TIMER=1`). Software timers (`mx_timer_add`, once or every
 period, and `mx_sleep_us`'s sleepers) are slots of one table, each due at a COP0 Count, on EE
