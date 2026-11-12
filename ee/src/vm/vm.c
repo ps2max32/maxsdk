@@ -73,26 +73,17 @@ void mx__thread_keep(int id); /* thread.c: mx_exit leaves it */
 #define NSEG 12    /* 4 segments of the program's ELF, 8 mapped files */
 #define PG_RAW 32  /* pinned to be overwritten whole: its frame not filled */
 
-static struct {
-  int active;
-  u32 npages, nframes;
-  u8 *frames;
+/* What the VM has of one address space (mx OS plan, the address space
+   plan's phase 3a): its pages' tables, the files its pages come from, its
+   windows. One for now (space0); the frames, the swap file and the
+   threads are the VM's, below. */
+struct vm_space {
+  u32 npages;
   u32 *lo;
-  u16 *frame_of, *slot_of, *page_of;
+  u16 *frame_of, *slot_of;
   u8 *flags, *pins;
   u8 *page_slot; /* TLB entry of each page (with a trace: of each block), 0: none */
-  u32 bpp;              /* TLB entries a page can have: 1, BPP with a trace */
-  u32 nfree, free_hint;
-  int dbit;
-  int fd;
-  u32 nslots;
-  int lock;
-  struct mx_vm_stats st;
-  u32 modified_seen;
   int code; /* the program runs code from VM (ee/src/vm/image.c) */
-  int wsema;        /* wakes the writer thread; -1: none */
-  int swapsema;     /* the swap file's seek and transfer (swap_io) */
-  u32 clean_frames; /* what it keeps free or clean */
   /* pages read from files (PG_FILE): the segments of a program linked
      into VM (its ELF) and the mapped files; fd -1: a free entry */
   u32 nseg;
@@ -102,6 +93,26 @@ static struct {
   } seg[NSEG];
   u32 nmap, map_next; /* pages of the file window, the next one not given out */
   u32 nheap, heap_next; /* pages of the heap window, the next one not given out */
+};
+static struct vm_space space0;
+static struct vm_space *vs = &space0;
+
+static struct {
+  int active;
+  u32 nframes;
+  u8 *frames;
+  u16 *page_of;
+  u32 bpp;              /* TLB entries a page can have: 1, BPP with a trace */
+  u32 nfree, free_hint;
+  int dbit;
+  int fd;
+  u32 nslots;
+  int lock;
+  struct mx_vm_stats st;
+  u32 modified_seen;
+  int wsema;        /* wakes the writer thread; -1: none */
+  int swapsema;     /* the swap file's seek and transfer (swap_io) */
+  u32 clean_frames; /* what it keeps free or clean */
   u32 pinned_frames;    /* frames out of the pool as pinned memory */
   struct {
     u32 *buf, cap, n, lost;
@@ -118,29 +129,29 @@ _Static_assert(VMF_BASE_PAGE == MX_VM_BASE >> PAGE_SHIFT, "tlb.S");
 /* The tables' pages: VM's (0 .. npages), the file window's (.. + nmap),
    the heap window's (.. + nheap). */
 static u32 page_va(u32 pg) {
-  if (pg < vm.npages)
+  if (pg < vs->npages)
     return MX_VM_BASE + pg * PAGE;
-  if (pg < vm.npages + vm.nmap)
-    return MX_VM_MAP_BASE + (pg - vm.npages) * PAGE;
-  return MX_VM_HEAP_BASE + (pg - vm.npages - vm.nmap) * PAGE;
+  if (pg < vs->npages + vs->nmap)
+    return MX_VM_MAP_BASE + (pg - vs->npages) * PAGE;
+  return MX_VM_HEAP_BASE + (pg - vs->npages - vs->nmap) * PAGE;
 }
 
 /* The page of va, or ~0 (outside the windows in use). */
 static u32 va_page(u32 va) {
-  if (va - MX_VM_BASE < vm.npages * PAGE)
+  if (va - MX_VM_BASE < vs->npages * PAGE)
     return (va - MX_VM_BASE) >> PAGE_SHIFT;
-  if (va - MX_VM_MAP_BASE < vm.nmap * PAGE)
-    return vm.npages + ((va - MX_VM_MAP_BASE) >> PAGE_SHIFT);
-  if (va - MX_VM_HEAP_BASE < vm.nheap * PAGE)
-    return vm.npages + vm.nmap + ((va - MX_VM_HEAP_BASE) >> PAGE_SHIFT);
+  if (va - MX_VM_MAP_BASE < vs->nmap * PAGE)
+    return vs->npages + ((va - MX_VM_MAP_BASE) >> PAGE_SHIFT);
+  if (va - MX_VM_HEAP_BASE < vs->nheap * PAGE)
+    return vs->npages + vs->nmap + ((va - MX_VM_HEAP_BASE) >> PAGE_SHIFT);
   return ~0u;
 }
 
 /* a page of the file window: read-only */
-static int is_mapped(u32 pg) { return pg - vm.npages < vm.nmap; }
-static u32 npages_all(void) { return vm.npages + vm.nmap + vm.nheap; }
+static int is_mapped(u32 pg) { return pg - vs->npages < vs->nmap; }
+static u32 npages_all(void) { return vs->npages + vs->nmap + vs->nheap; }
 
-void mx__vm_code(void) { vm.code = 1; }
+void mx__vm_code(void) { vs->code = 1; }
 
 /* A frame got new contents (written through the D-cache, or by DMA): with
    code in VM, out of the D-cache and the I-cache before the page is mapped.
@@ -148,7 +159,7 @@ void mx__vm_code(void) { vm.code = 1; }
    the same index, so a line of the frame's page before could still hit.
    Thread code with interrupts on (positive syscalls turn them on). */
 static void code_sync(void) {
-  if (vm.code) {
+  if (vs->code) {
     mx_dcache_flush_all();
     mx_icache_invalidate_all();
   }
@@ -164,7 +175,7 @@ struct mx__vm_x mx__vm_xs MX_ALIGNED(16);
 u8 mx__vm_xstack[8192] MX_ALIGNED(16);
 
 int mx_vm_active(void) { return vm.active; }
-u32 mx_vm_size(void) { return vm.npages * PAGE; }
+u32 mx_vm_size(void) { return vs->npages * PAGE; }
 
 static u8 *frame_ptr(u32 f) { return vm.frames + f * PAGE; }
 
@@ -204,7 +215,7 @@ static u32 tlb_take(void) {
   F.next_slot = F.next_of[s];
   u32 old = F.slot_page[s];
   if (old)
-    vm.page_slot[old - 1] = 0;
+    vs->page_slot[old - 1] = 0;
   F.slot_page[s] = 0;
   return s;
 }
@@ -223,7 +234,7 @@ static u32 tr_seen(u32 bi) {
   return (v >> 2) == (vm.tr.epoch & 63) ? v & 3 : 0;
 }
 static void blk_write(u32 s, u32 pg, u32 b) {
-  u32 lo = vm.lo[pg] + (b * BLK >> 12 << 6);
+  u32 lo = vs->lo[pg] + (b * BLK >> 12 << 6);
   if (vm.dbit && !(tr_seen(pg * BPP + b) & 2))
     lo &= ~LO_D;
   tlb_write(s, PM4K, (page_va(pg) + b * BLK) | mx__asid, lo, lo + (4096 >> 12 << 6));
@@ -234,14 +245,14 @@ static void blk_write(u32 s, u32 pg, u32 b) {
    blocks: those in the TLB rewritten, no new ones (blk_fill). Interrupts
    off (or at EXL). */
 static void tlb_sync(u32 pg) {
-  u32 lo = vm.lo[pg];
+  u32 lo = vs->lo[pg];
   for (u32 b = 0; b < vm.bpp; b++) {
-    u32 bi = pg * vm.bpp + b, s = vm.page_slot[bi];
+    u32 bi = pg * vm.bpp + b, s = vs->page_slot[bi];
     if (!(lo & LO_V)) {
       if (s) {
         tlb_clear(s);
         F.slot_page[s] = 0;
-        vm.page_slot[bi] = 0;
+        vs->page_slot[bi] = 0;
       }
     } else if (vm.bpp > 1) {
       if (s)
@@ -249,7 +260,7 @@ static void tlb_sync(u32 pg) {
     } else {
       if (!s) {
         s = tlb_take();
-        vm.page_slot[bi] = (u8)s;
+        vs->page_slot[bi] = (u8)s;
         F.slot_page[s] = (u16)(bi + 1);
       }
       tlb_write(s, PM16K, page_va(pg) | mx__asid, lo, lo + (HALF >> 12 << 6));
@@ -281,10 +292,10 @@ static void tr_note(u32 bi, int write) {
 static void blk_fill(u32 pg, u32 va, int write) {
   u32 b = (va - page_va(pg)) / BLK, bi = pg * BPP + b;
   tr_note(bi, write);
-  u32 s = vm.page_slot[bi];
+  u32 s = vs->page_slot[bi];
   if (!s) {
     s = tlb_take();
-    vm.page_slot[bi] = (u8)s;
+    vs->page_slot[bi] = (u8)s;
     F.slot_page[s] = (u16)(bi + 1);
   }
   blk_write(s, pg, b);
@@ -311,7 +322,7 @@ static void tr_tick(void) {
     u32 q = F.slot_page[i];
     if (q) {
       tlb_clear(i);
-      vm.page_slot[q - 1] = 0;
+      vs->page_slot[q - 1] = 0;
       F.slot_page[i] = 0;
     }
   }
@@ -336,7 +347,7 @@ static void vblank(void) {
     u32 q = F.slot_page[i];
     if (q) {
       tlb_clear(i);
-      vm.page_slot[q - 1] = 0;
+      vs->page_slot[q - 1] = 0;
       F.slot_page[i] = 0;
     }
   }
@@ -364,7 +375,7 @@ int mx_vm_trace_save(const char *path) {
   int was = mx_di();
   u32 n = vm.tr.n, lost = vm.tr.lost;
   mx_irq_restore(was);
-  struct mx_vm_trace_head h = {MX_VM_TRACE_MAGIC, 1, PAGE, BLK, vm.npages, vm.nmap,
+  struct mx_vm_trace_head h = {MX_VM_TRACE_MAGIC, 1, PAGE, BLK, vs->npages, vs->nmap,
                                vm.nframes, vm.tr.every_ms, n, lost};
   int fd = mx_fio_open(path, MX_FIO_WRONLY | MX_FIO_CREAT | MX_FIO_TRUNC);
   if (fd < 0)
@@ -517,18 +528,18 @@ void mx__vm_swap_close(void) {
 /* Map resident page pg; write: the access is a store. Interrupts off. */
 static void map(u32 pg, int write) {
   if ((write || !vm.dbit) && !is_mapped(pg)) /* mapped files: never D */
-    vm.flags[pg] |= PG_DIRTY;
-  u32 f = vm.frame_of[pg] - 1u;
+    vs->flags[pg] |= PG_DIRTY;
+  u32 f = vs->frame_of[pg] - 1u;
   /* not global (no LO_G): the process's, under its ASID */
-  vm.lo[pg] = mx_paddr_of(frame_ptr(f)).v >> 12 << 6 | LO_CACHED | LO_V |
-              (vm.flags[pg] & PG_DIRTY ? LO_D : 0);
-  vm.flags[pg] |= PG_REF;
+  vs->lo[pg] = mx_paddr_of(frame_ptr(f)).v >> 12 << 6 | LO_CACHED | LO_V |
+              (vs->flags[pg] & PG_DIRTY ? LO_D : 0);
+  vs->flags[pg] |= PG_REF;
   F.stamp[pg] = F.refills;
   tlb_sync(pg);
 }
 
 static void unmap(u32 pg) {
-  vm.lo[pg] = 0;
+  vs->lo[pg] = 0;
   tlb_sync(pg);
   if (vm.tr.seen) /* the trace: touched again, recorded again */
     for (u32 b = 0; b < BPP; b++)
@@ -558,7 +569,7 @@ static int page_in(u32 f) {
 }
 
 static void frame_give(u32 pg, u32 f) {
-  vm.frame_of[pg] = (u16)(f + 1);
+  vs->frame_of[pg] = (u16)(f + 1);
   vm.page_of[f] = (u16)(pg + 1);
 }
 
@@ -616,14 +627,14 @@ int mx__vm_exception(struct mx__vm_x *x) {
       mx__exception_note = "VM: a store to a mapped file (mx_vm_map_file: read-only)";
       return VMX_FATAL;
     }
-    if (!vm.frame_of[pg] || (vm.flags[pg] & PG_BUSY)) {
+    if (!vs->frame_of[pg] || (vs->flags[pg] & PG_BUSY)) {
       mx__exception_note = "VM: TLB modified on a page that is not resident";
       return VMX_FATAL;
     }
     if (vm.bpp > 1)
       blk_fill(pg, va, 1);
-    vm.flags[pg] |= PG_DIRTY;
-    vm.lo[pg] |= LO_D;
+    vs->flags[pg] |= PG_DIRTY;
+    vs->lo[pg] |= LO_D;
     F.stamp[pg] = F.refills;
     tlb_sync(pg);
     return VMX_RETURN;
@@ -632,14 +643,14 @@ int mx__vm_exception(struct mx__vm_x *x) {
   F.stamp[pg] = F.refills;
   if (x->badvaddr == x->epc + (x->cause >> 31 ? 4u : 0u)) /* an instruction fetch */
     F.refills_i++;
-  if (vm.lo[pg] & LO_V) { /* mapped, only not in the TLB */
+  if (vs->lo[pg] & LO_V) { /* mapped, only not in the TLB */
     if (vm.bpp > 1)
       blk_fill(pg, va, code == 3);
     else
       tlb_sync(pg);
     return VMX_RETURN;
   }
-  if (vm.frame_of[pg] && !(vm.flags[pg] & PG_BUSY)) { /* the clock took V away */
+  if (vs->frame_of[pg] && !(vs->flags[pg] & PG_BUSY)) { /* the clock took V away */
     map(pg, code == 3);
     if (vm.bpp > 1)
       blk_fill(pg, va, code == 3);
@@ -733,7 +744,7 @@ static void swap_io(u32 pg, u32 f, int out) {
 
 static void swap_io1(u32 pg, u32 f, int out) {
   irq_check(0x10);
-  u32 slot = vm.slot_of[pg] - 1u;
+  u32 slot = vs->slot_of[pg] - 1u;
   volatile u32 *lg = &mx__vm_swaplog[mx__vm_swapn++ & 7];
   *lg = (u32)out << 31 | slot << 16 | f << 4;
   /* again if the file server does not answer (it can drop what it sends
@@ -772,15 +783,15 @@ static void file_in(u32 pg, u32 f) {
 static void file_in1(u32 pg, u32 f) {
   irq_check(0x18);
   u32 i = 0;
-  while (i < vm.nseg && !(vm.seg[i].fd >= 0 && pg - vm.seg[i].pg < vm.seg[i].npg))
+  while (i < vs->nseg && !(vs->seg[i].fd >= 0 && pg - vs->seg[i].pg < vs->seg[i].npg))
     i++;
-  if (i == vm.nseg)
+  if (i == vs->nseg)
     vm_fatal("a file page outside the files", pg);
-  u32 off = (pg - vm.seg[i].pg) * PAGE;
-  u32 at = vm.seg[i].offset + off, n = vm.seg[i].filesz - off;
+  u32 off = (pg - vs->seg[i].pg) * PAGE;
+  u32 at = vs->seg[i].offset + off, n = vs->seg[i].filesz - off;
   if (n > PAGE)
     n = PAGE;
-  int fd = vm.seg[i].fd;
+  int fd = vs->seg[i].fd;
   int got = -1, sought = -1;
   for (int tries = 0; tries < 4 && got != (int)n; tries++) {
     if (tries)
@@ -801,21 +812,21 @@ static void file_in1(u32 pg, u32 f) {
    entry, or -1. The lock is held (or VM is starting). */
 static int file_pages(int fd, u32 pg, u32 filesz, u32 offset) {
   u32 i = 0; /* a free entry (unmapped, its pages given back) */
-  while (i < vm.nseg && (vm.seg[i].fd >= 0 || vm.seg[i].npg))
+  while (i < vs->nseg && (vs->seg[i].fd >= 0 || vs->seg[i].npg))
     i++;
   if (i == NSEG)
     return -1;
   u32 npg = (filesz + PAGE - 1) / PAGE;
-  vm.seg[i].pg = pg;
-  vm.seg[i].npg = npg;
-  vm.seg[i].filesz = filesz;
-  vm.seg[i].offset = offset;
-  vm.seg[i].fd = fd;
-  if (i == vm.nseg)
-    vm.nseg++;
+  vs->seg[i].pg = pg;
+  vs->seg[i].npg = npg;
+  vs->seg[i].filesz = filesz;
+  vs->seg[i].offset = offset;
+  vs->seg[i].fd = fd;
+  if (i == vs->nseg)
+    vs->nseg++;
   int was = mx_di();
   for (u32 p = pg; p < pg + npg; p++)
-    vm.flags[p] |= PG_FILE;
+    vs->flags[p] |= PG_FILE;
   mx_irq_restore(was);
   return (int)i;
 }
@@ -823,7 +834,7 @@ static int file_pages(int fd, u32 pg, u32 filesz, u32 offset) {
 /* ee/src/vm/image.c: pages [va, va + filesz) come from the ELF open as fd, at
    offset; va on a page. The rest of the segment is new pages (zero). */
 int mx__vm_file_pages(int fd, u32 va, u32 filesz, u32 offset) {
-  if ((va & (PAGE - 1)) || va < MX_VM_BASE || va - MX_VM_BASE + filesz > vm.npages * PAGE)
+  if ((va & (PAGE - 1)) || va < MX_VM_BASE || va - MX_VM_BASE + filesz > vs->npages * PAGE)
     return -1;
   return file_pages(fd, (va - MX_VM_BASE) >> PAGE_SHIFT, filesz, offset) < 0 ? -1 : 0;
 }
@@ -832,17 +843,17 @@ u32 mx_vm_unpin_done(void);
 
 /* Write page pg (busy, unmapped) out of frame f if it is dirty. */
 static void write_out(u32 pg, u32 f) {
-  if (!(vm.flags[pg] & PG_DIRTY)) {
+  if (!(vs->flags[pg] & PG_DIRTY)) {
     vm.st.drops++;
     return;
   }
   if (vm.fd < 0)
     vm_fatal("out of memory: all frames in use and no swap file", pg);
-  if (!vm.slot_of[pg])
-    vm.slot_of[pg] = (u16)++vm.nslots;
+  if (!vs->slot_of[pg])
+    vs->slot_of[pg] = (u16)++vm.nslots;
   swap_io(pg, f, 1);
   vm.st.swap_outs++;
-  vm.flags[pg] |= PG_SWAP;
+  vs->flags[pg] |= PG_SWAP;
 }
 
 /* ---- the writer thread (mx_vm_config.clean_frames) ------------------------ */
@@ -861,7 +872,7 @@ static u32 oldest(u32 k, u32 *out) {
     return 0;
   for (u32 f = 0; f < vm.nframes; f++) {
     int q = page_in(f);
-    if (q < 0 || vm.pins[q] || (vm.flags[q] & PG_BUSY))
+    if (q < 0 || vs->pins[q] || (vs->flags[q] & PG_BUSY))
       continue;
     u32 a = F.refills - F.stamp[q], i = n < k ? n++ : k;
     if (i == k && a <= age[k - 1])
@@ -884,7 +895,7 @@ static int dirty_candidate(void) {
   u32 n = oldest(k, pg);
   int q = -1;
   for (u32 i = 0; i < n && q < 0; i++)
-    if (vm.flags[pg[i]] & PG_DIRTY)
+    if (vs->flags[pg[i]] & PG_DIRTY)
       q = (int)pg[i];
   mx_irq_restore(was);
   return q;
@@ -901,27 +912,27 @@ static void writer(void *arg) {
       int q = dirty_candidate();
       if (q < 0)
         break;
-      u32 pg = (u32)q, f = vm.frame_of[pg] - 1u;
+      u32 pg = (u32)q, f = vs->frame_of[pg] - 1u;
       /* pinned for the write (not evicted, not moved); clean from now: a
          store meanwhile makes it dirty again (TLB modified; on PCSX2, which
          ignores D, it is unmapped and dirty when mapped again) */
       int was = mx_di();
-      vm.pins[pg]++;
-      vm.flags[pg] &= (u8)~PG_DIRTY;
+      vs->pins[pg]++;
+      vs->flags[pg] &= (u8)~PG_DIRTY;
       if (vm.dbit) {
-        vm.lo[pg] &= ~LO_D;
+        vs->lo[pg] &= ~LO_D;
         tlb_sync(pg);
       } else
         unmap(pg);
       mx_irq_restore(was);
-      if (!vm.slot_of[pg])
-        vm.slot_of[pg] = (u16)++vm.nslots;
+      if (!vs->slot_of[pg])
+        vs->slot_of[pg] = (u16)++vm.nslots;
       unlock();
       swap_io(pg, f, 1);
       lock();
       was = mx_di();
-      vm.pins[pg]--;
-      vm.flags[pg] |= PG_SWAP;
+      vs->pins[pg]--;
+      vs->flags[pg] |= PG_SWAP;
       mx_irq_restore(was);
       vm.st.writer_outs++;
     }
@@ -975,14 +986,14 @@ static u32 evict(void) {
     mx_irq_restore(was);
     vm_fatal("out of memory: every frame is pinned", 0);
   }
-  u32 fr = vm.frame_of[pg] - 1u;
+  u32 fr = vs->frame_of[pg] - 1u;
   unmap(pg);
-  vm.flags[pg] |= PG_BUSY;
+  vs->flags[pg] |= PG_BUSY;
   mx_irq_restore(was);
   write_out(pg, fr);
   was = mx_di();
-  vm.flags[pg] &= (u8)~(PG_BUSY | PG_DIRTY | PG_REF);
-  vm.frame_of[pg] = 0;
+  vs->flags[pg] &= (u8)~(PG_BUSY | PG_DIRTY | PG_REF);
+  vs->frame_of[pg] = 0;
   vm.page_of[fr] = FRAME_TAKEN;
   mx_irq_restore(was);
   return fr;
@@ -992,13 +1003,13 @@ static u32 evict(void) {
    lock is held. */
 static void place(u32 pg, u32 f, int write) {
   int was = mx_di();
-  vm.flags[pg] |= PG_BUSY; /* another thread's fault waits */
+  vs->flags[pg] |= PG_BUSY; /* another thread's fault waits */
   mx_irq_restore(was);
-  if (vm.flags[pg] & PG_SWAP) {
+  if (vs->flags[pg] & PG_SWAP) {
     swap_io(pg, f, 0);
     code_sync();
     vm.st.swap_ins++;
-  } else if (vm.flags[pg] & PG_FILE) {
+  } else if (vs->flags[pg] & PG_FILE) {
     file_in(pg, f);
     code_sync();
     vm.st.file_ins++;
@@ -1007,7 +1018,7 @@ static void place(u32 pg, u32 f, int write) {
     vm.st.zero_fills++;
   }
   was = mx_di();
-  vm.flags[pg] &= (u8)~PG_BUSY;
+  vs->flags[pg] &= (u8)~PG_BUSY;
   frame_give(pg, f);
   map(pg, write);
   mx_irq_restore(was);
@@ -1016,7 +1027,7 @@ static void place(u32 pg, u32 f, int write) {
 /* Page pg resident and mapped. The lock is held. */
 static void fault_in(u32 pg, int write) {
   int was = mx_di();
-  if (vm.frame_of[pg]) {
+  if (vs->frame_of[pg]) {
     map(pg, write);
     mx_irq_restore(was);
     return;
@@ -1076,9 +1087,9 @@ static int in_vm(const void *p, u32 bytes) {
 
 /* Frames [f0, f0 + n) hold pages a.. in order? */
 static int contiguous(u32 a, u32 n) {
-  u32 f0 = vm.frame_of[a];
+  u32 f0 = vs->frame_of[a];
   for (u32 i = 0; i < n; i++)
-    if (!f0 || vm.frame_of[a + i] != f0 + i)
+    if (!f0 || vs->frame_of[a + i] != f0 + i)
       return 0;
   return 1;
 }
@@ -1094,7 +1105,7 @@ static void vacate(u32 fr, u32 lo, u32 hi) {
     if (!vm.page_of[f] && (f < lo || f >= hi))
       to = (int)f;
   unmap(q);
-  vm.flags[q] |= PG_BUSY;
+  vs->flags[q] |= PG_BUSY;
   if (to >= 0) {
     vm.nfree--;
     vm.page_of[to] = FRAME_TAKEN;
@@ -1106,15 +1117,15 @@ static void vacate(u32 fr, u32 lo, u32 hi) {
     write_out(q, fr);
   irq_check(0x20);
   was = mx_di();
-  vm.flags[q] &= (u8)~PG_BUSY;
+  vs->flags[q] &= (u8)~PG_BUSY;
   vm.page_of[fr] = 0;
   vm.nfree++;
   if (to >= 0) {
     frame_give(q, (u32)to);
     map(q, 0);
   } else {
-    vm.flags[q] &= (u8)~(PG_DIRTY | PG_REF);
-    vm.frame_of[q] = 0;
+    vs->flags[q] &= (u8)~(PG_DIRTY | PG_REF);
+    vs->frame_of[q] = 0;
   }
   mx_irq_restore(was);
 }
@@ -1126,7 +1137,7 @@ static void vacate(u32 fr, u32 lo, u32 hi) {
 static void gather(u32 a, u32 n, u32 f0) {
   for (u32 i = 0; i < n; i++) {
     u32 fr = f0 + i, pg = a + i;
-    if (vm.frame_of[pg] == fr + 1)
+    if (vs->frame_of[pg] == fr + 1)
       continue;
     if (page_in(fr) >= 0)
       vacate(fr, f0, f0 + n);
@@ -1134,15 +1145,15 @@ static void gather(u32 a, u32 n, u32 f0) {
     int was = mx_di();
     vm.page_of[fr] = FRAME_TAKEN;
     vm.nfree--;
-    if (vm.frame_of[pg]) { /* resident elsewhere: copy it here */
-      u32 from = vm.frame_of[pg] - 1u;
+    if (vs->frame_of[pg]) { /* resident elsewhere: copy it here */
+      u32 from = vs->frame_of[pg] - 1u;
       unmap(pg);
-      vm.flags[pg] |= PG_BUSY;
+      vs->flags[pg] |= PG_BUSY;
       mx_irq_restore(was);
       copy_frame(fr, (int)from);
       irq_check(0x22);
       was = mx_di();
-      vm.flags[pg] &= (u8)~PG_BUSY;
+      vs->flags[pg] &= (u8)~PG_BUSY;
       vm.page_of[from] = 0;
       vm.nfree++;
       frame_give(pg, fr);
@@ -1162,7 +1173,7 @@ static int find_run(u32 a, u32 n) {
     for (; i < n; i++) {
       int q = page_in(f0 + i);
       if (vm.page_of[f0 + i] >= FRAME_PINNED ||
-          (q >= 0 && vm.pins[q] && ((u32)q < a || (u32)q >= a + n)))
+          (q >= 0 && vs->pins[q] && ((u32)q < a || (u32)q >= a + n)))
         break;
     }
     if (i == n)
@@ -1186,7 +1197,7 @@ int mx_vm_pin(const void *p, u32 bytes, u32 flags) {
     int f0 = -1;
     /* pinned pages may be in use by a transfer: they are not moved */
     for (u32 pg = a; pg <= b && f0 == -1; pg++)
-      if (vm.pins[pg])
+      if (vs->pins[pg])
         f0 = -2;
     if (f0 == -1)
       f0 = find_run(a, n);
@@ -1200,7 +1211,7 @@ int mx_vm_pin(const void *p, u32 bytes, u32 flags) {
   u32 lo = (u32)(uintptr_t)p, hi = lo + bytes;
   for (u32 pg = a; pg <= b; pg++) {
     u32 va = page_va(pg);
-    if ((flags & MX_VM_PIN_OVERWRITE) && va >= lo && va + PAGE <= hi && !vm.frame_of[pg]) {
+    if ((flags & MX_VM_PIN_OVERWRITE) && va >= lo && va + PAGE <= hi && !vs->frame_of[pg]) {
       /* overwritten whole: a frame, nothing read into it */
       int was = mx_di();
       int f = frame_take();
@@ -1208,19 +1219,19 @@ int mx_vm_pin(const void *p, u32 bytes, u32 flags) {
       f = f >= 0 ? f : (int)evict();
       was = mx_di();
       frame_give(pg, (u32)f);
-      vm.flags[pg] |= PG_RAW;
+      vs->flags[pg] |= PG_RAW;
       map(pg, 1);
       mx_irq_restore(was);
       vm.st.overwrites++;
     } else
       fault_in(pg, (flags & MX_VM_PIN_WRITE) != 0);
-    if (vm.pins[pg] == 255)
+    if (vs->pins[pg] == 255)
       vm_fatal("mx_vm_pin: pinned 255 times", pg);
     int was = mx_di();
-    if (!vm.pins[pg]++)
+    if (!vs->pins[pg]++)
       vm.st.pinned++;
     if (flags & MX_VM_PIN_WRITE) {
-      vm.flags[pg] |= PG_DIRTY;
+      vs->flags[pg] |= PG_DIRTY;
       map(pg, 1);
     }
     if (vm.tr.seen) /* the trace: the blocks the DMAC or the IOP touches */
@@ -1243,17 +1254,17 @@ void mx_vm_overwrite_done(const void *p, u32 bytes, u32 done) {
   u32 end = (u32)(uintptr_t)p + done;
   lock();
   for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b; pg++) {
-    if (!(vm.flags[pg] & PG_RAW))
+    if (!(vs->flags[pg] & PG_RAW))
       continue;
     u32 va = page_va(pg), from = end > va ? end - va : 0;
-    u8 *d = frame_ptr(vm.frame_of[pg] - 1u);
+    u8 *d = frame_ptr(vs->frame_of[pg] - 1u);
     if (from < PAGE) {
-      if (vm.flags[pg] & (PG_SWAP | PG_FILE)) {
+      if (vs->flags[pg] & (PG_SWAP | PG_FILE)) {
         int was = mx_di();
         int t = frame_take();
         mx_irq_restore(was);
         u32 tf = t >= 0 ? (u32)t : evict();
-        if (vm.flags[pg] & PG_SWAP)
+        if (vs->flags[pg] & PG_SWAP)
           swap_io(pg, tf, 0);
         else
           file_in(pg, tf);
@@ -1268,7 +1279,7 @@ void mx_vm_overwrite_done(const void *p, u32 bytes, u32 done) {
       code_sync();
     }
     int was = mx_di();
-    vm.flags[pg] &= (u8)~PG_RAW;
+    vs->flags[pg] &= (u8)~PG_RAW;
     mx_irq_restore(was);
   }
   unlock();
@@ -1279,9 +1290,9 @@ void mx_vm_unpin(const void *p, u32 bytes) {
     return;
   int was = mx_di();
   for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b; pg++)
-    if (vm.pins[pg] && !--vm.pins[pg]) {
+    if (vs->pins[pg] && !--vs->pins[pg]) {
       vm.st.pinned--;
-      vm.flags[pg] &= (u8)~PG_RAW; /* overwritten (or not: then its contents are lost) */
+      vs->flags[pg] &= (u8)~PG_RAW; /* overwritten (or not: then its contents are lost) */
     }
   mx_irq_restore(was);
 }
@@ -1321,7 +1332,7 @@ void mx_vm_unpin_after(const void *p, u32 bytes, mx_event e) {
 }
 
 static mx_paddr page_paddr(u32 pg) {
-  return mx_paddr_of(frame_ptr(vm.frame_of[pg] - 1u));
+  return mx_paddr_of(frame_ptr(vs->frame_of[pg] - 1u));
 }
 
 static void pieces_fault(const void *p, u32 bytes, const char *what) __attribute__((noreturn));
@@ -1342,7 +1353,7 @@ u32 mx_vm_pieces(const void *p, u32 bytes, struct mx_vm_piece *pc, u32 max) {
     pieces_fault(p, bytes, "VM not in use there");
   u32 n = 0, off = (uintptr_t)p & (PAGE - 1);
   for (u32 pg = first_page(p), left = bytes; left;) {
-    if (!vm.pins[pg] || !vm.frame_of[pg])
+    if (!vs->pins[pg] || !vs->frame_of[pg])
       pieces_fault(p, bytes, "VM not pinned (mx_vm_pin)");
     u32 k = PAGE - off < left ? PAGE - off : left;
     mx_paddr a = mx_paddr_add(page_paddr(pg), off);
@@ -1369,7 +1380,7 @@ struct mx_vm_piece mx_vm_first_piece(const void *p, u32 bytes) {
     pieces_fault(p, bytes, "VM not in use there");
   u32 off = (uintptr_t)p & (PAGE - 1), got = 0;
   for (u32 pg = first_page(p); got < bytes; pg++, off = 0) {
-    if (!vm.pins[pg] || !vm.frame_of[pg])
+    if (!vs->pins[pg] || !vs->frame_of[pg])
       pieces_fault(p, bytes, "VM not pinned (mx_vm_pin)");
     mx_paddr a = mx_paddr_add(page_paddr(pg), off);
     if (got && pc.addr.v + got != a.v)
@@ -1410,7 +1421,7 @@ static int pin_run(u32 n) {
       if (vm.page_of[f] >= FRAME_PINNED)
         break;
       int q = page_in(f);
-      if (q >= 0 && (vm.pins[q] || (vm.flags[q] & PG_BUSY)))
+      if (q >= 0 && (vs->pins[q] || (vs->flags[q] & PG_BUSY)))
         break;
     }
     if (i == n)
@@ -1466,9 +1477,9 @@ u32 mx__vm_va_take(u32 bytes) {
   u32 n = (bytes + PAGE - 1) / PAGE;
   int was = mx_di();
   u32 r = 0;
-  if (vm.active && vm.heap_next + n <= vm.nheap) {
-    r = MX_VM_HEAP_BASE + vm.heap_next * PAGE;
-    vm.heap_next += n;
+  if (vm.active && vs->heap_next + n <= vs->nheap) {
+    r = MX_VM_HEAP_BASE + vs->heap_next * PAGE;
+    vs->heap_next += n;
   }
   mx_irq_restore(was);
   return r;
@@ -1483,7 +1494,7 @@ int mx__vm_resident(const void *p, u32 bytes) {
   int was = mx_di();
   int r = 1;
   for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b && r; pg++)
-    r = vm.frame_of[pg] && !(vm.flags[pg] & PG_BUSY);
+    r = vs->frame_of[pg] && !(vs->flags[pg] & PG_BUSY);
   mx_irq_restore(was);
   return r;
 }
@@ -1497,7 +1508,7 @@ u32 mx__vm_resident_bytes(const void *p, u32 bytes) {
   int was = mx_di();
   u32 n = 0;
   for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b; pg++)
-    n += vm.frame_of[pg] ? PAGE : 0;
+    n += vs->frame_of[pg] ? PAGE : 0;
   mx_irq_restore(was);
   return n;
 }
@@ -1525,7 +1536,7 @@ static void pager(void *arg) {
         continue;
       lock();
       for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b; pg++)
-        if (!vm.frame_of[pg])
+        if (!vs->frame_of[pg])
           fault_in(pg, 0);
       unlock();
 
@@ -1567,16 +1578,16 @@ void mx__vm_discard(const void *p, u32 bytes) {
     return;
   lock();
   for (u32 pg = va_page(a), b = va_page(e - 1); pg <= b; pg++) {
-    if (vm.pins[pg] || (vm.flags[pg] & PG_BUSY))
+    if (vs->pins[pg] || (vs->flags[pg] & PG_BUSY))
       continue;
     int was = mx_di();
     unmap(pg);
-    if (vm.frame_of[pg]) {
-      vm.page_of[vm.frame_of[pg] - 1u] = 0;
+    if (vs->frame_of[pg]) {
+      vm.page_of[vs->frame_of[pg] - 1u] = 0;
       vm.nfree++;
-      vm.frame_of[pg] = 0;
+      vs->frame_of[pg] = 0;
     }
-    vm.flags[pg] = 0;
+    vs->flags[pg] = 0;
     mx_irq_restore(was);
   }
   unlock();
@@ -1589,7 +1600,7 @@ void mx__vm_cold(const void *p, u32 bytes) {
     return;
   int was = mx_di();
   for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b; pg++)
-    if (vm.frame_of[pg])
+    if (vs->frame_of[pg])
       F.stamp[pg] = F.refills - 0x40000000u;
   mx_irq_restore(was);
 }
@@ -1606,10 +1617,10 @@ const void *mx_vm_map_file(const char *path, u32 *size) {
   u32 npg = n > 0 ? ((u32)n + PAGE - 1) / PAGE : 0;
   const void *p = 0;
   lock();
-  if (npg && vm.map_next + npg <= vm.nmap) {
-    u32 pg = vm.npages + vm.map_next;
+  if (npg && vs->map_next + npg <= vs->nmap) {
+    u32 pg = vs->npages + vs->map_next;
     if (file_pages(fd, pg, (u32)n, 0) >= 0) {
-      vm.map_next += npg;
+      vs->map_next += npg;
       p = (const void *)(uintptr_t)page_va(pg);
     }
   }
@@ -1631,38 +1642,38 @@ void mx_vm_unmap_file(const void *p) {
     return;
   lock();
   u32 i = 0;
-  while (i < vm.nseg && !(vm.seg[i].fd >= 0 && vm.seg[i].pg == pg))
+  while (i < vs->nseg && !(vs->seg[i].fd >= 0 && vs->seg[i].pg == pg))
     i++;
-  if (i == vm.nseg) {
+  if (i == vs->nseg) {
     unlock();
     return;
   }
-  u32 npg = vm.seg[i].npg;
-  int fd = vm.seg[i].fd;
+  u32 npg = vs->seg[i].npg;
+  int fd = vs->seg[i].fd;
   for (u32 q = pg; q < pg + npg; q++) {
-    if (vm.pins[q])
+    if (vs->pins[q])
       vm_fatal("mx_vm_unmap_file: a page is pinned", q);
     int was = mx_di();
     unmap(q);
-    if (vm.frame_of[q]) {
-      vm.page_of[vm.frame_of[q] - 1u] = 0;
-      vm.frame_of[q] = 0;
+    if (vs->frame_of[q]) {
+      vm.page_of[vs->frame_of[q] - 1u] = 0;
+      vs->frame_of[q] = 0;
       vm.nfree++;
     }
-    vm.flags[q] = 0;
+    vs->flags[q] = 0;
     mx_irq_restore(was);
   }
   /* unmapped, its pages kept (npg) until the window's end comes back to
      them: the window is given out from its start */
-  vm.seg[i].fd = -1;
+  vs->seg[i].fd = -1;
   for (int k = 0; k >= 0;) {
     k = -1;
-    for (u32 j = 0; j < vm.nseg; j++)
-      if (vm.seg[j].fd < 0 && vm.seg[j].npg &&
-          vm.seg[j].pg + vm.seg[j].npg == vm.npages + vm.map_next)
+    for (u32 j = 0; j < vs->nseg; j++)
+      if (vs->seg[j].fd < 0 && vs->seg[j].npg &&
+          vs->seg[j].pg + vs->seg[j].npg == vs->npages + vs->map_next)
         k = (int)j;
     if (k >= 0)
-      vm.map_next -= vm.seg[k].npg, vm.seg[k].npg = 0;
+      vs->map_next -= vs->seg[k].npg, vs->seg[k].npg = 0;
   }
   unlock();
   mx_fio_close(fd);
@@ -1706,7 +1717,7 @@ void mx_vm_stats(struct mx_vm_stats *s) {
   *s = vm.st;
   s->refills = F.refills;
   s->refills_i = F.refills_i;
-  s->pages = vm.npages;
+  s->pages = vs->npages;
   s->frames = vm.nframes;
   s->free_frames = vm.nfree;
   s->pinned_frames = vm.pinned_frames;
@@ -1729,32 +1740,32 @@ u32 mx__vm_check(void) {
     u32 q = vm.page_of[f];
     if (!q)
       nfree++;
-    else if (q < FRAME_PINNED && vm.frame_of[q - 1] != f + 1)
+    else if (q < FRAME_PINNED && vs->frame_of[q - 1] != f + 1)
       r = 1u << 28 | f;
   }
   if (!r && nfree != vm.nfree)
     r = 2u << 28;
   for (u32 pg = 0; pg < npages_all() && !r; pg++) {
-    u32 f = vm.frame_of[pg];
+    u32 f = vs->frame_of[pg];
     if (f && vm.page_of[f - 1] != pg + 1)
       r = 1u << 28 | (f - 1);
-    else if ((vm.lo[pg] & LO_V) &&
-             (!f || vm.lo[pg] >> 6 != mx_paddr_of(frame_ptr(f - 1)).v >> 12))
+    else if ((vs->lo[pg] & LO_V) &&
+             (!f || vs->lo[pg] >> 6 != mx_paddr_of(frame_ptr(f - 1)).v >> 12))
       r = 3u << 28 | pg;
   }
   for (u32 s = 0; s < TLB_N && !r; s++) {
     u32 q = F.slot_page[s];
     if (q) {
       u32 pg = (q - 1) / vm.bpp, b = (q - 1) % vm.bpp;
-      if (vm.page_slot[q - 1] != s)
+      if (vs->page_slot[q - 1] != s)
         r = 4u << 28 | s;
       else {
         u32 pm, hi, lo0, lo1;
         tlb_read(s, &pm, &hi, &lo0, &lo1);
         if (vm.bpp > 1 ? pm != PM4K || (hi & ~0x1FFFu) != page_va(pg) + b * BLK ||
-                             (lo0 & ~LO_D) != ((vm.lo[pg] & ~LO_D) + (b * BLK >> 12 << 6)) ||
-                             (lo0 & LO_D & ~vm.lo[pg])
-                       : pm != PM16K || (hi & ~0x1FFFu) != page_va(pg) || lo0 != vm.lo[pg])
+                             (lo0 & ~LO_D) != ((vs->lo[pg] & ~LO_D) + (b * BLK >> 12 << 6)) ||
+                             (lo0 & LO_D & ~vs->lo[pg])
+                       : pm != PM16K || (hi & ~0x1FFFu) != page_va(pg) || lo0 != vs->lo[pg])
           r = 5u << 28 | s;
       }
     }
@@ -1787,12 +1798,12 @@ static void *table(u32 bytes) {
    without VM and mx_vm_init may be tried again. The VM_RESUME syscall
    stays set: it is only reached from VM's own faults. */
 static void undo_init(void) {
-  mx__phys_free(vm.lo), vm.lo = 0;
-  mx__phys_free(vm.frame_of), vm.frame_of = 0;
-  mx__phys_free(vm.slot_of), vm.slot_of = 0;
-  mx__phys_free(vm.flags), vm.flags = 0;
-  mx__phys_free(vm.pins), vm.pins = 0;
-  mx__phys_free(vm.page_slot), vm.page_slot = 0;
+  mx__phys_free(vs->lo), vs->lo = 0;
+  mx__phys_free(vs->frame_of), vs->frame_of = 0;
+  mx__phys_free(vs->slot_of), vs->slot_of = 0;
+  mx__phys_free(vs->flags), vs->flags = 0;
+  mx__phys_free(vs->pins), vs->pins = 0;
+  mx__phys_free(vs->page_slot), vs->page_slot = 0;
   mx__phys_free(F.stamp), F.stamp = 0;
   mx__phys_free(vm.page_of), vm.page_of = 0;
   mx__phys_free(vm.tr.seen), vm.tr.seen = 0;
@@ -1851,12 +1862,12 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
       nmap = 0xFFFE / vm.bpp > np ? 0xFFFE / vm.bpp - np : 0;
   }
   u32 nt = np + nmap + nheap; /* the tables: VM's pages, the file window's, the heap window's */
-  vm.lo = table(nt * 4);
-  vm.frame_of = table(nt * 2);
-  vm.slot_of = table(nt * 2);
-  vm.flags = table(nt);
-  vm.pins = table(nt);
-  vm.page_slot = table(nt * vm.bpp);
+  vs->lo = table(nt * 4);
+  vs->frame_of = table(nt * 2);
+  vs->slot_of = table(nt * 2);
+  vs->flags = table(nt);
+  vs->pins = table(nt);
+  vs->page_slot = table(nt * vm.bpp);
   F.stamp = table(nt * 4);
   if (cfg->trace) {
     vm.tr.seen = table(nt * BPP);
@@ -1885,7 +1896,7 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   if (nf > 0xFFFE)
     nf = 0xFFFE;
   vm.page_of = table(nf * 2);
-  if (!vm.lo || !vm.frame_of || !vm.slot_of || !vm.flags || !vm.pins || !vm.page_slot || !F.stamp ||
+  if (!vs->lo || !vs->frame_of || !vs->slot_of || !vs->flags || !vs->pins || !vs->page_slot || !F.stamp ||
       !vm.page_of || nf < 4) {
     undo_init();
     mx_printf("mx_vm_init: not enough memory (%u frames)\n", nf);
@@ -1893,10 +1904,10 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   }
   if (vm.fd < 0 && np > nf)
     np = nf;
-  vm.npages = np;
-  vm.nmap = nmap;
-  vm.nheap = nheap;
-  vm.heap_next = 0;
+  vs->npages = np;
+  vs->nmap = nmap;
+  vs->nheap = nheap;
+  vs->heap_next = 0;
   vm.pinned_frames = 0;
   /* the frames through MX_PHYS_WIN: the BIOS's mapping of them goes */
   u32 flo = mx_paddr_of(mem).v, fhi = flo + nf * PAGE;
@@ -1929,12 +1940,12 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   int faults = vm.st.zero_fills == 1 && t[1] == 1;
   vm.dbit = vm.modified_seen != 0;
   was = mx_di();
-  if (vm.frame_of[0]) {
-    vm.page_of[vm.frame_of[0] - 1u] = 0; /* free again */
-    vm.frame_of[0] = 0;
+  if (vs->frame_of[0]) {
+    vm.page_of[vs->frame_of[0] - 1u] = 0; /* free again */
+    vs->frame_of[0] = 0;
     vm.nfree++;
   }
-  vm.flags[0] = 0;
+  vs->flags[0] = 0;
   unmap(0);
   vm.st.zero_fills = vm.st.faults = 0;
   F.refills = F.refills_i = 0;
@@ -1948,9 +1959,9 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   }
   /* the fast refill (tlb.S): without a trace (a page, one entry) */
   was = mx_di();
-  F.lo = vm.lo;
-  F.page_slot = vm.page_slot;
-  F.npages = vm.bpp == 1 ? vm.npages : 0;
+  F.lo = vs->lo;
+  F.page_slot = vs->page_slot;
+  F.npages = vm.bpp == 1 ? vs->npages : 0;
   mx_irq_restore(was);
   if (cfg->trace) {
     was = mx_di();
