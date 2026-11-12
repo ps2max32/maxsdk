@@ -363,7 +363,10 @@ Steps, each on the PS2 on its own:
     calls, SetupThread (its arguments, the boot path) and the poke's SetSyscall (its way into
     kernel mode). Left: those two, and the BIOS thread the kernel's threads run on.
 - *2h-5, the first MiB for the kernel.* The BIOS's memory (0x0 - 0x7_FFFF) is the kernel's
-  after its boot.
+  after its boot. Not on PCSX2 (2026-11-12): there the kernel keeps calling SetGsCrt, whose
+  code is in that memory (the BIOS's syscall table, SCPH-70004's image: syscall 2 at
+  0x8000_BD58), and PCSX2 needs that call for the PAL rate (without it, PAL modes run at 60
+  vblanks a second, `pcsx2.md`). On the PS2 the kernel's own CRTC timing makes it free.
 - Then the address space plan's phase 3: VM in the kernel, one frame pool, one swap file
   (`mc0:/MXOS/SWAP.CFG`, no swap without it). Proposed steps (2026-11-12, not started):
   - 3a, a VM per process: vm.c's and image.c's state (about 28 KiB in the kernel now, the front
