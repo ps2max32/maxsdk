@@ -243,20 +243,17 @@ static int skip_slices(const u8 *buf, u32 size, u32 *pos) {
 
 /* ---- P and B pictures: a macroblock a BDEC, the prediction on the EE ---------- */
 
-void mx_mpeg_refs(struct mx_mpeg *m, void *frames, void *row, void *block) {
+void mx_mpeg_refs(struct mx_mpeg *m, void *frames, void *block) {
   m->frames = frames;
-  m->row = row;
   m->block = block ? block : (void *)0x70000000;
   m->ref[0] = 0, m->ref[1] = 1, m->spare = 2;
   m->nrefs = m->held = 0;
 }
 
-static u32 frame_bytes(const struct mx_mpeg *m) { return (u32)m->mbw * m->mbh * 384u; }
-/* plane c (0 Y, 1 Cb, 2 Cr) of frame f */
-static u8 *plane(const struct mx_mpeg *m, u32 f, int c) {
-  u32 mbs = (u32)m->mbw * m->mbh;
-  return m->frames + f * frame_bytes(m) + (c ? 256u * mbs + (u32)(c - 1) * 64u * mbs : 0);
-}
+/* A picture is kept as its macroblocks, each 384 bytes as the IPU's RAW8: Y
+   (16 lines of 16), Cb, Cr (8 lines of 8 each). CSC takes it as it lies, and
+   a prediction reads fewer cache lines than from planes. */
+static u8 *frame(const struct mx_mpeg *m, u32 f) { return m->frames + f * (u32)m->mbw * m->mbh * 384u; }
 
 /* Eight pixels at a time in a 64-bit register: the EE's are that wide */
 static inline u64 ld8(const u8 *p) {
@@ -276,26 +273,15 @@ static inline u64 avg4(u64 a, u64 b, u64 c, u64 d) {
   return h + ((l >> 2) & lo);
 }
 
-/* Frame f to out as RGB: a row of macroblocks at a time as RAW8 through CSC. */
+/* Frame f to out as RGB. */
 static void show(struct mx_mpeg *m, u32 f, void *out) {
   u32 mbq = m->flags & MX_IPU_RGB16 ? MX_IPU_MB_RGB16 : MX_IPU_MB_RGB32;
-  u32 ys = m->mbw * 16u, cs = m->mbw * 8u;
-  const u8 *py = plane(m, f, 0), *pb = plane(m, f, 1), *pr = plane(m, f, 2);
-  for (u32 r = 0; r < m->mbh; r++) {
-    u8 *d = m->row;
-    for (u32 c = 0; c < m->mbw; c++, d += 384) {
-      const u8 *y = py + r * 16 * ys + c * 16, *b = pb + r * 8 * cs + c * 8, *v = pr + r * 8 * cs + c * 8;
-      for (u32 i = 0; i < 16; i++) {
-        st8(d + i * 16, ld8(y + i * ys));
-        st8(d + i * 16 + 8, ld8(y + i * ys + 8));
-      }
-      for (u32 i = 0; i < 8; i++) {
-        st8(d + 256 + i * 8, ld8(b + i * cs));
-        st8(d + 320 + i * 8, ld8(v + i * cs));
-      }
-    }
-    mx_dcache_writeback(m->row, m->mbw * 384u);
-    mx_ipu_csc(m->row, m->mbw, m->flags, (u8 *)out + r * m->mbw * mbq * 16);
+  u32 mbs = (u32)m->mbw * m->mbh, max = m->flags & MX_IPU_RGB16 ? 2047 : 1023;
+  const u8 *src = frame(m, f);
+  mx_dcache_writeback(src, mbs * 384u);
+  for (u32 i = 0; i < mbs; i += max) {
+    u32 n = mbs - i < max ? mbs - i : max;
+    mx_ipu_csc(src + i * 384u, n, m->flags, (u8 *)out + i * mbq * 16);
   }
   mx_ipu_input_end();
 }
@@ -315,21 +301,39 @@ struct pb {
   struct dec d;
   u32 w, used;   /* the stream's next 32 bits as FDEC gave them, and how many are taken */
   u8 valid, starved, bad;
-  u8 *cur[3];          /* the picture being decoded: Y, Cb, Cr */
-  const u8 *from[2][3]; /* forward and backward reference */
-  u32 ys, cs;          /* a line of Y, of Cb and Cr */
+  u8 *cur;             /* the picture being decoded */
+  const u8 *from[2];   /* forward and backward reference */
   int pmv[2][2][2];    /* the vectors' predictors: [first, second][forward, backward][x, y] */
   u8 sel[2][2];        /* field prediction: the reference field of [field][direction] */
   u8 dirs, field;      /* the last macroblock's directions (MB_FWD | MB_BWD), field prediction */
   u32 qsc;
 };
 
+/* FDEC or VDEC, looked at: they end within cycles unless the stream's
+   transfer has to go on. Returns what was decoded. */
+static u32 quick(struct pb *p, u32 cmd) {
+  MX_R32(MX_IPU_CMD) = cmd;
+  for (int i = 0; i < 64; i++) {
+    u64 v = MX_R64(MX_IPU_CMD);
+    if (!(v >> 63))
+      return (u32)v;
+  }
+  for (;;) {
+    if (mx_ipu_wait() == MX_IPU_OK)
+      return mx_ipu_result();
+    if (!more(&p->d)) {
+      p->starved = 1;
+      return 0;
+    }
+  }
+}
+#define FDEC(fb) ((u32)MX_IPU_FDEC << 28 | (fb))
+#define VDEC(tbl, fb) ((u32)MX_IPU_VDEC << 28 | (u32)(tbl) << 26 | (fb))
+
 /* n bits of the stream (1 .. 16) */
-static u32 bits(struct pb *p, u32 n) {
+static inline u32 bits(struct pb *p, u32 n) {
   if (!p->valid || p->used + n > 32) {
-    int starved = 0;
-    p->w = fdec(&p->d, p->used, &starved);
-    p->starved |= (u8)starved;
+    p->w = quick(p, FDEC(p->valid ? p->used : p->used & 63));
     p->used = 0;
     p->valid = 1;
   }
@@ -338,29 +342,19 @@ static u32 bits(struct pb *p, u32 n) {
   return v;
 }
 /* the next 32 bits, none taken */
-static u32 peek(struct pb *p) {
+static inline u32 peek(struct pb *p) {
   if (!p->valid || p->used) {
-    int starved = 0;
-    p->w = fdec(&p->d, p->used, &starved);
-    p->starved |= (u8)starved;
+    p->w = quick(p, FDEC(p->used));
     p->used = 0;
     p->valid = 1;
   }
   return p->w;
 }
 /* a code of one of VDEC's tables: 0 for none */
-static u32 vlc(struct pb *p, u32 tbl) {
-  u32 v = mx_ipu_vdec(tbl, p->valid ? p->used : 0);
+static inline u32 vlc(struct pb *p, u32 tbl) {
+  u32 v = quick(p, VDEC(tbl, p->used));
   p->used = 0;
   p->valid = 0;
-  while (busy()) {
-    if (!more(&p->d)) {
-      p->starved = 1;
-      return 0;
-    }
-    mx_ipu_wait();
-    v = mx_ipu_result();
-  }
   return v;
 }
 
@@ -405,11 +399,42 @@ static void vectors(struct pb *p, int s, int field) {
   }
 }
 
-/* A block of w x h pixels (w 16 or 8) from src at (x, y) moved by (dx, dy)
-   half pixels, to dst; avg: the mean with what dst holds (the second
-   direction). lines high is src; the block is kept inside it. */
-static void predict(u8 *dst, u32 dstride, const u8 *src, u32 sstride, int width, int lines, int x, int y,
-                    int w, int h, int dx, int dy, int avg) {
+/* The reference's pixels for a block at (x, y) of plane c (0 Y, 1 Cb, 2 Cr)
+   of the picture at ref, rows lines of them from every step-th line starting
+   with line first + y * step (a frame: 1, 0; a field: 2, its parity), into
+   t: lines of 32 bytes (Y; 16 for Cb, Cr), the macroblock's and its right
+   neighbour's. Returns where (x, y) is in t. */
+static const u8 *fetch(const struct mx_mpeg *m, const u8 *ref, int c, int x, int y, int rows, int step,
+                       int first, u8 *t) {
+  if (!c) {
+    u32 col = (u32)x >> 4, next = col + 1 < m->mbw ? 384 : 0;
+    for (int j = 0; j < rows; j++, t += 32) {
+      u32 line = (u32)(first + (y + j) * step);
+      const u64 *s = (const u64 *)(const void *)(ref + ((line >> 4) * m->mbw + col) * 384u + (line & 15) * 16);
+      u64 *d = (u64 *)(void *)t;
+      d[0] = s[0], d[1] = s[1];
+      d[2] = s[next / 8], d[3] = s[next / 8 + 1];
+    }
+    return t - rows * 32 + (x & 15);
+  }
+  u32 col = (u32)x >> 3, next = col + 1 < m->mbw ? 384 : 0;
+  for (int j = 0; j < rows; j++, t += 16) {
+    u32 line = (u32)(first + (y + j) * step);
+    const u64 *s =
+        (const u64 *)(const void *)(ref + ((line >> 3) * m->mbw + col) * 384u + 256 + (u32)(c - 1) * 64 + (line & 7) * 8);
+    u64 *d = (u64 *)(void *)t;
+    d[0] = s[0], d[1] = s[next / 8];
+  }
+  return t - rows * 16 + (x & 7);
+}
+
+/* A block of w x h pixels (w 16 or 8) of plane c from the picture at ref,
+   at (x, y) moved by (dx, dy) half pixels, to dst; avg: the mean with what
+   dst holds (the second direction). The plane is width x lines (of the
+   field, if step is 2); the block is kept inside it. */
+static void predict(const struct mx_mpeg *m, u8 *dst, u32 dstride, const u8 *ref, int c, int width, int lines,
+                    int step, int first, int x, int y, int w, int h, int dx, int dy, int avg) {
+  u64 tmp[17 * 4];
   int hx = dx & 1, hy = dy & 1;
   x += dx >> 1;
   y += dy >> 1;
@@ -421,7 +446,8 @@ static void predict(u8 *dst, u32 dstride, const u8 *src, u32 sstride, int width,
     y = 0, hy = 0;
   if (y > lines - h - hy)
     y = lines - h, hy = 0;
-  const u8 *s = src + (u32)y * sstride + (u32)x, *s2 = s + sstride;
+  u32 sstride = c ? 16 : 32;
+  const u8 *s = fetch(m, ref, c, x, y, h + hy, step, first, (u8 *)tmp), *s2 = s + sstride;
   int mode = hx | hy << 1;
   for (int j = 0; j < h; j++, s += sstride, s2 += sstride, dst += dstride)
     for (int k = 0; k < w; k += 8) {
@@ -444,40 +470,50 @@ static void motion(struct pb *p, u32 col, u32 row, int s, int field, int avg) {
   const struct mx_mpeg *m = p->m;
   int x = (int)col * 16, y = (int)row * 16, W = m->mbw * 16, H = m->mbh * 16;
   int full = m->full_pel[s];
+  u8 *mb = p->cur + (row * m->mbw + col) * 384u;
+  const u8 *ref = p->from[s];
   if (!field) {
     int dx = p->pmv[0][s][0] << full, dy = p->pmv[0][s][1] << full;
-    predict(p->cur[0] + (u32)y * p->ys + (u32)x, p->ys, p->from[s][0], p->ys, W, H, x, y, 16, 16, dx, dy, avg);
-    for (int c = 1; c < 3; c++)
-      predict(p->cur[c] + (u32)(y / 2) * p->cs + (u32)(x / 2), p->cs, p->from[s][c], p->cs, W / 2, H / 2,
-              x / 2, y / 2, 8, 8, dx / 2, dy / 2, avg);
+    predict(m, mb, 16, ref, 0, W, H, 1, 0, x, y, 16, 16, dx, dy, avg);
+    predict(m, mb + 256, 8, ref, 1, W / 2, H / 2, 1, 0, x / 2, y / 2, 8, 8, dx / 2, dy / 2, avg);
+    predict(m, mb + 320, 8, ref, 2, W / 2, H / 2, 1, 0, x / 2, y / 2, 8, 8, dx / 2, dy / 2, avg);
     return;
   }
   for (u32 r = 0; r < 2; r++) { /* the macroblock's top and bottom field */
-    int dx = p->pmv[r][s][0], dy = p->pmv[r][s][1] >> 1;
-    u32 f = p->sel[r][s];
-    predict(p->cur[0] + ((u32)y + r) * p->ys + (u32)x, p->ys * 2, p->from[s][0] + f * p->ys, p->ys * 2, W,
-            H / 2, x, y / 2, 16, 8, dx, dy, avg);
-    for (int c = 1; c < 3; c++)
-      predict(p->cur[c] + ((u32)(y / 2) + r) * p->cs + (u32)(x / 2), p->cs * 2, p->from[s][c] + f * p->cs,
-              p->cs * 2, W / 2, H / 4, x / 2, y / 4, 8, 4, dx / 2, dy / 2, avg);
+    int dx = p->pmv[r][s][0], dy = p->pmv[r][s][1] >> 1, f = p->sel[r][s];
+    predict(m, mb + r * 16, 32, ref, 0, W, H / 2, 2, f, x, y / 2, 16, 8, dx, dy, avg);
+    predict(m, mb + 256 + r * 8, 16, ref, 1, W / 2, H / 4, 2, f, x / 2, y / 4, 8, 4, dx / 2, dy / 2, avg);
+    predict(m, mb + 320 + r * 8, 16, ref, 2, W / 2, H / 4, 2, f, x / 2, y / 4, 8, 4, dx / 2, dy / 2, avg);
   }
 }
 
-static u8 clip(int v) { return (u8)(v < 0 ? 0 : v > 255 ? 255 : v); }
+typedef s16 s16x8 __attribute__((vector_size(16)));
+typedef u8 u8x16 __attribute__((vector_size(16)));
 
 /* BDEC's macroblock into the picture: an intra one as it is, another added
-   to the prediction. */
+   to the prediction. Both are 384 samples in the same order, 16-byte
+   aligned: sixteen at a time in the EE's 128-bit registers (the bytes
+   widened to 16 bits, added, kept within 0 .. 255, packed again). */
 static void blocks(struct pb *p, u32 col, u32 row, int intra) {
-  const s16 *b = mx_is_spr(p->m->block) ? p->m->block : MX_UNCACHED(p->m->block);
-  u8 *y = p->cur[0] + row * 16 * p->ys + col * 16;
-  for (u32 j = 0; j < 16; j++, y += p->ys, b += 16)
-    for (u32 i = 0; i < 16; i++)
-      y[i] = clip(intra ? b[i] : y[i] + b[i]);
-  for (int c = 1; c < 3; c++) {
-    u8 *d = p->cur[c] + row * 8 * p->cs + col * 8;
-    for (u32 j = 0; j < 8; j++, d += p->cs, b += 8)
-      for (u32 i = 0; i < 8; i++)
-        d[i] = clip(intra ? b[i] : d[i] + b[i]);
+  const s16x8 *b = (const s16x8 *)(mx_is_spr(p->m->block) ? p->m->block : MX_UNCACHED(p->m->block));
+  u8x16 *d = (u8x16 *)(void *)(p->cur + (row * p->m->mbw + col) * 384u);
+  const u8x16 zero = {0};
+  const s16x8 max = {255, 255, 255, 255, 255, 255, 255, 255};
+  for (u32 i = 0; i < 24; i++) {
+    s16x8 lo = b[i * 2], hi = b[i * 2 + 1];
+    if (!intra) {
+      u8x16 px = d[i];
+      lo += (s16x8)__builtin_shufflevector(px, zero, 0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23);
+      hi += (s16x8)__builtin_shufflevector(px, zero, 8, 24, 9, 25, 10, 26, 11, 27, 12, 28, 13, 29, 14, 30,
+                                           15, 31);
+    }
+    lo &= lo > (s16x8){0};
+    hi &= hi > (s16x8){0};
+    s16x8 ml = lo > max, mh = hi > max;
+    lo = (lo & ~ml) | (max & ml);
+    hi = (hi & ~mh) | (max & mh);
+    d[i] = __builtin_shufflevector((u8x16)lo, (u8x16)hi, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26,
+                                   28, 30);
   }
 }
 
@@ -495,12 +531,9 @@ static void copy_mb(struct pb *p, u32 col, u32 row) {
    or MX_MPEG_PICTURE with *pos after it and m->errors, m->decoded set. */
 static int slices(struct mx_mpeg *m, const u8 *buf, u32 size, u32 *pos, u32 cur) {
   struct pb p = {.m = m, .d = {buf, *pos >> 4, 0, size >> 4}};
-  p.ys = m->mbw * 16u, p.cs = m->mbw * 8u;
-  for (int c = 0; c < 3; c++) {
-    p.cur[c] = plane(m, cur, c);
-    p.from[0][c] = plane(m, m->type == MX_MPEG_B ? m->ref[0] : m->ref[1], c);
-    p.from[1][c] = plane(m, m->ref[1], c);
-  }
+  p.cur = frame(m, cur);
+  p.from[0] = frame(m, m->type == MX_MPEG_B ? m->ref[0] : m->ref[1]);
+  p.from[1] = frame(m, m->ref[1]);
   u32 n = p.d.endq - p.d.q0;
   if (n > FEED_MAX)
     n = FEED_MAX;

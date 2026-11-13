@@ -28,7 +28,7 @@ struct mx_movie {
   u8 *es;
   u32 es_max, ahead, have, pos;
   u8 *pix;
-  u8 *frames, *row; /* a stream with P and B pictures: mx_mpeg_refs' memory */
+  u8 *frames; /* a stream with P and B pictures: mx_mpeg_refs' memory */
   u8 flushed;
   u32 decoded;
   u64 dec_cycles;
@@ -258,9 +258,9 @@ void mx_movie_close(struct mx_movie *m) {
     mx_sema_delete(m->sem_free);
   if (ipu_user == m)
     ipu_user = 0;
-  void *pinned[] = {m->es, m->pix, m->stack, m->row, m->frames};
+  void *pinned[] = {m->es, m->pix, m->stack, m->frames};
   void *paged[] = {m->raw, m->pcm, m->chunk[0], m};
-  for (u32 i = 0; i < 5; i++)
+  for (u32 i = 0; i < 4; i++)
     if (pinned[i])
       mx_dma_free(pinned[i]);
   for (u32 i = 0; i < 4; i++)
@@ -328,13 +328,10 @@ struct mx_movie *mx_movie_open(const char *path, u32 flags) {
     if (!fill(m, 1))
       break;
   if (next == MX_MPEG_P || next == MX_MPEG_B) {
-    /* pinned: read and written all over for every macroblock, which as
-       pages would cost the TLB's entries */
     m->frames = mx_dma_alloc(MX_MPEG_REF_BYTES(m->mpeg.mbw, m->mpeg.mbh));
-    m->row = mx_dma_alloc(MX_MPEG_ROW_BYTES(m->mpeg.mbw));
-    if (!m->frames || !m->row)
+    if (!m->frames)
       goto fail;
-    mx_mpeg_refs(&m->mpeg, m->frames, m->row, 0);
+    mx_mpeg_refs(&m->mpeg, m->frames, 0);
     m->info.predicted = 1;
   }
   /* sound, if the file's start had samples */

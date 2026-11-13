@@ -12,8 +12,8 @@
    fast kind, for anything large (ipu.md: 1920 x 1080 in 24 ms). A stream
    with P and B pictures (leave -g 1 -bf 0 out; a third of the size or less)
    is found out when the movie is opened and decoded with the EE's help, at
-   several times the cost (ipu.md: 640 x 384 in 25 ms, which holds 24 a
-   second; 720 x 576 does not yet). It takes three more pictures of pinned
+   several times the cost (ipu.md: 720 x 576 in 21 ms, 640 x 384 in 12 ms,
+   against 5 and 3 ms). It takes three more pictures of pinned
    memory and the scratchpad's first 768 bytes while a picture is decoded.
 
    The movie decodes into a buffer of its own; the program puts the picture

@@ -162,8 +162,7 @@ static void stream(const char *name, const u8 *es, u32 es_size, const u8 *yuv, u
    differences add up from picture to picture). */
 static void stream_refs(const char *name, const u8 *es, u32 es_size, const u8 *yuv, u32 yuv_size, u32 w,
                         u32 h) {
-  static u8 frames[MX_MPEG_REF_BYTES(5, 4)];
-  static u8 row[MX_MPEG_ROW_BYTES(5)] MX_ALIGNED(64) MX_CORE_BSS;
+  static u8 frames[MX_MPEG_REF_BYTES(5, 4)] MX_ALIGNED(64) MX_CORE_BSS;
   u32 size = es_size;
   memset(buf, 0, sizeof buf);
   memcpy(buf, es, es_size);
@@ -180,7 +179,7 @@ static void stream_refs(const char *name, const u8 *es, u32 es_size, const u8 *y
     int r = mx_mpeg_headers(&m, buf, size, &pos);
     if (r == MX_MPEG_PICTURE) {
       if (!refs)
-        mx_mpeg_refs(&m, frames, row, 0);
+        mx_mpeg_refs(&m, frames, 0);
       refs = 1;
       types |= 1u << m.type;
       r = mx_mpeg_picture(&m, buf, size, &pos, out);

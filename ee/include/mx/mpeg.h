@@ -65,8 +65,7 @@ struct mx_mpeg {
   u8 have_seq, dc_prec, frame_dct, conceal, q_type, vlc_fmt, alt_scan;
   u8 f_code[2][2]; /* [forward, backward][horizontal, vertical] */
   u8 full_pel[2];  /* MPEG-1: vectors in whole pixels */
-  u8 *frames;      /* mx_mpeg_refs: three pictures in Y, Cb, Cr */
-  u8 *row;         /* a row of macroblocks as RAW8, for the conversion */
+  u8 *frames;      /* mx_mpeg_refs: three pictures as macroblocks of Y, Cb, Cr */
   s16 *block;      /* where BDEC writes a macroblock */
   u8 ref[2], spare; /* the frames of the older and the newer reference picture, and the third */
   u8 nrefs;        /* reference pictures decoded (2: both there) */
@@ -100,23 +99,20 @@ int mx_mpeg_picture(struct mx_mpeg *m, const u8 *buf, u32 size, u32 *pos, void *
 /* P and B pictures too (without this they are skipped): memory for the
    pictures that others are predicted from. After mx_mpeg_headers has found
    the first picture (the sizes come from it):
-     frames   MX_MPEG_REF_BYTES(mbw, mbh) bytes that only the EE reads
-     row      MX_MPEG_ROW_BYTES(mbw) bytes the DMAC reads (16-byte aligned, one
-              physical piece)
+     frames   MX_MPEG_REF_BYTES(mbw, mbh) bytes for three pictures, read and
+              written by the EE and read by the DMAC: 16-byte aligned, one
+              physical piece (core or pinned memory)
      block    768 bytes the DMAC writes, a macroblock at a time: best in the
-              scratchpad (0: its first 768 bytes, 0x7000_0000), else as row
+              scratchpad (0: its first 768 bytes, 0x7000_0000), else as frames
    Every picture is then decoded a macroblock a BDEC command to Y, Cb, Cr,
-   the prediction added on the EE, and converted to RGB a row of macroblocks
-   a CSC command when it is its turn to be shown: mx_mpeg_picture gives the
-   pictures in the order of display, a reference picture when the next one
-   has been decoded (MX_MPEG_NONE: nothing to show for this one), and
-   mx_mpeg_flush the last. Frame pictures with frame and field prediction;
-   field pictures and dual prime are skipped. Several times the IDEC path's
-   time (docs/ipu.md). frames is best pinned memory: as pages of VM its
-   reads all over would cost the TLB's entries. */
+   the prediction added on the EE, and converted to RGB by CSC when it is
+   its turn to be shown: mx_mpeg_picture gives the pictures in the order of
+   display, a reference picture when the next one has been decoded
+   (MX_MPEG_NONE: nothing to show for this one), and mx_mpeg_flush the last.
+   Frame pictures with frame and field prediction; field pictures and dual
+   prime are skipped. Several times the IDEC path's time (docs/ipu.md). */
 #define MX_MPEG_REF_BYTES(mbw, mbh) (3u * (mbw) * (mbh) * 384u)
-#define MX_MPEG_ROW_BYTES(mbw) ((mbw) * 384u)
-void mx_mpeg_refs(struct mx_mpeg *m, void *frames, void *row, void *block);
+void mx_mpeg_refs(struct mx_mpeg *m, void *frames, void *block);
 /* At the stream's end (MX_MPEG_END): the picture still held, to out.
    MX_MPEG_PICTURE, or MX_MPEG_NONE if there is none. */
 int mx_mpeg_flush(struct mx_mpeg *m, void *out);
