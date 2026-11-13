@@ -282,12 +282,15 @@ static void irq_on(void) {
   MX_R64(MX_GS_IMR) = mx__gs_imr = IMR_ON;
 }
 
-/* Two vblanks within 100 ms: a mode the console does not have gives none
-   (576p on BIOS 2.00, PS2 2026-10-27). */
+/* Two vblanks of the new mode within half a second, else -1: a mode the
+   console does not have gives none (576p on BIOS 2.00, PS2 2026-10-27).
+   Half a second, as a mode the kernel times itself (720p50, 1080i50,
+   1080p30) first switches the GS's clock (40 ms) and two vblanks take
+   67 ms at 30 Hz. */
 static int vblanks(void) {
   u32 v = mx_gs.vsync, t0 = mx_count();
   while (mx_gs.vsync - v < 2)
-    if (mx_count() - t0 > 29491200u)
+    if (mx_count() - t0 > MX_EE_HZ / 2)
       return -1;
   return 0;
 }

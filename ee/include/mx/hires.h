@@ -100,6 +100,13 @@ u32 mx_hires_slot(void);
    record. A once record that is full takes no more: the stream goes into
    the main one. */
 void mx_hires_once(int on);
+/* Dithering into 16 bits that changes with the field: n (up to
+   MX_HIRES_DITHER) DIMX values, field f's passes drawn with dimx[f % n];
+   n 0: the frame stream's own DIMX. Every field is drawn anew, so two
+   matrices that complement each other give twice the shades on an
+   interlaced screen, and a few in turn make the pattern look like grain. */
+#define MX_HIRES_DITHER 8
+void mx_hires_dither(const u64 *dimx, u32 n);
 /* The colour each pass clears its strip to, for the frame being built. */
 void mx_hires_clear(u32 r, u32 g, u32 b);
 /* The field (CSR.FIELD) whose passes are drawn half a line lower in

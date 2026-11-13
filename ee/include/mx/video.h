@@ -64,7 +64,7 @@ MX_INLINE u32 mx_video_line_lines(const struct mx_video_mode *m) {
    (<mx/display.h>) before the picture is meaningful.
    The GS must be idle (no frame pipeline running). mx_gs_init_video() also
    initializes the DMAC; use that first. Returns 0, or -1 if the CRTC gives
-   no vblank within 100 ms: the console does not have the mode (the frame
+   no two vblanks within half a second: the console does not have the mode (the frame
    pipeline would wait for ever); set another one. */
 int mx_video_set(const struct mx_video_mode *m);
 /* The field being shown, from the vblank that starts it: 0 even, 1 odd.

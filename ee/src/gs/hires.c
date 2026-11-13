@@ -15,7 +15,7 @@ enum { FREE, BUILDING, WAITING, PLAYED, RETIRING };
 
 /* the pass chains, written by the timer interrupt through the uncached
    segment: CALL with the pass's registers, the record, END */
-#define PASS_QW 24 /* a chain is 19 quadwords, 21 with the FINISH */
+#define PASS_QW 24 /* a chain is 20 quadwords, 22 with the FINISH */
 /* a once record up to this size (quadwords) is sent in the first pass of
    its record, not over PATH3: PATH3 only gets the GS between passes, so a
    record could wait fields for it; larger ones (a level's textures) would
@@ -91,6 +91,19 @@ static void retire(void) {
 
 /* The chain of pass k of slot s (shifted: half a line lower; finish: a
    FINISH after it), in the next of the pass chains. */
+/* the dither matrices, one a field in turn (mx_hires_dither); 0: the
+   stream's own DIMX */
+#define GIF_AD_NOP 0x7F /* SCE_GS_NOP (GIF Starting Guide): an A+D write to no register */
+static u64 dither_m[MX_HIRES_DITHER];
+static u32 dither_n;
+
+void mx_hires_dither(const u64 *dimx, u32 n) {
+  n = n > MX_HIRES_DITHER ? MX_HIRES_DITHER : n;
+  for (u32 i = 0; i < n; i++)
+    dither_m[i] = dimx[i];
+  dither_n = n;
+}
+
 static u64 *pass_chain(int s, u32 k, int shifted, int finish, int once) {
   u32 y0 = k * h.strip_h;
   /* the lines of the strip that are shown (the last one is shorter) */
@@ -110,8 +123,14 @@ static u64 *pass_chain(int s, u32 k, int shifted, int finish, int once) {
   if (once)
     c = mx_e_call(c, h.slot[s].once, 0, 0, 0);
   /* the batches of the pass before are drawn before the registers change */
-  c = mx_e_call(c, h.slot[s].mem, 16, mx_vif_flush(), mx_vif_direct(16));
-  c = mx_e_ad_tag(c, 15, 1);
+  c = mx_e_call(c, h.slot[s].mem, 17, mx_vif_flush(), mx_vif_direct(17));
+  c = mx_e_ad_tag(c, 16, 1);
+  /* this field's dither matrix (the stream writes none then), else the
+     one in effect again (a NOP write) */
+  if (dither_n)
+    c = mx_e_ad(c, MX_GS_REG_DIMX, dither_m[mx_hires_stats.fields % dither_n]);
+  else
+    c = mx_e_ad(c, GIF_AD_NOP, 0);
   /* PRIM's attributes are PRIM's (not PRMODE's), colours clamped */
   c = mx_e_ad(c, MX_GS_REG_PRMODECONT, 1);
   c = mx_e_ad(c, MX_GS_REG_COLCLAMP, 1);
