@@ -105,7 +105,7 @@ void mx_hires_once(int on);
    n 0: the frame stream's own DIMX. Every field is drawn anew, so two
    matrices that complement each other give twice the shades on an
    interlaced screen, and a few in turn make the pattern look like grain. */
-#define MX_HIRES_DITHER 8
+#define MX_HIRES_DITHER 16
 void mx_hires_dither(const u64 *dimx, u32 n);
 /* The colour each pass clears its strip to, for the frame being built. */
 void mx_hires_clear(u32 r, u32 g, u32 b);
