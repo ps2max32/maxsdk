@@ -145,6 +145,8 @@ $(MOVIE_EXAMPLES): $(LIBK) $(HERE)/ee/ld/maxsdk-vm.ld
 # tests/ps2/mpeg.c: its streams (tools/mpeg-fixtures.sh), embedded
 $(OUT)/tests/mpeg.elf: CFLAGS += -Wno-c23-extensions
 $(OUT)/tests/mpeg.elf: $(wildcard $(HERE)/tests/ps2/data/mpeg_*)
+$(OUT)/tests/mp2.elf: CFLAGS += -Wno-c23-extensions
+$(OUT)/tests/mp2.elf: $(wildcard $(HERE)/tests/ps2/data/mp2_*)
 # tests/ps2/pic.c: its pictures (tools/pic-fixtures.sh)
 $(OUT)/tests/pic.elf: CFLAGS += -Wno-c23-extensions
 $(OUT)/tests/pic.elf: $(wildcard $(HERE)/tests/ps2/data/pic_*)

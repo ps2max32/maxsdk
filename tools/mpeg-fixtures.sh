@@ -38,4 +38,10 @@ done
 ffmpeg -v fatal -y -i $D/mpeg_a.m2v -f lavfi -i sine=frequency=440:sample_rate=48000 -t 0.08 \
   -c:v copy -c:a pcm_s16be -ac 2 -f vob $D/mpeg_a.mpg
 ffmpeg -v error -y -i $D/mpeg_a.mpg -vn -f s16be $D/mpeg_a.pcm
+# sound: MPEG audio layer II, 0.2 s of the film's, and ffmpeg's samples of it
+ffmpeg -v error -y -ss 163 -t 0.2 -i "$1" -vn -c:a mp2 -b:a 192k -ar 48000 -ac 2 -f mp2 $D/mp2_stereo.mp2
+ffmpeg -v error -y -ss 163 -t 0.2 -i "$1" -vn -c:a mp2 -b:a 96k -ar 44100 -ac 1 -f mp2 $D/mp2_mono.mp2
+for f in mp2_stereo mp2_mono; do
+  ffmpeg -v error -y -i $D/$f.mp2 -f s16le $D/$f.pcm
+done
 ls -l $D

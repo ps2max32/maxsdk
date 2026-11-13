@@ -3,8 +3,10 @@
 
 /* A movie from a file: MPEG-2 or MPEG-1 video decoded on the IPU
    (<mx/mpeg.h>), alone (.m2v) or in a program stream with sound
-   (<mx/mpegps.h>: LPCM, 48 kHz, 16 bits, stereo), which plays through
-   <mx/snd.h>'s stream in step with the pictures. docs/video-plan.md.
+   (<mx/mpegps.h>): LPCM (48 kHz, 16 bits, stereo), or MPEG audio layer II
+   (<mx/mp2.h>: what an .mpg usually has; a seventh of the EE to decode),
+   which plays through <mx/snd.h>'s stream in step with the pictures.
+   docs/video-plan.md.
 
    Make one with ffmpeg:
      -c:v mpeg2video -g 1 -bf 0 -q:v 5 -c:a pcm_s16be -ar 48000 -ac 2 -f vob -muxrate 40000000

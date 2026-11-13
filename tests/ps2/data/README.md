@@ -8,3 +8,6 @@ under the Creative Commons Attribution 3.0 license.
 
 `pic_*`: a frame of it as JPEG and PNG pictures of several kinds, with what ffmpeg decodes
 them to (`tools/pic-fixtures.sh`; `tests/ps2/pic.c`).
+
+`mp2_*`: 0.2 s of its sound as MPEG audio layer II, with ffmpeg's samples
+(`tools/mpeg-fixtures.sh`; `tests/ps2/mp2.c`).
