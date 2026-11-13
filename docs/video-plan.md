@@ -16,7 +16,7 @@ given CLUT. Its limits decide the plan:
 - **4:2:0 only**, sizes in whole macroblocks (16 x 16).
 - **The codes are MPEG's.** JPEG has the same transform but its own Huffman tables, and
   its samples use the full range where the IPU's conversion is BT.601's 16–235: a JPEG is
-  decoded on the EE, the IPU at most converting.
+  decoded on the EE (`<mx/pic.h>`).
 - Output comes a macroblock at a time (16 x 16 pixels each), not in the picture's lines.
 
 | What | Path | Expected limit (to be measured) |
@@ -53,7 +53,7 @@ unnecessary.
 | Into GS memory | `<mx/mpeg.h>` | a DMA chain, built once for a picture size, that sends the decoded macroblocks to their places in a texture or the frame buffer (one IMAGE transfer a macroblock, the data by reference) |
 | The program stream | `<mx/mpegps.h>` | a file's packets taken apart: video, LPCM sound, time stamps |
 | A movie | `<mx/movie.h>` | a file as the source, a thread that reads ahead, the pictures decoded when due, sound through `mx_snd`'s stream in step with them |
-| Pictures | `<mx/pic.h>` | a still to a `struct mx_tex`: an I picture, a JPEG, a PNG |
+| Pictures | `<mx/pic.h>` | a still from a JPEG or PNG file to pixels the GS takes, on the EE |
 | libgl | | a decoded picture as a texture (video in a 3D scene) |
 
 Under mx OS the IPU belongs to the program in front, as the GS, VIF and VUs do (the kernel
@@ -75,7 +75,7 @@ Each step counts once it ran on the PS2.
 | V1 | `<mx/mpeg.h>`: sequence and picture headers, I pictures by `IDEC`, the upload chain; `tests/ps2/mpeg.c` on streams made by ffmpeg from Big Buck Bunny (`tools/mpeg-fixtures.sh`) against ffmpeg's decoding; `examples/movie` plays an `.m2v` from `host:` as it reads it, `examples/moviehd` one of 1920 x 1080 in 1080i | decodes right on the PS2 and PCSX2; the example ran on the PS2 (its picture on the TV not yet confirmed); open: the upload's time, RGB16 into a CT16 buffer, 1280 x 720 |
 | V2 | `<mx/movie.h>`: a movie from a file for any program: the program stream taken apart (`<mx/mpegps.h>`), a reading thread, LPCM sound through `mx_snd`'s stream with its rate steered to the picture (a linear interpolation on the EE, 3 parts in a thousand at most; a jump when far off), buffers from the pinned and the pageable heap. `mx_movie_update` once a frame for a frame loop (`examples/movie`), or `mx_movie_decode` / `mx_movie_shown` / `mx_movie_poll` for a player that times pictures itself (`examples/moviehd`) | done on the PS2, 2026-11-13: 1920 x 1080 at 24 a second with sound, no picture late, the sound within -3 .. 9 ms of the picture by the stream's count (SCPH-90006); 640 x 384 in a 50 Hz frame loop, 720 pictures in 1502 frames (SCPH-70004). To do: MPEG audio layer II; time stamps beyond the start; pause, seek, loop; the end of the sound's queue played out |
 | V3 | P and B pictures (`mx_mpeg_refs`): the macroblock's header and vectors by `VDEC`/`FDEC`, its blocks by `BDEC` (the IPU's interrupts off, its commands looked at: `mx_ipu_direct`), the prediction in C eight pixels at a time in 64-bit registers while the IPU decodes, three pictures in Y, Cb, Cr, the picture to show converted a row of macroblocks a `CSC`; frame pictures with frame and field prediction, MPEG-2 and MPEG-1; `<mx/movie.h>` finds such a stream out by its second picture | decodes right on the PS2 (three streams against ffmpeg's decoding, mean difference 0.05 of 255) and PCSX2. Speed (`ipu.md`): 640 x 384 in 12.4 ms a picture, 720 x 576 in 20.7 ms: both play at 24 a second with sound, no picture late. To do: field pictures, dual prime, concealment vectors |
-| V4 | `<mx/pic.h>`: stills (I picture, JPEG baseline, PNG) to a texture; RGB16 with dither and `PACK`'s 4-bit CLUT for textures that must be small | |
+| V4 | `<mx/pic.h>`: stills to pixels for the GS (CT32, pinned memory): JPEG (baseline and extended sequential, grey and colour with any of the usual chroma sizes, restart intervals) and PNG (all colour types and depths, not interlaced; its own inflate), both in C on the EE; `tests/ps2/pic.c` against ffmpeg's decoding (PNG the same pixels, JPEG within 3 of 255); `examples/picture` shows one | done on the PS2 and PCSX2, 2026-11-13: 640 x 384 read from `host:` and decoded in 78 ms (JPEG, 42 KB) and 454 ms (PNG, 336 KB). To do: inflate by table (it takes a code a bit at a time); progressive JPEG; RGB16 with dither and the IPU's 4-bit CLUT (`PACK`) for textures that must be small; a still of I-picture MPEG is `<mx/movie.h>`'s |
 | V5 | libgl: a picture as a texture; stop and go on for the home button; the shell's use (backgrounds, previews) | |
 
 ## 1920 x 1080 and 1280 x 720

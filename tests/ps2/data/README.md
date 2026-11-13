@@ -5,3 +5,6 @@ ffmpeg decodes them to (`tools/mpeg-fixtures.sh` makes them; `tests/ps2/mpeg.c` 
 
 Big Buck Bunny: (c) copyright 2008, Blender Foundation / www.bigbuckbunny.org, licensed
 under the Creative Commons Attribution 3.0 license.
+
+`pic_*`: a frame of it as JPEG and PNG pictures of several kinds, with what ffmpeg decodes
+them to (`tools/pic-fixtures.sh`; `tests/ps2/pic.c`).

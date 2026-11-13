@@ -21,7 +21,7 @@ decision in maxsdk and in the compiler.
 | [iop-drivers.md](iop-drivers.md) | maxsdk's IOP drivers for DEV9: mxdev9, mxeth (design, measurements, steps) |
 | [vif.md](vif.md) | VIF codes: costs and behaviour |
 | [ipu.md](ipu.md) | IPU: where the manual is unclear, decoding times |
-| [video-plan.md](video-plan.md) | Pictures and video on the IPU: what is possible, the layers, the steps |
+| [video-plan.md](video-plan.md) | Video (MPEG on the IPU) and pictures (JPEG, PNG): what is possible, the layers, the steps and their state |
 | [gif-gs.md](gif-gs.md) | GIF paths, GS SIGNAL/FINISH/LABEL, vsync |
 | [vu0.md](vu0.md), [vu1.md](vu1.md) | VU macro/micro mode, transfers, control |
 | [hlsl.md](hlsl.md) | Writing VU programs in HLSL (not measurements: how the toolchain is used) |

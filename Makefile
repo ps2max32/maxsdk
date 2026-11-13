@@ -117,7 +117,7 @@ $(LIBK): $(LIBK_OBJS)
 	$(HERE)/tools/mxos-bios-check.sh $(LLVM) $@ || { rm -f $@; exit 1; }
 
 # tests linked into VM (ee/ld/maxsdk-vm.ld), started by mxlink (or mxlink's EMU build)
-VM_TESTS = vm11_vmlink vm12_elfpage vm13_guards vm16_lock vm21_crash vm22_net vm23_pad vm24_home vm25_ids vm26_launch vm27_pads vm28_asid vm29_long vm30_dmairq vm31_rumble vm32_side vm33_msg vm34_child vm35_timers vm36_dir vm38_vmbeside vm39_swapcfg vm40_stackdepth vm41_seq vm42_corefault vm43_keep vm44_keepdev
+VM_TESTS = vm11_vmlink vm12_elfpage vm13_guards vm16_lock vm21_crash vm22_net vm23_pad vm24_home vm25_ids vm26_launch vm27_pads vm28_asid vm29_long vm30_dmairq vm31_rumble vm32_side vm33_msg vm34_child vm35_timers vm36_dir vm38_vmbeside vm39_swapcfg vm40_stackdepth vm41_seq vm42_corefault vm43_keep vm44_keepdev vm45_writer
 $(VM_TESTS:%=$(OUT)/tests/%.elf): MX_TARGET = mxos
 $(VM_TESTS:%=$(OUT)/tests/%.elf): $(LIBK) $(HERE)/ee/ld/maxsdk-vm.ld
 
@@ -138,12 +138,16 @@ $(K_STAY_TESTS:%=$(OUT)/tests/%.elf): $(LIBK) $(HERE)/ee/ld/maxsdk-vm.ld
 $(OUT)/examples/display.elf: MX_TARGET = mxos
 $(OUT)/examples/display.elf: MX_VM_TEXT = core
 $(OUT)/examples/display.elf: $(LIBK)
-# the movie example and the IPU's tests run on the PS2, so under the kernel
-$(OUT)/examples/movie.elf $(OUT)/examples/moviehd.elf: MX_TARGET = mxos
-$(OUT)/examples/movie.elf $(OUT)/examples/moviehd.elf: $(LIBK) $(HERE)/ee/ld/maxsdk-vm.ld
+# the movie and picture examples run on the PS2, so under the kernel
+MOVIE_EXAMPLES = $(OUT)/examples/movie.elf $(OUT)/examples/moviehd.elf $(OUT)/examples/picture.elf
+$(MOVIE_EXAMPLES): MX_TARGET = mxos
+$(MOVIE_EXAMPLES): $(LIBK) $(HERE)/ee/ld/maxsdk-vm.ld
 # tests/ps2/mpeg.c: its streams (tools/mpeg-fixtures.sh), embedded
 $(OUT)/tests/mpeg.elf: CFLAGS += -Wno-c23-extensions
 $(OUT)/tests/mpeg.elf: $(wildcard $(HERE)/tests/ps2/data/mpeg_*)
+# tests/ps2/pic.c: its pictures (tools/pic-fixtures.sh)
+$(OUT)/tests/pic.elf: CFLAGS += -Wno-c23-extensions
+$(OUT)/tests/pic.elf: $(wildcard $(HERE)/tests/ps2/data/pic_*)
 # k37: an IOP module of its own (tests/iop/chantest), embedded
 $(OUT)/tests/k37_iopchan.elf: CFLAGS += --embed-dir=$(IOP_OUT) -Wno-c23-extensions
 $(OUT)/tests/k37_iopchan.elf: $(IOP_OUT)/chantest.irx
