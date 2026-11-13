@@ -560,6 +560,7 @@ static int sleep_wait(struct mx_sif_client *c, u32 limit, u32 t0, int *r) {
    no such line): the counts and the channels, the last packets received,
    the sleepers. A sleeper's client is read only where it is the kernel's
    (below 1 MiB): a program's may be in another address space. */
+#ifndef MX_KERNEL /* the kernel's report: not in libmxk (no sifdma.c there) */
 int mx__sif_dbg_line(u32 i, char *buf, u32 size) {
   if (i == 0) {
     u32 s[8];
@@ -595,6 +596,7 @@ int mx__sif_dbg_line(u32 i, char *buf, u32 size) {
                 c->sema - 1, c->server);
   return 1;
 }
+#endif
 
 /* time (µs) and number of waits for the IOP, all, and of them for the file
    server (mx__sif_report) */
