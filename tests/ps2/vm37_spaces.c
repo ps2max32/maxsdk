@@ -15,7 +15,7 @@
 #define NP 40
 
 struct vm_space;
-struct vm_space *mx__vm_space_new(void);
+struct vm_space *mx__vm_space_new(u32 size);
 void mx__vm_space_switch(struct vm_space *s);
 struct vm_space *mx__vm_space_now(void);
 void mx__vm_space_free(struct vm_space *s);
@@ -49,7 +49,7 @@ int main(void) {
   CHECK_EQ(mx_vm_init(&cfg), 0);
   struct vm_space *s[2];
   s[0] = mx__vm_space_now();
-  s[1] = mx__vm_space_new();
+  s[1] = mx__vm_space_new(0);
   CHECK(s[1] != 0);
   if (!s[1])
     return t_done("vm37");
@@ -87,7 +87,7 @@ int main(void) {
   CHECK(st.swap_outs > 0 && st.swap_ins > 0);
 
   /* 3: a third space, written, freed: its frames back, the others intact */
-  struct vm_space *t = mx__vm_space_new();
+  struct vm_space *t = mx__vm_space_new(0);
   CHECK(t != 0);
   mx__vm_space_switch(t);
   write_all(2, 1);

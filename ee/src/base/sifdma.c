@@ -158,17 +158,6 @@ static u32 hw_index(void) {
   return i ? i - 1 : USED - 1;
 }
 
-/* tags free for new transfers: USED with nothing queued, USED - 1 with the
-   last one under way (and cur, its tag, rebuilt) */
-static u32 free_tags(void) {
-  u32 hw = hw_index();
-  if (hw == cur)
-    return R32(MX_DMA_SIF1_QWC) ? USED - 1 : USED;
-  if (hw < cur)
-    return USED - 1 - (cur - hw);
-  return hw - cur - 1;
-}
-
 static volatile u32 *next_tag(void) {
   cur = cur + 1 == USED ? 0 : cur + 1;
   written++;
@@ -245,33 +234,28 @@ u32 mx__sif_dma_set(const void *transfers, int n, int intr) {
     return intr ? mx_bios_isif_set_dma((void *)transfers, n)
                 : mx_bios_sif_set_dma((void *)transfers, n);
   }
-  /* the channel stopped where it is */
-  R32(MX_D_ENABLEW) = R32(MX_D_ENABLER) | CPND;
-  w32(MX_DMA_SIF1_CHCR, 0);
-  (void)R32(MX_DMA_SIF1_CHCR);
-  R32(MX_D_ENABLEW) = R32(MX_D_ENABLER) & ~CPND;
-  u32 room = free_tags(), need = (u32)tags_for(t, n), id = 0;
-  if (need <= room) {
-    if (room != USED) {
-      volatile u32 *e = uc(tags[cur]);
-      if (room == USED - 1) {
-        /* the last one under way: its rest, a REF, from the channel's
-           registers, and the channel started from it again */
-        e[0] = (e[0] & 0x8C000000u) | TAG_REF | R32(MX_DMA_SIF1_QWC);
-        e[1] = R32(MX_DMA_SIF1_MADR);
-        w32(MX_DMA_SIF1_QWC, 0);
-        w32(MX_DMA_SIF1_TADR, phys(tags[cur]));
-      } else {
-        e[0] |= TAG_REF; /* REFE: goes on */
-      }
-    }
+  /* Only an idle channel takes a transfer: one still running is not
+     stopped and added to (the chain rebuilt from TADR, MADR and QWC: on
+     the PS2 a transfer queued so was lost now and then when two threads
+     sent at once, an RPC that never got its answer). The caller tries
+     again (a thread: while the channel ends, microseconds; an interrupt
+     handler gives up after a while and the caller keeps it for later). */
+  if (busy()) {
+    mx_irq_restore(was);
+    return 0;
+  }
+  u32 need = (u32)tags_for(t, n), id = 0;
+  if (need <= USED) {
+    u32 first = cur + 1 == USED ? 0 : cur + 1;
     for (int i = 0; i < n; i++)
       put(&t[i], i == n - 1);
     id = written ? written : 1; /* the last tag's number: never 0 */
+    /* from its first tag, whatever TADR was left at by the last one */
+    w32(MX_DMA_SIF1_QWC, 0);
+    w32(MX_DMA_SIF1_TADR, phys(tags[first]));
+    w32(MX_DMA_SIF1_CHCR, (R32(MX_DMA_SIF1_CHCR) & 0xFFFFu) | CHCR_GO);
+    (void)R32(MX_DMA_SIF1_CHCR);
   }
-  /* (again) running, also with no room: what was queued goes on */
-  w32(MX_DMA_SIF1_CHCR, R32(MX_DMA_SIF1_CHCR) | CHCR_GO);
-  (void)R32(MX_DMA_SIF1_CHCR);
   mx_irq_restore(was);
   return id;
 }
@@ -296,7 +280,13 @@ int mx__sif_dma_stat(u32 id) {
    all below, the BIOS's own call while SIF1 is not taken: a program on the
    BIOS's threads does what it did before (on the PS2, not on PCSX2, the
    kernel's memory was found overwritten after such a program wrote the
-   channel and the registers itself). */
+   channel and the registers itself).
+   Only a channel that stopped is started again: the IOP's packet ends
+   with an END tag, which stops it. One still running was started already
+   (the kernel has two handlers of SIF0, sif.c's and the host link's, and
+   each starts it) and may be taking the next packet: stopping it then
+   lost that packet on the PS2 (an RPC's answer: its caller waited for
+   good), not on PCSX2, whose DMA is done at once. */
 void mx__sif_dchain(int intr) {
   if (!own) {
     if (intr)
@@ -306,10 +296,12 @@ void mx__sif_dchain(int intr) {
     return;
   }
   int was = intr ? 0 : mx_di(); /* as in mx__sif_dma_set */
-  w32(MX_DMA_SIF0_CHCR, 0);
-  w32(MX_DMA_SIF0_QWC, 0);
-  w32(MX_DMA_SIF0_CHCR, CHCR_GO);
-  (void)R32(MX_DMA_SIF0_CHCR);
+  if (!(R32(MX_DMA_SIF0_CHCR) & CHCR_STR)) {
+    w32(MX_DMA_SIF0_CHCR, 0);
+    w32(MX_DMA_SIF0_QWC, 0);
+    w32(MX_DMA_SIF0_CHCR, CHCR_GO);
+    (void)R32(MX_DMA_SIF0_CHCR);
+  }
   mx_irq_restore(was);
 }
 

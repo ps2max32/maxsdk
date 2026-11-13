@@ -93,7 +93,6 @@ static u8 rx_buf[128] MX_DMA_LINES;
 /* Outgoing RPC packets, and replies to IOP requests (a small ring). */
 static u8 pkt_pool[NPKT][RPC_PKT_SIZE] MX_DMA_LINES;
 static u8 reply_ring[NPKT][RPC_PKT_SIZE] MX_DMA_LINES;
-static volatile u32 pkt_busy;
 static u32 reply_idx;
 static u32 rpc_pid = 1;
 
@@ -111,13 +110,30 @@ static volatile u32 *uw(void *p) { return (volatile u32 *)MX_UNCACHED(p); }
 /* A wait for SIF longer than about 3 s: the kernel shows what it can (where:
    1 the send, 2 the answer). Once a wait. */
 void mx__sif_stuck(int where) __attribute__((weak));
-static void stuck_check(int *told, u32 t0, int where) {
+/* what the stuck wait was (for mx__sif_stuck): the client, its server, the
+   call's number, its packet, the packets in use, the client's done,
+   sleeping and semaphore, the thread, deferred RDATA and packets given up */
+u32 mx__sif_stuck_detail[8];
+static volatile u32 pkt_busy;
+static volatile u32 ndeferred;
+static u32 given_up;
+static void stuck_check1(int *told, u32 t0, int where, struct mx_sif_client *c) {
   if (!*told && mx_count() - t0 > 3u * MX_EE_HZ) {
     *told = 1;
+    u32 *d = mx__sif_stuck_detail;
+    d[0] = (u32)(uintptr_t)c;
+    d[1] = c ? c->server : 0;
+    d[2] = c && c->pkt ? ((volatile u32 *)MX_UNCACHED(c->pkt))[8] : 0;
+    d[3] = c ? (u32)((u8 *)c->pkt - pkt_pool[0]) / RPC_PKT_SIZE : 0;
+    d[4] = pkt_busy;
+    d[5] = c ? (u32)c->done | (u32)c->sleeping << 4 | (u32)c->sema << 8 : 0;
+    d[6] = (u32)mx_bios_get_thread_id();
+    d[7] = ndeferred | given_up << 16;
     if (mx__sif_stuck)
       mx__sif_stuck(where);
   }
 }
+#define stuck_check(told, t0, where) stuck_check1(told, t0, where, 0)
 
 static u32 send_cmd(int intr, u32 cid, void *pkt, u32 psize, mx_paddr src, u32 dest,
                     u32 dsize) {
@@ -166,7 +182,6 @@ static u32 send_cmd(int intr, u32 cid, void *pkt, u32 psize, mx_paddr src, u32 d
 static struct {
   u32 pkt_addr, client, src, dest, size;
 } deferred[NPKT];
-static volatile u32 ndeferred;
 
 static void send_rdata(int intr, const u32 *w) {
   u8 *r = reply_ring[reply_idx++ % NPKT];
@@ -284,13 +299,27 @@ static void serve(const u32 *pkt) {
    (apps/mxos, kmsg.c), in the interrupt; the packet with its header */
 void mx__sif_cmd(u32 cid, const u32 *pkt, u32 bytes) __attribute__((weak));
 
+/* the last packets received (for mx__sif_stuck): cid | command << 8 |
+   size << 16, and word 7 (an answer's client); interrupts, empty ones */
+u32 mx__sif_rx_log[8][2], mx__sif_rx_n, mx__sif_rx_count, mx__sif_rx_empty, mx__sif_rx_running;
+
 /* SIF0 (IOP -> EE) DMA end: one command packet is in rx_buf. */
 static int sif0_handler(int ch, void *arg, void *addr) {
   (void)ch, (void)arg, (void)addr;
   volatile u32 *rx = uw(rx_buf);
-  u32 psize = rx[0] & 0xFF;
-  if (!psize)
+  /* a running channel is taking a packet (started by the other handler of
+     SIF0, the kernel's host link, for its own): what is in rx_buf may be
+     half of it, and its end is an interrupt of its own */
+  if (MX_R32(MX_DMA_SIF0_CHCR) & 0x100) {
+    mx__sif_rx_running++;
     return 0;
+  }
+  u32 psize = rx[0] & 0xFF;
+  mx__sif_rx_count++;
+  if (!psize) {
+    mx__sif_rx_empty++;
+    return 0;
+  }
   u32 pkt[28];
   u32 words = (psize + 3) / 4;
   if (words > 28)
@@ -303,6 +332,11 @@ static int sif0_handler(int ch, void *arg, void *addr) {
      wipe that packet's size, and the packet (say a READ's answer) is lost */
   mx_sync();
   mx__sif_dchain(1);
+  {
+    u32 *l = mx__sif_rx_log[mx__sif_rx_n++ % 8];
+    l[0] = (pkt[2] & 0xFF) | (pkt[8] & 0xFF) << 8 | psize << 16;
+    l[1] = pkt[7];
+  }
 
   switch (pkt[2]) {
   case CMD_CHANGE_SADDR:
@@ -491,7 +525,7 @@ static int sleep_wait(struct mx_sif_client *c, u32 limit, u32 t0, int *r) {
       send_deferred();
     if (c->done)
       break;
-    stuck_check(&told, t0, 2);
+    stuck_check1(&told, t0, 2, c);
     if (limit && mx_count() - t0 > limit) {
       *r = -1;
       break;
@@ -554,7 +588,7 @@ static int wait_answer1(struct mx_sif_client *c, int may_give_up) {
   while (!c->done) {
     if (ndeferred)
       send_deferred();
-    stuck_check(&told, t0, 2);
+    stuck_check1(&told, t0, 2, c);
     if (may_give_up && mx_count() - t0 > limit)
       return -1;
   }
@@ -1108,15 +1142,6 @@ static int mxio_close(int fd) {
   return mxio_call(MXIO_CLOSE, (void *)a, 16);
 }
 
-/* A program ended: what it left open */
-void mx__mxio_cleanup(void) {
-  if (mxio_up()) {
-    volatile u32 *a = MX_UNCACHED(mxio_arg);
-    a[0] = 0;
-    mxio_call(MXIO_CLOSE_ALL, (void *)a, 16);
-  }
-}
-
 /* One WRITE of n bytes that the IOP reads from pa (the CPU's view of them
    at p): the bytes before the first quadword boundary go in the call (mis,
    as ps2sdk's fioWrite), the rest the IOP takes from memory. Returns the
@@ -1154,6 +1179,13 @@ static int written(int fd, int got, u32 n) {
    advance it; an error forgets it. Under the fio lock. */
 #define NPOS 32
 static s32 fpos[NPOS] = {[0 ... NPOS - 1] = -1};
+/* FILEIO's descriptors opened through here and not closed yet, a bit each:
+   files and directories (mx__fio_cleanup) */
+static u32 fio_files, fio_dirs;
+static void fd_mark(u32 *mask, int fd, int open) {
+  if ((u32)fd < 32)
+    *mask = open ? *mask | 1u << fd : *mask & ~(1u << fd);
+}
 static void pos_set(int fd, s32 at) {
   if ((u32)fd < NPOS)
     fpos[fd] = at;
@@ -1268,6 +1300,7 @@ static int fio_open_unlocked(const char *path, int flags) {
   volatile s32 *r = (volatile s32 *)MX_UNCACHED(wr_result);
   if (fio_call(FILEIO_OPEN, a, sizeof *a, (void *)r, 4) < 0)
     return -1;
+  fd_mark(&fio_files, r[0], 1);
   return r[0];
 }
 
@@ -1442,6 +1475,7 @@ static int fio_close_unlocked(int fd) {
   volatile s32 *a = (volatile s32 *)MX_UNCACHED(cl_arg);
   a[0] = fd;
   volatile s32 *r = (volatile s32 *)MX_UNCACHED(wr_result);
+  fd_mark(&fio_files, fd, 0);
   if (fio_call(FILEIO_CLOSE, (void *)a, 16, (void *)r, 4) < 0)
     return -1;
   return r[0];
@@ -1477,6 +1511,7 @@ static int fio_dopen_unlocked(const char *path) {
   volatile s32 *r = (volatile s32 *)MX_UNCACHED(wr_result);
   if (fio_call(FILEIO_DOPEN, a, sizeof dp_arg, (void *)r, 4) < 0)
     return -1;
+  fd_mark(&fio_dirs, r[0], 1);
   return r[0];
 }
 
@@ -1553,6 +1588,7 @@ static int fio_dclose_unlocked(int fd) {
   volatile s32 *a = (volatile s32 *)MX_UNCACHED(dc_arg);
   a[0] = fd;
   volatile s32 *r = (volatile s32 *)MX_UNCACHED(wr_result);
+  fd_mark(&fio_dirs, fd, 0);
   if (fio_call(FILEIO_DCLOSE, (void *)a, 16, (void *)r, 4) < 0)
     return -1;
   return r[0];
@@ -1563,6 +1599,49 @@ int mx_fio_dclose(int fd) {
   int r = fio_dclose_unlocked(fd);
   fio_unlock();
   return r;
+}
+
+/* A program ended (the kernel): the files it left open are closed, but
+   those keep names (0: none): the VM's, its swap file and the files of the
+   programs that go on. FILEIO's descriptors are ioman's, and so are the
+   handles mxio holds for its files on a driver (a card, USB): closing every
+   number of FILEIO's closes mxio's files behind its back, and the next file
+   opened gets the handle (the VM's swap file was a file of the next game).
+   So with files to keep, only what was opened through here is closed, and
+   mxio's one by one. With none to keep, every number and all of mxio's:
+   also what a kernel before this one left open. A call without an answer
+   (the kernel's limit, mx__sif_wait_limit) ends it. */
+void mx__fio_cleanup(int (*keep)(int fd)) {
+  u32 kept_fio = 0, kept_mxio = 0, timeouts = mx__sif_timeouts;
+  for (int f = 0; keep && f < 32; f++) {
+    kept_fio |= (u32)(keep(f) != 0) << f;
+    kept_mxio |= (u32)(keep(f + MXIO_FD) != 0) << f;
+  }
+  int all = !kept_fio && !kept_mxio;
+  for (int fd = 3; fd < 32 && mx__sif_timeouts == timeouts; fd++) {
+    if (kept_fio >> fd & 1)
+      continue;
+    if (fio_dirs >> fd & 1)
+      mx_fio_dclose(fd);
+    else if (all || (fio_files >> fd & 1))
+      mx_fio_close(fd);
+  }
+  if (mx__sif_timeouts != timeouts || !mxio_up())
+    return;
+  fio_lock();
+  volatile u32 *a = MX_UNCACHED(mxio_arg);
+  if (all) {
+    a[0] = 0;
+    mxio_call(MXIO_CLOSE_ALL, (void *)a, 16);
+  } else {
+    /* one that is not open answers -9 */
+    for (int f = 0; f < MXIO_FILES && mx__sif_timeouts == timeouts; f++)
+      if (!(kept_mxio >> f & 1)) {
+        a[0] = (u32)f;
+        mxio_call(MXIO_CLOSE, (void *)a, 16);
+      }
+  }
+  fio_unlock();
 }
 
 /* REMOVE, MKDIR and RMDIR: the path (the ROM's MKDIR takes no mode). FILEIO
@@ -1698,6 +1777,7 @@ static int reset_wait(void) {
 #ifndef MX_KERNEL
   for (int i = 0; i < NPOS; i++)
     fpos[i] = -1;
+  fio_files = fio_dirs = 0;
 #endif
   u32 t0 = mx_count();
   while (!(mx__sif_get_reg(REG_SMFLAG) & SMFLAG_BOOTEND))
@@ -1827,6 +1907,7 @@ int mx__sif_calls_finish(void) {
   }
   /* the rest given up: their answers would land in freed packets */
   left += __builtin_popcount(pkt_busy & ~live) << 8;
+  given_up += (u32)__builtin_popcount(pkt_busy & ~live);
   pkt_busy &= live;
   return left;
 }

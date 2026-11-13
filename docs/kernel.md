@@ -179,7 +179,11 @@ Before, with mxlink's app as the service on the card, such a start failed (-1): 
 `k42` failed on the PS2.
 Since 2026-11-12 (mx OS plan, phase 3a) a program with VM may also be parked: its VM stays on,
 and the next program's `mx_vm_init` gives it an address space of its own (vm.c's
-`mx__vm_space_new`) on the same frames and swap file, one LRU over both; its core is a run of
+`mx__vm_space_new`) on the same frames and swap file, one LRU over both (the space's size:
+the program's `mx_vm_config.size`, 128 MiB if it does not say, when it has a swap file; without
+one the first space's, which is no more than the frames when a service without a swap file
+turned the VM on. Before 2026-11-13 every space had the first one's size: 30 MiB under the
+host link's service, and a game's 16 MiB `malloc` failed); its core is a run of
 those frames (MiB-aligned, pinned), and its end gives back both (`exec.c`'s `kvm_init`,
 `kvm_shutdown`, `kvm_front_gone`). `kproc.c` switches the space with the ASID (the VM's TLB
 entries go at each switch). The VM's state in the kernel (resident.ld's `__vm_*`: vm.c,
@@ -194,7 +198,13 @@ has a page in it, the VM closes it and has none again (since 2026-11-12: on the 
 file goes with the host's run, and the next run's descriptors took its number, so the next
 program wrote its pages into its own ELF). At a program's end the kernel closes the program's
 descriptors but the VM's (`mx__vm_uses_fd`: the swap file, the ELF and mapped files of the
-spaces that go on); a space closes its own files when it is freed. A
+spaces that go on), FILEIO's and mxio's (sif.c's `mx__fio_cleanup`). When the VM keeps none,
+that is every FILEIO number 3..31 and one `MXIO_CLOSE_ALL`. When it keeps files, only the
+FILEIO descriptors the EE opened itself (sif.c keeps a mask of them) and mxio's slots one by
+one but the VM's: FILEIO's numbers are ioman's, and mxio holds ioman handles of its own for
+its files on a driver (`usb0:`, `mc0:`), so closing every number closed the VM's files behind
+mxio's back (`tests/ps2/vm43_keep.c` for `host:` files, `vm44_keepdev.c` for a file on the
+card). A space closes its own files when it is freed. A
 program without VM that takes all memory (no core heap) does not start while a program with VM
 is parked: `k40_frame` and `k41_present` have a core heap for that.
 
@@ -214,7 +224,8 @@ builds its maxsdk with `MX_SOFT_TIMER=1`). Software timers (`mx_timer_add`, once
 period, and `mx_sleep_us`'s sleepers) are slots of one table, each due at a COP0 Count, on EE
 timer 1, which no program sees: it is set, one-shot, to the earliest, and its interrupt runs
 what is due. A callback runs in its process's address space (`mx__timer_enter`, `kproc.c`), so
-it and its argument are in core. The other EE timer, 0, is lent out whole (`mx_timer_claim`,
+it and its argument are in core. The timer's handler itself runs in the front's, so this is a
+switch inside a switch: each one returns to the space it was entered from (at most 4 deep). The other EE timer, 0, is lent out whole (`mx_timer_claim`,
 `mx_timer_release`) for a clock of its own: `mx_hires` counts H-blanks with it (the kernel's
 sleep on timer 0, versions 14 to 18, rewrote it under the shell). Timers 2 and 3 are the
 BIOS's page, read-only to programs. A process's end takes its timers, sleepers and claim
@@ -261,6 +272,12 @@ instruction cache and jumps to the new kernel's entry with ExecPS2's arguments. 
 a restart (the IOP reset, the services and the shell started again). Before, a new kernel was
 tried by starting mxkernel-high (a copy linked at 0x1E0_0000) and from it `MXKERNEL.ELF`. Once the
 BIOS is gone (2h-5) the kernel starts the trampoline itself instead of ExecPS2.
+Not safe while a program with VM is parked (a service: so at present always on the PS2;
+found 2026-11-13): the replace starts with `tlb_restore`, which takes away the `MX_PHYS_WIN`
+entry the VM's tables are read through (the VM's vblank handler then misses the TLB, and the
+old kernel goes on with a crash on its screen), and 0x0100_0000 and 0x00F0_0000 are frames
+of the VM. To do: end the services and the VM first. Until then a new kernel is tried through
+mxboot's one-shot.
 
 The kernel runs MXOS programs only (2026-11-11, mx OS plan step 2h-2; `apps/mxos/ee/exec.c`):
 an ELF without the MXK note of version 10 or later (a standalone ELF on `libmx`, ps2sdk's, an
@@ -371,6 +388,12 @@ in kernel mode, through the kernel's syscall (an interrupt handler: through kseg
 TLB maps that page read only for user mode (`bios.md`). Once the ring is the kernel's, SIF0's chain
 and the SIF registers 1-4 are written by maxsdk too; until then, and in every program on the BIOS's
 threads, all of it goes to the BIOS (`iSifSetDma`, `iSifSetDChain` from an interrupt handler).
+SIF0 has two handlers in the kernel, sif.c's (the packets in its buffer) and the host link's
+(`apps/mxos/ee/cmd.c`, the packets at `0xFF800`). Each starts the channel again only after a packet
+it took itself, and sif.c reads its buffer only while the channel is stopped: started before the
+other handler had copied its packet, the channel let the IOP's next packet land on top of it (on
+the PS2 an RPC's answer was lost so, at a program's start or end with a service beside; PCSX2's
+kernel has no host link handler).
 `libmxk`'s `mx_iop_write` goes through the kernel (version 22: `iop_write`, a physical source):
 a program's own SifSetDma would meet the kernel's ring. A SIF wait of over 3 s shows the ring's
 state on the kernel's screen, and a crash of the kernel shows there at once, before the report

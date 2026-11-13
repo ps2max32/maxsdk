@@ -1,20 +1,33 @@
-# mx OS: the plan towards programs in windows
+# mx OS: the plan towards a game OS
 
 Where mx OS goes from "one program at a time" ([mx-os.md](mx-os.md)), in steps that each run on
-the PS2 on their own. Chosen 2026-11-07: programs in windows with address spaces of their own,
-protected against accidents only (option B). Validating DMA chains in the kernel (option C) is
-not done.
+the PS2 on their own. Chosen 2026-11-07: programs with address spaces of their own, protected
+against accidents only (option B). Validating DMA chains in the kernel (option C) is not done.
+Changed 2026-11-13 (user): the goal is a game OS, not programs in windows; steps 3 and 4 of
+the first plan (windows, full screen) are dropped (see "Not planned").
 
 ## Goal
 
-- mxboot always starts the kernel; the kernel always starts the GUI (the shell grown into a
-  window manager). The GUI owns the GS display and the video mode.
-- Programs (Quake, mxlink's host link screen, the shell's own parts) run in address spaces of
-  their own (ASID), each in a window: it draws into a render target the GUI gives it (for
-  example 256 x 256) and the GUI shows it as a texture. A window has a menu: quit, the pad's
-  settings, full screen.
-- Full screen: the program gets all of GS memory and every video mode, as now.
-- Programs on `libmx` and ps2sdk's run alone (full screen, the rest stopped), as now.
+mx OS is an operating system with processes, as Linux is, but made for running games, and it
+works as the PS3, PS4 and PS5 do: a game OS, the games, and a shell that comes back at the
+home button.
+
+- mxboot always starts the kernel; the kernel starts its services and the shell.
+- Several programs run at once, each in an address space of its own (ASID). One of them is in
+  front: it has the pad, the sound and the whole graphics path (GS memory, the GS's drawing
+  state, GIF, VIF0, VIF1, VU1). The video mode is the system's: the shell's setting, and the
+  most a game gets (step 5).
+- A game in front runs as if it were the only program: all of main memory but the kernel's
+  and what the others must keep, and all of the graphics hardware. This is measured: at most
+  4 % slower than the same game alone, and as little as can be reached (step 7).
+- The shell uses every resource too while it is in front, and gives them up when it starts a
+  game. The graphics path is handed over (step 5). Main memory is not handed over by a call:
+  it leaves through the VM, whose one LRU sends what is not used to the swap file (step 6).
+- The home button brings the shell back over the paused game. The shell is in front again
+  with the whole graphics path, and shows the game's last picture as a texture, made smaller
+  and turned aside, with its menu beside it. At resume the picture grows back to the full
+  screen, the game loads its GS memory again and goes on from that same picture.
+- Protection stays against accidents only (step 8's open point).
 
 ## What the hardware gives and does not give
 
@@ -25,10 +38,14 @@ not done.
 | GS memory | no protection: a GIF packet can set FRAME or BITBLTBUF anywhere. Windows share it by agreement (libgl, maxsdk), not by force |
 | Display | PMODE, DISPFB, DISPLAY, SMODE are on a page of their own (0x1200_0000): the kernel can keep them for itself |
 | Overlay | the merge circuit blends read circuit 1 over circuit 2 with circuit 1's alpha (0x80 = 1.0, doubled and clamped) or PMODE.ALP (GS manual 5.2.3): a menu over a program's picture without drawing into it |
+| A frame buffer as a texture | a frame buffer is GS memory as any other: FBP is its word address / 2048 and TBP0 a texture's / 64 (GS manual, FRAME and TEX0), so TEX0 with TBP0 = FBP x 32 and the buffer's width and format reads it as a texture in place, without a copy. Step 5's picture of the paused game |
 
 ## Steps
 
 ### Step 1: the home menu (option A)
+
+Done, and what the PS2 runs now. Step 5 replaces the kernel's menu by the shell: the kernel
+keeps the combination and the pause at a frame boundary (1a-1c), 1d's menu goes.
 
 One program at a time, as now. Held together, Select + Start + L1 + R1 open the kernel's menu
 over the program, which waits meanwhile: resume, quit, the pad's settings. Only for programs
@@ -530,20 +547,230 @@ Steps, each on the PS2 on its own:
   `tlb_write` ORs `mx__asid`; its entries G = 0); the BIOS's TLB entries for core memory are
   global and stay so for the kernel's memory below 1 MiB.
 
-### Step 3: windows
+### Step 3: stable on the PS2
 
-- Graphics through the kernel: a program in a window sends its frame as a chain
-  (`mx_frame_init_chain`), the kernel CALLs it after a prelude of the GS's drawing state
-  (FRAME, ZBUF, SCISSOR, XYOFFSET, TEST of both contexts) and loads VU1's microcode again when
-  another program's ran. The MFIFO ring and beam racing are for full screen only.
-- `mx_gs_init*` in a window: the GUI's render target and a share of GS memory for the texture
-  cache. The GUI draws each window's target as a texture.
-- The pad goes to the window with the focus; sound only from it.
-- Budget, GS memory (512 pages): the GUI's screen 640 x 448 CT16S twice, 140 pages; Quake in
-  256 x 256 (CT32 twice, Z16), 80 pages; about 290 pages for textures and other windows.
+Since 2026-11-11 several steps (the VM's phases 3 and 4, the kernel without the BIOS) were
+tested on PCSX2 only. On the PS2 a program's start or end with a service beside now and then
+lost one answer of the IOP, and its caller waited for good. No later step starts before this
+one is done, and from here on a step counts as done only once it ran on the PS2.
 
-### Step 4: full screen
+- Found 2026-11-13: SIF0 has two handlers in the kernel, sif.c's (the packets in its buffer)
+  and the host link's (`apps/mxos/ee/cmd.c`, the packets at `0xFF800`; not in the PCSX2
+  build). The host link's ran first and started the channel again after every packet, its own
+  or not, before sif.c had copied the packet out of its buffer: the IOP's next packet landed
+  on top of it. With a process beside, the kernel's state is swapped between the two
+  handlers, which made the gap wide enough to be hit. Now only the handler that took a packet
+  starts the channel again, and sif.c leaves its buffer alone while the channel runs.
+  `tests/ps2/k46_spawnloop.c` (a program in front started 60 times beside the service): three
+  runs passed on the PS2; before, every run hung within 43 starts.
+- Found 2026-11-13, by the series: a handler entered inside another had no way back of its
+  own (`apps/mxos/ee/kproc.c` kept one address space to return to). The kernel's timer
+  handler runs in the front's space, and a process's timer callback, called by it, in that
+  process's: when the timer came in while a process beside ran its own thread, the outer
+  return was lost and that thread went on in the front's space (a crash at address 0 on
+  PCSX2, a black screen on the PS2). Now each handler entered returns to the space it was
+  entered from. `tests/ps2/k42_timers.c` runs 100 ms in its own thread beside the other
+  process and counts its ticks: before, it failed in every run on PCSX2; after, it passed five
+  times on the PS2. The series on the PS2 with both fixes: all 35 runs passed.
+- Found 2026-11-13, by the shell (a game from USB, quit, the next game): at a program's end
+  the kernel told the file server to close every file (`MXIO_CLOSE_ALL`), the VM's too: the
+  swap file and the ELFs of the programs that go on. The exception for the VM's files
+  (`mx__vm_uses_fd`, 2026-11-12) covered only FILEIO's descriptors, and on the PS2 files go
+  through mxio. The first game ran; the second one's swap file was a file of its own with the
+  same number ("swap file write failed"), and the shell, back in front, could not read its
+  code from its ELF. Now the file server closes what the VM does not use.
+  `tests/ps2/vm43_keep.c` (pages in the swap file and in the ELF, read
+  after a program it started has ended): failed on the PS2 before, passed three times after.
+  It passes on PCSX2 either way: no mxio there. That was the cause for `host:` files only;
+  the shell's case failed the same way after it. The second cause: the kernel also closed
+  every FILEIO descriptor 3..31, which are ioman's numbers, and mxio holds ioman handles of
+  its own for its files on `usb0:` and `mc0:` (the swap file, the shell's ELF): they were
+  closed behind mxio's back. Now, while the VM keeps files, only the FILEIO descriptors the EE
+  opened itself are closed (`mx__fio_cleanup` in sif.c). `tests/ps2/vm44_keepdev.c` (a file on
+  the card mapped, read again after a program it started has ended) passes on the PS2 with the
+  fix; it was not run there without it. With the fix the shell comes back after a game from
+  USB and starts the next one.
+- Found 2026-11-13, by the shell: Quake 2 ended with "Hunk_Begin: no memory for 16777216
+  bytes", also as the first game and on PCSX2. Every address space had the size of the first
+  one, and the first is the host link's service, which has no swap file: its VM is cut to the
+  frames (30 MiB). Now a program with a swap file gets the size it asks for, 128 MiB if it
+  does not say (`mx__vm_space_new(size)`, `exec.c`'s `kvm_init`). Quake 2 runs on the PS2 from
+  USB with it.
+- Found 2026-11-13: the shell started a game again right after it ended, when the button that
+  ended the game was still down (the shell's `input_wait`: no button counts until all are let
+  go).
+- Open, 2026-11-13: Quake's second start from the shell (USB) hangs while it loads its first
+  map (`maps/e1m3.bsp`), twice out of twice (after Quake, Quake 2; after Quake 2, Quake): no
+  message, no crash report, the home button dead, the host's reset still works. Three runs
+  from the host in a row (each ended by a reset, files on `host:`) did not show it.
+- Open, 2026-11-13: replacing the kernel through the host crashes the old kernel while a
+  service with VM runs (kernel.md, "Another kernel replaces this one"): new kernels go through
+  mxboot's one-shot until the replace ends the services and the VM first.
+- The gate: `k46_spawnloop` as above; every `k*` and `vm*` test on the PS2; the shell, a game
+  from USB, quit, ten times; only then is the kernel installed as the card's default.
+- After the gate, what the review of 2026-11-13 found in the SIF code and has not failed yet:
+  - one handler for SIF0 (sif.c's; the host link's packets handed on by it), so the order of
+    two handlers cannot matter;
+  - an answer for a client in a program beside is handled in the front's address space
+    (`sif.c`'s END branch reads the client through the program's pointer): in the client's
+    space, or the client's record in the kernel;
+  - the kernel's static clients (`rdc`, the pad's) are used by several threads without a lock;
+  - at a program's end a packet number may be given up while its request is still under way
+    (`mx__sif_calls_finish`): the IOP's answer then shares a slot with a later one.
 
-- A window goes full screen and back: the program is told (an event), sets its framebuffer
-  and video mode up again and loads its textures again; the GUI stops drawing meanwhile and
-  keeps only the menu's GS memory. Quake: `VID_SetMode`.
+### Step 4: a process table
+
+Today a process is a place in a stack: one program in front, at most two waiting for it
+(`MAX_PARK`) and two beside (`MAX_SIDES`). The kernel's state of a program is the `.data` and
+`.bss` of the object files `resident.ld` lists, copied word by word at each switch (3272
+bytes). A process beside that ends or crashes ends the program in front. The shell and the
+host link's service are known to the kernel by their paths.
+
+- One table of processes (8 to start with). An entry has what is the process's: its address
+  space (ASID, VM space), its state (running, held), its threads, semaphores, handlers,
+  files, sockets, sound, ports, timers, its first thread's stack and its exit status. The
+  kernel's state of a process is in its entry, reached through one pointer to the current
+  one: nothing is copied at a switch.
+- "In front" is a role the kernel gives to one process and can move to another and back (step
+  5 needs that for the shell over a game), not the top of a stack. A process that starts
+  another chooses to wait for it or to go on beside it, as now.
+- Every process can end or crash alone. What it leaves is cleaned up by its owner tag (files,
+  sockets, sound, IOP memory), not by address ranges (`program_memory`: 1 MiB and up), fixed
+  file numbers (3 to 31) or "close all".
+- The VM's own parts (its lock, the swap file's semaphore, the pager and writer threads, the
+  tables) are made by the kernel at its boot, not by the first program that turns the VM on
+  and handed on at its end.
+- The shell and the services are roles from the card's configuration (`SERVICES.CFG`, and
+  the shell's path beside it), not paths in the kernel's code: the shell is the process the
+  kernel brings in front at the home button and when the program in front ends.
+- Tests: the `k3x` and `k4x` tests as they are; new ones for a service that ends or crashes
+  beside a running program, and for three processes that take turns in front.
+
+### Step 5: graphics and sound have an owner, and home is the shell
+
+Today nothing owns the graphics hardware: every program writes the GS, GIF, VIF and VU1
+itself, the end of any program resets all of them (`units_off`), and only VU0's registers
+are switched between processes. The home menu is the kernel's own (step 1d), drawn by the
+CPU on read circuit 1 over the program's picture.
+
+- **The owner** is the process in front: GS memory, the GS's drawing registers, GIF, VIF0,
+  VIF1, VU1, the scratchpad's and the graphics' DMA channels. A process that is not in front
+  does not touch them: `libmxk`'s frame calls wait until it is in front again. Services stay
+  text only (decided 2026-11-09). The units are reset at a process's end only when it is the
+  owner. The display's registers and the video mode stay the kernel's, set for the owner.
+- **Sound** belongs to the process in front as the graphics do (user, 2026-11-13): the SPU2's
+  voices, its stream and its memory. It is handed over with the graphics path: the old
+  owner's voices and stream are stopped, the new owner plays what it likes, and the old one
+  loads its samples again and starts its stream again when it is back.
+- **The video mode.** The shell has a resolution setting (kept by the kernel with the pad's
+  settings): the system's video mode. It is also the most a game gets. A game asks for
+  "auto" and gets the system's mode; a game that cannot draw in it gets the highest mode it
+  can that is not above it. So the shell and a game are in the same mode as a rule and the
+  television sees no change at home; after a fallback the mode changes at home and back.
+- **The hand-over**, done by the kernel when the front changes while the old owner lives:
+  1. The owner is asked to stop at its next frame boundary (`mx_frame_begin`, as step 1c:
+     the GS idle, its transfers done). One that does not come within a second is not paused;
+     the combination held for 2 s ends it, as now. Before it stops it is told, so it can
+     read back what only GS memory holds (below).
+  2. The kernel holds its threads, stops its sound stream, and keeps what the program cannot
+     make again: its display registers and video mode (the kernel's copy), VU0's registers
+     and memory.
+  3. Its displayed picture stays where it is in GS memory: the pages DISPFB names (known to
+     the kernel: base, width, format, the DISPLAY rectangle). Nobody writes these pages
+     until the owner has shown a new frame. Everything else in GS memory, VU1's memory, the
+     GIF's and VIFs' state belong to the new owner from here on, and are lost for the old.
+  4. The new owner is told (an event) and gets the description of the kept picture.
+  5. Back the same way. The old owner goes on in `mx_frame_begin` with "graphics lost":
+     maxsdk sets the GS's drawing state up again, loads VU1's programs again and empties its
+     texture cache, and the program is told for what it keeps in GS memory itself. It draws
+     its next frame into its other buffer and flips: until then the kept picture is on the
+     screen.
+- **What can be loaded again, and what cannot.** Textures are no problem: maxsdk's texture
+  cache (`<mx/vcache.h>`) treats GS memory as a cache that may lose any entry, and libgl
+  keeps every texture's levels in main memory in the GS's format (`struct tex`'s `m`), also
+  those made by `glTexSubImage2D` and `glCopyTexSubImage2D`. They are sent again as they are
+  used. Lost for good is only what the GS itself drew and nobody read back: a render target
+  that is kept over frames. Today that is the PS1 emulator's video memory (`apps/pcsx`,
+  gpu_gs: the PS1's 1024 x 512 buffer is drawn in GS memory, and only the tiles the PS1's
+  CPU asked for are in main memory). Such a program reads its buffer back when it is told of
+  the hand-over (step 1 above; gpu_gs has the code: `renderer_sync_vram`) and uploads it when
+  it is back. Depth buffers and a frame's own targets (supersampling) are drawn anew each
+  frame.
+- **Home.** At the home combination the kernel hands the graphics path to the shell and gives
+  it the pad. The shell has every resource then, as when no game runs. It draws its home
+  screen: the kept picture as a texture in place (TBP0 = FBP x 32: no copy), smaller and
+  turned aside, and its menu beside it (resume, quit, the pad's and the resolution's
+  settings, the services, whatever the shell offers). It draws in the system's video mode,
+  which as a rule is the game's too.
+- **Resume.** The shell lets the picture grow back to the full screen; its last frame shows
+  the kept picture one to one. The kernel then puts the game's display registers back (the
+  same pages: nothing changes on the screen) and hands the graphics path over. The game
+  loads its GS memory and takes over at its first flip, without a visible step.
+- **Quit** from the home screen: the kernel ends the game, the shell stays in front.
+- What goes: the kernel's menu (`apps/mxos/ee/home.c`), its GS memory lent by the program
+  (`ee/src/gs/home.c`) and the overlay on circuit 1. The pad's settings are changed in the
+  shell; the kernel keeps applying them.
+- GS memory (512 pages): a kept picture of 640 x 448 is 140 pages as CT32, 70 as CT16; the
+  shell has the other 372 or more.
+- Sub-steps, each on the PS2 with a television:
+  - 5a: the owner, the reset only at the owner's end, frame calls of the others wait; the
+    system's video mode and "auto" for games.
+  - 5b: the hand-over and "graphics lost" in maxsdk and libgl. Test: a program in front hands
+    over to a second one that overwrites all GS memory but the kept picture, and VU1; back,
+    its next frames are the same as without the hand-over.
+  - 5c: the shell's home screen with the kept picture; the kernel's menu removed.
+  - 5d: the picture's way in and back out, and the game taking over at its flip.
+- A kept picture that leaves the shell too little GS memory (a supersampled frame) is made
+  smaller by a GS draw at the hand-over (user, 2026-11-13); the game's first frame after the
+  resume then replaces a picture that is less sharp.
+- Open: the order of the video modes for "not above the system's" (interlaced, progressive,
+  720p, 1080i; 50 and 60 Hz), and what a game gets that knows only modes above it.
+
+### Step 6: all of main memory for the program in front
+
+The plan is the address space plan's phase 4 (above, in step 2): 4c, the core gone, and 4d,
+the background shrinks. With both, a process that is not in front keeps only what must stay
+(its handlers' code and data, buffers in a transfer), and all else of it leaves through the
+one LRU when the game needs the frames. No call hands main memory over (user, 2026-11-13).
+
+- Today, beside a game: the waiting shell keeps a core of 2 MiB, the host link's service 1
+  MiB, the kernel 478 KiB below 1 MiB.
+- A test that says, with a game in front, how many frames each other process and the kernel
+  keep pinned. The number is written down with each step; the aim is the kernel's memory and
+  a few pages for each process.
+- Open: without a swap file only pages with a copy in a file (code, constants) can leave.
+  What the shell does then (builds its data again when it comes back, or ends and is started
+  again) is to decide.
+
+### Step 7: as fast as alone
+
+- The test, on the PS2: a game's timedemo (Quake first) under the whole OS (the shell
+  waiting, the services beside) against the same game alone (no shell, no service).
+  At most 4 % slower; the aim is the smallest difference that can be reached.
+- Measured first right after step 3, as the starting point, and again with each later step.
+- Where to look: the TLB's refills (Quake's timedemo: 1.02 M, about 610 ms), the services'
+  threads, the interrupt path with handlers of several processes, the state copied at a
+  process switch (gone with step 4).
+- The decision of 2026-11-12 (all code is paged, also in front; refills are measured, not
+  avoided by pinning) stands while the 4 % holds. If paging alone costs more: larger pages or
+  resident code for the program in front, decided with the numbers.
+
+### Step 8: open, not planned now
+
+- **Protection.** A program runs in user mode, but so does the kernel's code it calls
+  through the table: the kernel's data (0x88000-0xBFFFF) is writable by programs, all of
+  main memory is through `MX_PHYS_WIN`, and COP0 can be used. A program's wild store can
+  damage the kernel. A real boundary means a system call for every service and the kernel's
+  memory out of the programs' reach, and costs speed in calls that are frequent. Decided
+  2026-11-13 (user): not now; looked at again after step 7, with its numbers.
+- **The kernel and the SDK are one body of code.** Nine of maxsdk's files are built twice
+  (kernel side, program side), ten of its sources are the kernel's only (`vm.c`, `sifdma.c`,
+  `exception.c`, ...), and what is a program's state in the kernel is chosen by object file
+  name in `resident.ld`. Step 4 ends the last; where the kernel's sources live is to decide.
+
+### Not planned
+
+- **Windows** (steps 3 and 4 of the first plan): programs drawing into render targets
+  through the kernel's queue, shown by the shell as textures, with a change to full screen
+  and back. A game always has the whole screen; the shell shows it only as the kept picture
+  of step 5. The text is in this file's history.

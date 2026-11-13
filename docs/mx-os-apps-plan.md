@@ -1,8 +1,10 @@
 # mx OS: apps, services and the kernel's interface (plan)
 
 Where [mx-os-plan.md](mx-os-plan.md) step 2e ("mxlink a program") leads to once mxlink is more than a
-split: an app model that the shell, mxlink, the games and later windowed programs all follow,
-and one interface between the kernel and every app. Agreed 2026-11-08.
+split: an app model that the shell, mxlink and the games all follow, and one interface between
+the kernel and every app. Agreed 2026-11-08. Changed 2026-11-13: windowed programs and GS
+surfaces are no longer planned (mx-os-plan.md, "Goal" and "Not planned"); the home menu over a
+paused game (2f-1) is mx-os-plan.md's step 5.
 
 ## Decided
 
@@ -49,12 +51,11 @@ Chosen: mxshell. The other names weighed:
 
 ## The app model
 
-Three kinds, one way to start them (the kernel's `spawn`):
+Two kinds, one way to start them (the kernel's `spawn`):
 
 | Kind | Screen | Example |
 |---|---|---|
-| full screen | all of GS memory and the video mode, as programs have now. One at a time, in front; the home button pauses it (its frozen frame as a texture, its GS memory saved: the mockup) | the games, ps2sdk and `libmx` programs |
-| windowed | a surface the kernel gives it; the shell shows it | step 3's programs in windows |
+| full screen | the whole graphics path and the video mode while it is in front. The home button pauses it and brings the shell in front, which shows its last picture as a texture; at resume it loads its GS memory again (mx-os-plan.md, step 5) | the games, the shell |
 | service | runs without being in front, a text console as its window | mxlink, later a file or network server |
 
 **Text consoles** (decided 2026-11-09, in place of EE surfaces for services): a service is a
@@ -65,15 +66,12 @@ own (`<name>.in`): lines the shell sends, typed or picked with the pad. It costs
 no memory for a screen (an EE surface of 512 x 256 CT16 would be 256 KiB in each service,
 and uploads to the GS), and needs no GS arbitration.
 
-**GS surfaces**, for programs that draw: a render target in GS memory, drawn by the GS through
-the kernel's queue (step 3: the chain CALLed after a prelude of FRAME, SCISSOR, XYOFFSET), one
-or two buffers. This is for games in a window, later. EE surfaces (a front buffer in the
-app's memory that the shell uploads) are dropped for now; they come back only if an app that
-draws cannot use the GS.
+**GS surfaces** (a render target in GS memory for a program in a window, drawn through the
+kernel's queue) and EE surfaces are not planned (2026-11-13): a program that draws is in
+front and has the whole graphics path.
 
 **A manifest per app**, `app.ini` (it replaces `game.ini`, which keeps working): the name, the
-kind, the surface size (windowed), the cover, and whether a service starts at the boot by
-default.
+kind, the cover, and whether a service starts at the boot by default.
 
 - System apps are in `mc0:/MXOS/APPS/<id>/`: mxlink, the shell.
 - The other apps are in `<device>:/PS2MAX/<id>/`, as now.
@@ -85,7 +83,7 @@ itself is not in it: the kernel always starts it last, in front.
 ## The interface: the kernel and every app
 
 One set of calls in `struct mxk_services` (version 12 and on), and `libmxk`'s wrappers in new
-headers (`<mx/proc.h>`, `<mx/msg.h>`, `<mx/log.h>`; `<mx/surface.h>` with step 3). Each group
+headers (`<mx/proc.h>`, `<mx/msg.h>`, `<mx/log.h>`). Each group
 has a test of its own. Where
 mxlink needs something, it is general:
 
@@ -98,7 +96,6 @@ mxlink needs something, it is general:
 | IOP channels | an app registers a SIF channel, and what its IOP module sends there reaches its port (instead of a fixed EE address, as ps2link's 0xFF800 is now) | ps2link.irx's commands |
 | Memory of another process | `proc_read`, `proc_regs`, for debuggers | `dumpmem`, `dumpreg` |
 | Consoles | the log (its output) and a port `<name>.in` (its input); events: shown, hidden, focus | its window |
-| Surfaces (step 3) | `surface_create(w, h, psm)` in GS memory, `surface_title`; events: shown, hidden, focus | |
 | Input | the pad of the process in front or with the focus; the home button to the shell | |
 
 - **Who may do what**: for now every app may use every call; the manifest's `system=1`
@@ -198,12 +195,13 @@ mxlink needs something, it is general:
      `mxos-emu/mxkernel.elf` on PCSX2; its screen "mx kernel", its lines "mxkernel:"), the host
      link's app `MXLINK.ELF` in `SERVICES.CFG`; mxboot's `BOOT.CFG` names `MXKERNEL.ELF`.
      Step 2e-4 is done.
-5. **2f-1, the home menu over a paused game** (the mockup): the shell draws, with the frozen frame
-   as one texture, while the game's GS memory is saved.
+5. **2f-1, the home menu over a paused game**: mx-os-plan.md's step 5 now (the shell in front
+   with the whole graphics path, the game's last picture as a texture; the game's GS memory is
+   not saved, it loads it again).
 6. **2f-2, consoles.** The shell's console window of a service (the log of its process, its
    input port), mxlink's among them, and Settings > Services.
-7. Then step 3 (GS surfaces, games in windows) and 2g (the BIOS only at the boot), as in
-   mx-os-plan.md.
+7. Then mx-os-plan.md's steps 3 to 7 (stable on the PS2, the process table, the graphics
+   path's owner and home in the shell, memory, speed).
 
 ## Open points
 

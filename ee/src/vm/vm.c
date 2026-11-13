@@ -562,9 +562,20 @@ static void slot_give(u32 slot);
    window, the heap window), every page new (zero) and none from a file,
    sharing the frames (one LRU over all spaces) and the swap file. Returns
    it, or 0 (VM off, a trace, no frames for its tables). Thread code. */
-struct vm_space *mx__vm_space_new(void) {
+struct vm_space *mx__vm_space_new(u32 size) {
   if (!vm.active || vm.bpp != 1)
     return 0;
+  /* its VM: size bytes, or the first space's (which is no more than the
+     frames when the VM came on without a swap file: a program that brings
+     one, or uses MXOS's, asks for its own size) */
+  u32 np = space0.npages;
+  if (size) {
+    if (size > MX_VM_LIMIT - MX_VM_BASE)
+      size = MX_VM_LIMIT - MX_VM_BASE;
+    np = size / PAGE;
+    if (np + space0.nmap + space0.nheap > 0xFFFE)
+      np = 0xFFFE - space0.nmap - space0.nheap;
+  }
   u32 id = 1;
   while (id < MAX_SPACES && spaces[id])
     id++;
@@ -574,7 +585,7 @@ struct vm_space *mx__vm_space_new(void) {
      MX_PHYS_WIN (a global entry): every process's threads may read them
      (the LRU takes any space's pages), not only this program's (its core
      heap is mapped under its ASID) */
-  u32 nt = space0.npages + space0.nmap + space0.nheap;
+  u32 nt = np + space0.nmap + space0.nheap;
   u32 head = (sizeof(struct vm_space) + 15) & ~15u;
   u32 bytes = head + nt * (4 + 2 + 2 + 1 + 1 + 1 + 4) + 16 * 7;
   u8 *m = mx__vm_frames_take(bytes);
@@ -593,7 +604,7 @@ struct vm_space *mx__vm_space_new(void) {
   TAKE(page_slot, nt);
 #undef TAKE
   n->id = id;
-  n->npages = space0.npages, n->nmap = space0.nmap, n->nheap = space0.nheap;
+  n->npages = np, n->nmap = space0.nmap, n->nheap = space0.nheap;
   n->bytes = bytes;
   int was = mx_di();
   spaces[id] = n;
@@ -1190,6 +1201,16 @@ static u32 oldest_of(u32 k, u32 *out, struct vm_space *only) {
     struct vm_space *s = space_in(f);
     if ((only && s != only) || s->pins[q] || (s->flags[q] & PG_BUSY))
       continue;
+    /* a swap file a program brought holds only its own pages: it goes with
+       that program (a host: file goes with the host's run); another
+       space's written page stays (a clean one may still go) */
+    if (swap_owner && s != swap_owner && (s->flags[q] & PG_DIRTY))
+      continue;
+    /* without a swap file only a clean page can go (dropped: from its
+       file, or zero again); before, the oldest one was taken, and a
+       written one ended the program though clean ones were there */
+    if (vm.fd < 0 && (s->flags[q] & PG_DIRTY))
+      continue;
     u32 a = F.refills - s->stamp[q], i = n < k ? n++ : k;
     if (i == k && a <= age[k - 1])
       continue;
@@ -1302,7 +1323,9 @@ static u32 evict_of(struct vm_space *only) {
   u32 o;
   if (!oldest_of(1, &o, only)) {
     mx_irq_restore(was);
-    vm_fatal("out of memory: every frame is pinned", 0);
+    vm_fatal(vm.fd < 0 ? "out of memory: every frame pinned or written, and no swap file"
+                       : "out of memory: every frame is pinned",
+             0);
   }
   struct vm_space *s = OUT_SPACE(o);
   u32 pg = OUT_PAGE(o);

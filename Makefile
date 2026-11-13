@@ -117,7 +117,7 @@ $(LIBK): $(LIBK_OBJS)
 	$(HERE)/tools/mxos-bios-check.sh $(LLVM) $@ || { rm -f $@; exit 1; }
 
 # tests linked into VM (ee/ld/maxsdk-vm.ld), started by mxlink (or mxlink's EMU build)
-VM_TESTS = vm11_vmlink vm12_elfpage vm13_guards vm16_lock vm21_crash vm22_net vm23_pad vm24_home vm25_ids vm26_launch vm27_pads vm28_asid vm29_long vm30_dmairq vm31_rumble vm32_side vm33_msg vm34_child vm35_timers vm36_dir vm38_vmbeside vm39_swapcfg vm40_stackdepth vm41_seq vm42_corefault
+VM_TESTS = vm11_vmlink vm12_elfpage vm13_guards vm16_lock vm21_crash vm22_net vm23_pad vm24_home vm25_ids vm26_launch vm27_pads vm28_asid vm29_long vm30_dmairq vm31_rumble vm32_side vm33_msg vm34_child vm35_timers vm36_dir vm38_vmbeside vm39_swapcfg vm40_stackdepth vm41_seq vm42_corefault vm43_keep vm44_keepdev
 $(VM_TESTS:%=$(OUT)/tests/%.elf): MX_TARGET = mxos
 $(VM_TESTS:%=$(OUT)/tests/%.elf): $(LIBK) $(HERE)/ee/ld/maxsdk-vm.ld
 
@@ -127,7 +127,7 @@ $(VM_TESTS:%=$(OUT)/tests/%.elf): $(LIBK) $(HERE)/ee/ld/maxsdk-vm.ld
 # (frame.c, fpresent.c under the kernel) as well: the frame pipeline without VM is the
 # standalone frame and fpresent's
 K_TESTS = k37_iopchan k43_phys k44_read k45_alldir k40_frame k41_present
-K_STAY_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k38_service k42_timers
+K_STAY_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k38_service k42_timers k46_spawnloop
 $(K_TESTS:%=$(OUT)/tests/%.elf): MX_TARGET = mxos
 $(K_TESTS:%=$(OUT)/tests/%.elf): MX_VM_TEXT = core
 $(K_TESTS:%=$(OUT)/tests/%.elf): $(LIBK) $(HERE)/ee/ld/maxsdk-vm-coretext.ld

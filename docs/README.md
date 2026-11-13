@@ -15,7 +15,7 @@ decision in maxsdk and in the compiler.
 | [dma.md](dma.md) | DMAC: addresses, throughput, chain restart gaps, MFIFO |
 | [vm.md](vm.md) | Virtual memory: the TLB, the kernel's exception paths, paging, DMA from VM |
 | [mx-os.md](mx-os.md) | mx OS: the design, rules for porting games and apps |
-| [mx-os-plan.md](mx-os-plan.md) | mx OS: the steps towards programs in windows (address spaces, the GUI owning the GS) |
+| [mx-os-plan.md](mx-os-plan.md) | mx OS: the steps towards a game OS (processes, the graphics path's owner, the shell at the home button, memory and speed for the game in front) |
 | [pad-bt-plan.md](pad-bt-plan.md) | Pads over USB and Bluetooth: DS3/DS4/DS5, our own Bluetooth host stack, the steps |
 | [kernel.md](kernel.md) | mx-kernel and the two libraries, `libmx` and `libmxk` |
 | [iop-drivers.md](iop-drivers.md) | maxsdk's IOP drivers for DEV9: mxdev9, mxeth (design, measurements, steps) |

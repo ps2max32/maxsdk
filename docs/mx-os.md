@@ -2,7 +2,7 @@
 
 The kernel (`apps/mxos`, `MXKERNEL.ELF`; mxlink until 2026-11-10) is growing into a small resident OS for the PS2. A program uses what it
 offers and keeps the graphics. Library split and service state: [kernel.md](kernel.md). Virtual
-memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-os-plan.md).
+memory: [vm.md](vm.md). Where it goes (a game OS): [mx-os-plan.md](mx-os-plan.md).
 
 ## Model
 
@@ -16,7 +16,8 @@ memory: [vm.md](vm.md). Where it goes (programs in windows): [mx-os-plan.md](mx-
   `docs/iop-drivers.md`), and only on them: none on a PCMCIA PS2 (SCPH-1xxxx). The fast path for
   `host:` files is its own module beside mxnet (mxfast, which is the console too: to the
   ps2client that serves the fast path, without loss, else by broadcast as udptty sent it).
-  Between programs the kernel closes files, pad ports and sound, and
+  Between programs the kernel closes the ended program's files (not the swap file, nor the
+  ELFs of the programs that go on: their pages come from them), pad ports and sound, and
   keeps the IOP and the network. USB pads (DualShock 3, DualShock 4, DualSense) run on usbd and
   maxsdk's `mxpad`, loaded at the boot (`docs/pad-bt-plan.md`), and with a Bluetooth dongle on USB
   the pads paired with it (over USB, as a PS3 or PS4 pairs them), kept in `mc0:/MXOS/BTPADS.DAT`. The internal HDD (`mxata`, `docs/iop-drivers.md`) is a FAT32 or exFAT

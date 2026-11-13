@@ -2,8 +2,9 @@
    program (libmxk without VM) has a software timer every 10 ms and claims
    an EE timer of its own; it starts vm35_timers in front (mx_proc_spawn),
    which has timers of its own and finds no EE timer free. Its timer goes on
-   while the other runs and after its end (the end stops the EE timers, the
-   kernel sets its own again). Started by mxlink:
+   while the other runs, also into this one's running thread, and after its
+   end (the end stops the EE timers, the kernel sets its own again). Started
+   by mxlink:
      k42_timers.elf host:vm35_timers.elf     (status 0 expected) */
 #include "t.h"
 #include <mx/loader.h>
@@ -38,6 +39,17 @@ int main(int argc, char **argv) {
   u32 t0 = ticks;
   int child = mx_proc_spawn(1, args, n, 0);
   CHECK(child > 0);
+  /* this thread running (not waiting: the test) beside the other while its
+     own timer's interrupts come. Each is a switch inside a switch: the
+     kernel's timer handler runs in the front's address space and this one's
+     callback in this one's, and after both this thread must be in its own
+     again (on the PS2 it went on in the front's now and then, and hung) */
+  u32 c0 = mx_count(), s0 = ticks;
+  while (mx_count() - c0 < MX_EE_HZ / 10)
+    ;
+  u32 spun = ticks - s0;
+  mx_printf("k42: 100 ms running beside the other: %u ticks\n", spun);
+  CHECK(spun >= 8 && spun <= 12);
   int st = -1;
   CHECK_EQ(mx_proc_wait(child, &st, 0), 1);
   u32 during = ticks - t0;
