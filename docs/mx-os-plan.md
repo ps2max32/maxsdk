@@ -599,13 +599,23 @@ one is done, and from here on a step counts as done only once it ran on the PS2.
 - Found 2026-11-13: the shell started a game again right after it ended, when the button that
   ended the game was still down (the shell's `input_wait`: no button counts until all are let
   go).
-- Open, 2026-11-13: Quake's second start from the shell (USB) hangs while it loads its first
-  map (`maps/e1m3.bsp`), twice out of twice (after Quake, Quake 2; after Quake 2, Quake): no
-  message, no crash report, the home button dead, the host's reset still works. Three runs
-  from the host in a row (each ended by a reset, files on `host:`) did not show it.
-- Open, 2026-11-13: replacing the kernel through the host crashes the old kernel while a
-  service with VM runs (kernel.md, "Another kernel replaces this one"): new kernels go through
-  mxboot's one-shot until the replace ends the services and the VM first.
+- Open, 2026-11-13: Quake hangs now and then while it loads a map, from the shell (USB) and
+  from the host alike (`+timedemo demo1` in a row: within 1 to 8 runs): no message, no crash
+  report, the home button dead, the host's reset still works. Two forms in the kernel's
+  report of a hang (kernel.md): the main thread running on in `Mod_LoadTextures` over data
+  that is not the map's, or asleep in sif.c's `wait_answer` on its client's semaphore with no
+  "SIF stuck" line. Not found yet; next, the SIF's state in that report (who sleeps on which
+  client, the packets under way, the last ones received).
+- Open, 2026-11-13: the same timedemo gets slower with every run on one kernel (79.8 to 70.8
+  frames a second in 7 runs) and later runs swap: something is not given back at a program's
+  end.
+- Fixed 2026-11-13: replacing the kernel through the host crashed the old kernel while a
+  service with VM ran. Now the kernel restarts without the services first (kernel.md, "Another
+  kernel replaces this one").
+- 2026-11-13: a second console (ROM 2.20, a SCPH-90006) boots the kernel from its card: its
+  BIOS has its data 0x5C0 higher, and its video encoder is on another bus (kernel.md, "Other
+  consoles"; `docs/bios.md`). `examples/display` is to be run on every console the kernel is
+  brought to.
 - The gate: `k46_spawnloop` as above; every `k*` and `vm*` test on the PS2; the shell, a game
   from USB, quit, ten times; only then is the kernel installed as the card's default.
 - After the gate, what the review of 2026-11-13 found in the SIF code and has not failed yet:

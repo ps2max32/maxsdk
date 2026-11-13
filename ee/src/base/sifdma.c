@@ -79,7 +79,10 @@ u32 (*mx__kpeek32)(u32 a);
    0x8002_12C0 (docs/bios.md). The kernel's own copy while it has the SIF
    (mx OS plan 2h-4b): read from the table at the take, written back at the
    give, so that the BIOS, and the kernel's next start, find them. */
-#define SYSREGS 0x800212C0u
+/* In ROM 2.00; a kernel on another ROM sets mx__bios_delta, how much higher
+   that BIOS has its data (apps/mxos/ee/kirq.c: 0x5C0 in ROM 2.20). */
+u32 mx__bios_delta __attribute__((weak));
+#define SYSREGS (0x800212C0u + mx__bios_delta)
 static u32 sysregs[32];
 static int sysregs_own;
 

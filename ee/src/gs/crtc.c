@@ -72,6 +72,7 @@ int mx_crtc_regs(const struct mx_crtc *c, struct mx_crtc_regs *r) {
 
   r->smode1 = pll(c->vck_hz) | MX_SET(GS_SMODE1_CMOD, tv ? c->kind : 0) |
               MX_SET(GS_SMODE1_SPML, c->spml) |
+              MX_SET(GS_SMODE1_PCK2, c->kind == MX_CRTC_HD && c->vdp == 576) |
               MX_SET(GS_SMODE1_GCONT, c->kind != MX_CRTC_VESA) | MX_SET(GS_SMODE1_CLKSEL, 1) |
               MX_SET(GS_SMODE1_NVCK, 1) | MX_SET(GS_SMODE1_SLCK2, 1) |
               MX_SET(GS_SMODE1_VCKSEL, c->kind != MX_CRTC_VESA && c->vdp <= 576) |
@@ -102,6 +103,8 @@ const struct mx_crtc mx_crtc_pal_p  = TV(MX_CRTC_PAL,  0, 254, 262, 48, 127, 5, 
 
 /*                                   vck        kind         spml int ffmd hs   hbp  hact  hfp  hseq vs vbpe vbp vdp  vfpe vfp */
 const struct mx_crtc mx_crtc_480p   = {54000000, MX_CRTC_HD,   2, 0, 0, 128, 101, 1440,  47, 128,  6, 0, 30,  480, 0,  9};
+/* 576p: in ROM 2.20's BIOS (0x53), not in ROM 2.00's; the one mode with PCK2 set */
+const struct mx_crtc mx_crtc_576p   = {54000000, MX_CRTC_HD,   2, 0, 0, 128, 121, 1440,  39, 128,  5, 0, 39,  576, 0,  5};
 const struct mx_crtc mx_crtc_720p   = {74250000, MX_CRTC_HD,   1, 0, 0, 104, 195, 1280,  71,  40,  5, 0, 20,  720, 0,  5};
 const struct mx_crtc mx_crtc_1080i  = {74250000, MX_CRTC_HD,   1, 1, 0, 104, 131, 1920,  45,  44, 10, 2, 28, 1080, 0,  5};
 const struct mx_crtc mx_crtc_vesa_1a = {50625000, MX_CRTC_VESA, 2, 0, 0, 192,  81, 1280,  47,   0,  2, 0, 33,  480, 0, 10};
@@ -131,6 +134,7 @@ const struct mx_crtc *mx_crtc_for_code(int code, int interlace) {
     const struct mx_crtc *c;
   } t[] = {
       {0x50, &mx_crtc_480p},    {0x51, &mx_crtc_1080i},   {0x52, &mx_crtc_720p},
+      {0x53, &mx_crtc_576p},
       {0x1A, &mx_crtc_vesa_1a}, {0x1B, &mx_crtc_vesa_1b}, {0x1C, &mx_crtc_vesa_1c},
       {0x2A, &mx_crtc_vesa_2a}, {0x2B, &mx_crtc_vesa_2b}, {0x2C, &mx_crtc_vesa_2c},
       {0x2D, &mx_crtc_vesa_2d}, {0x3B, &mx_crtc_vesa_3b}, {0x3C, &mx_crtc_vesa_3c},

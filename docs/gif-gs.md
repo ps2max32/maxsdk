@@ -119,7 +119,7 @@ MAGH/MAGV and centres the rectangle (by whole frames when interlaced).
 | NTSC 480i / 240p | 0x02 | 2560 × 448 / 224 | 0x27C, 50 / 25 | yes | 480i yes (sceGsSetDefDispEnv's); 240p no |
 | PAL 576i / 288p | 0x03 | 2560 × 512 / 256 | 0x290, 72 / 36 | yes | no |
 | 480p | 0x50 | 1440 × 480 | 232, 35 | yes | no (gsKit's) |
-| 576p | 0x53 | 1440 × 576 | 255, 44 | **no: SetGsCrt returns, no vblank ever comes** | |
+| 576p | 0x53 | 1440 × 576 | 255, 44 | not by ROM 2.00's SetGsCrt (it returns, no vblank ever comes); ROM 2.20's has it, and mx-kernel writes it itself (`mx_crtc_576p`) | |
 | 720p | 0x52 | 1280 × 720 | 306, 24 | yes | no (gsKit's) |
 | 1080i | 0x51 | 1920 × 1080 | 236, 38 | yes (FRAME mode) | no (gsKit's) |
 | VESA 640/800/1024/1280 | 0x1A, 0x2B, 0x3D, 0x4A | 1280×480, 1600×600, 1024×768, 1280×1024 | gsKit's | yes | no |

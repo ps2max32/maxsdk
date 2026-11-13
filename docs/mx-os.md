@@ -28,6 +28,9 @@ memory: [vm.md](vm.md). Where it goes (a game OS): [mx-os-plan.md](mx-os-plan.md
   removed first) or `MXBOOT/BOOT.CFG` (`mc?:/MXOS/MXKERNEL.ELF`). A new kernel or program is tried as
   the one-shot: if it hangs, a reset boots the default again. New IOP modules the same way: a kernel built
   with `MODULE_DIR=mc0:/MXOS/NEW/` reads them (and its shell) from that directory.
+- Consoles: the kernel knows two (ROM 2.00, a SCPH-70004; ROM 2.20, a SCPH-90006: `kernel.md`,
+  "Other consoles"). On those it sets the video modes itself, 576p (`mx_video_576p`) among them;
+  on another a mode is the BIOS's or fails (`mx_video_set` returns -1: set another one). Run `examples/display` on each console the kernel is brought to.
 - Services: the kernel starts the program `mc0:/MXOS/SERVICES.CFG` names (a path and its
   arguments) at the boot and after a restart; it stays beside every program in front
   (`mx_proc_service`, kernel version 18). The host link is one (kernel version 20):

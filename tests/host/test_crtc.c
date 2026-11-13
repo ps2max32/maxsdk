@@ -19,6 +19,8 @@ static const struct ref bios[] = {
     {&mx_crtc_pal, 0x742816504ull, 0x1ull, 0x8ull, 0x7f5c21fc83030ull, 0x3484bcull, 0xa9000502101401ull},
     {&mx_crtc_pal_p, 0x742816504ull, 0x0ull, 0x8ull, 0x7f5c21fc83030ull, 0x3484bcull, 0xa9000502101404ull},
     {&mx_crtc_480p, 0x1742410504ull, 0x0ull, 0x4ull, 0x402da2003282full, 0x195a75ull, 0xc7800001e00009ull},
+    /* ROM 2.20's (a SCPH-90006's BIOS code, read the same way) */
+    {&mx_crtc_576p, 0x1742490504ull, 0x0ull, 0x4ull, 0x402e02003c827ull, 0x19ca67ull, 0xa9000002700005ull},
     {&mx_crtc_720p, 0x13422004b2ull, 0x0ull, 0x4ull, 0x343110a061847ull, 0x17920eull, 0xab400001400005ull},
     {&mx_crtc_1080i, 0x3422004b2ull, 0x1ull, 0x4ull, 0x344200b04182dull, 0x20fb61ull, 0x150e00201c00005ull},
     {&mx_crtc_vesa_1a, 0x134040047aull, 0x0ull, 0x4ull, 0x602603002882full, 0x178a0full, 0x4780000210000aull},

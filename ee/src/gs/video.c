@@ -8,7 +8,7 @@ const struct mx_video_mode mx_video_ntsc_240p = {0x02, 0, 0, 60, 2560, 224, 0x27
 const struct mx_video_mode mx_video_pal_288p  = {0x03, 0, 0, 50, 2560, 256, 0x290, 36, &mx_crtc_pal_p};
 /* gsKit's (gsKit_set_buffer_attributes), not checked on a screen yet */
 const struct mx_video_mode mx_video_480p      = {0x50, 0, 0, 60, 1440, 480, 232, 35, &mx_crtc_480p};
-const struct mx_video_mode mx_video_576p      = {0x53, 0, 0, 50, 1440, 576, 255, 44, 0};
+const struct mx_video_mode mx_video_576p      = {0x53, 0, 0, 50, 1440, 576, 255, 44, &mx_crtc_576p};
 const struct mx_video_mode mx_video_720p      = {0x52, 0, 0, 60, 1280, 720, 306, 24, &mx_crtc_720p};
 const struct mx_video_mode mx_video_1080i     = {0x51, 1, 0, 60, 1920, 1080, 236, 38, &mx_crtc_1080i};
 const struct mx_video_mode mx_video_vga_640   = {0x1A, 0, 0, 60, 1280, 480, 280, 18, &mx_crtc_vesa_1a};

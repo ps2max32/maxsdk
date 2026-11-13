@@ -891,11 +891,28 @@ void mx__vm_break_init(void (*fn)(u32 code)) {
   mx__set_handler(9, mx__vm_vector);
 }
 
+/* For a kernel's report of a hang: the last exception the VM took (address,
+   EPC, cause, how many times in a row the same address and EPC), and that
+   page's state when it came (its page, lo, flags | frame << 8, TLB entry,
+   the space, the ASID, the status). */
+u32 mx__vm_dbg_last[12];
+u32 mx__vm_dbg_slot(u32 i) { return i < 48 ? F.slot_page[i] : 0; }
+u32 mx__vm_dbg_refills(void) { return F.refills; }
+
 int mx__vm_exception(struct mx__vm_x *x) {
   u32 code = x->cause >> 2 & 31, va = x->badvaddr;
   if (code == 9 && break_fn && !(x->cause >> 31))
     return to_thread(x);
   u32 pg = va_page(va);
+  {
+    u32 *d = mx__vm_dbg_last;
+    d[3] = d[0] == va && d[1] == x->epc ? d[3] + 1 : 1;
+    d[0] = va, d[1] = x->epc, d[2] = x->cause, d[4] = pg;
+    d[5] = pg != ~0u ? vs->lo[pg] : 0;
+    d[6] = pg != ~0u ? (u32)vs->flags[pg] | (u32)vs->frame_of[pg] << 8 | (u32)vs->pins[pg] << 24 : 0;
+    d[7] = pg != ~0u ? vs->page_slot[pg * vm.bpp] : 0;
+    d[8] = vs->id, d[9] = mx__asid, d[10] = x->status, d[11] = vs->npages;
+  }
   if (code < 1 || code > 3 || pg == ~0u) {
       mx__exception_note = va - MX_VM_BASE < MX_VM_LIMIT - MX_VM_BASE
                              ? "VM: outside the VM in use (mx_vm_size)"

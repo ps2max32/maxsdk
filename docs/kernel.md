@@ -272,12 +272,29 @@ instruction cache and jumps to the new kernel's entry with ExecPS2's arguments. 
 a restart (the IOP reset, the services and the shell started again). Before, a new kernel was
 tried by starting mxkernel-high (a copy linked at 0x1E0_0000) and from it `MXKERNEL.ELF`. Once the
 BIOS is gone (2h-5) the kernel starts the trampoline itself instead of ExecPS2.
-Not safe while a program with VM is parked (a service: so at present always on the PS2;
-found 2026-11-13): the replace starts with `tlb_restore`, which takes away the `MX_PHYS_WIN`
-entry the VM's tables are read through (the VM's vblank handler then misses the TLB, and the
-old kernel goes on with a crash on its screen), and 0x0100_0000 and 0x00F0_0000 are frames
-of the VM. To do: end the services and the VM first. Until then a new kernel is tried through
-mxboot's one-shot.
+While a program with VM is parked (a service: so at present always on the PS2) the kernel
+first restarts itself without the services and takes the new kernel then (since 2026-11-13):
+the replace starts with `tlb_restore`, which takes away the `MX_PHYS_WIN` entry the VM's
+tables are read through, and 0x0100_0000 and 0x00F0_0000 are frames of the VM (before, the
+VM's vblank handler missed the TLB and the old kernel went on with a crash on its screen).
+
+Other consoles (2026-11-13). The kernel reads and writes BIOS data by address (the exception
+and interrupt tables, the threads, the SIF registers), and another ROM has them elsewhere:
+`kirq.c`'s `bios_find` takes the tables' place from the BIOS's own vectors and applies the
+difference to all of them (`docs/bios.md`; ROM 2.00: 0, ROM 2.20: 0x5C0). Vectors that are not
+the BIOS's code leave the difference at 0. Nothing may be printed before the interrupt tables
+are found: a line on the console starts the SIF, which hung the start on ROM 2.20; what
+`bios_find` and `kvideo_init` found is said after the console is up (`kirq_report`,
+`kvideo_report`). A start that shows nothing can be followed by its colours: `make KTRACE=1`
+sets the screen's border colour at each step of the start (`ee/main.c`).
+
+A report of a hang (2026-11-13; `ee/main.c`'s `hang_threads`): at the host's reset while a
+program runs, the kernel notes every thread (its process, state, priority, epc, ra, sp, and the semaphore it waits on), the
+VM's last exception (`mx__vm_dbg_last`: the address, the EPC, how many times in a row, the
+page's state), COP0's BadVAddr, EntryHi and EPC and the TLB's entries, in memory that the
+restart keeps, and prints them at the next program from `host:` (`hang_log`); the SIF's own
+"stuck" lines go there too. So after a program hangs: `ps2client reset`, then any run shows
+where it stood.
 
 The kernel runs MXOS programs only (2026-11-11, mx OS plan step 2h-2; `apps/mxos/ee/exec.c`):
 an ELF without the MXK note of version 10 or later (a standalone ELF on `libmx`, ps2sdk's, an
@@ -365,10 +382,15 @@ Version 22: the video timing without the BIOS (plan step 2g; `apps/mxos/ee/kvide
 `iop_write` (below). maxsdk
 computes the CRTC registers (SMODE1 with the PLL, SYNCH1, SYNCH2, SYNCV, SRFSH, SMODE2) from a
 description of the line and the frame (`<mx/crtc.h>`, `ee/src/gs/crtc.c`); the descriptions of
-the BIOS's modes give the values its SetGsCrt writes, all 20 of them (`tests/host/test_crtc.c`),
+the BIOS's modes give the values its SetGsCrt writes, all 21 of them (`tests/host/test_crtc.c`),
 and new ones are made the same way (`mx_video_720p50`, `mx_video_1080i50`, `mx_video_1080p30`,
 or any `struct mx_crtc` in `mx_video_mode.crtc`). `mx_video_set` hands the description to the
-kernel (`crtc_set`), which writes it as SetGsCrt does: the HD clock switch (0xBF80146C bit 3,
+kernel (`crtc_set`), which writes it as SetGsCrt does on the console it finds (two known:
+ROM 2.00's, a SCPH-70004, and since 2026-11-13 ROM 2.20's, a SCPH-90006, which has no clock
+switch and its encoder on another bus, `docs/bios.md`; told apart by the BIOS's place of its
+data, two instructions of its SetGsCrt and its variables; any other console: the BIOS's
+SetGsCrt). 576p (`mx_video_576p`, 2026-11-13) is ROM 2.20's BIOS's mode, written by the
+kernel on both consoles. For ROM 2.00's: the HD clock switch (0xBF80146C bit 3,
 for the 74.25 MHz modes), the registers in its order (PRST and SINT), and the video encoder on
 the I2C bus at 0xBA000000, with the registers SetGsCrt writes for that kind of mode. Those last
 two were read from the BIOS of one console; the kernel takes this path only where the BIOS's

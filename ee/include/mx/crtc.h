@@ -52,7 +52,7 @@ u32 mx_crtc_vck(u64 smode1);
 MX_INLINE u32 mx_crtc_pixel_hz(const struct mx_crtc *c) { return c->vck_hz / c->spml; }
 
 /* The description of a BIOS mode code (SetGsCrt's 0x02, 0x03, 0x50 ...), 0 for
-   one there is none of (576p: not in all BIOSes). */
+   one there is none of. */
 const struct mx_crtc *mx_crtc_for_code(int code, int interlace);
 
 /* The BIOS's modes (SetGsCrt codes 0x02, 0x03, 0x50 ...). */
@@ -61,6 +61,7 @@ extern const struct mx_crtc mx_crtc_ntsc_p;    /* 240p */
 extern const struct mx_crtc mx_crtc_pal;       /* 576i (0x03) */
 extern const struct mx_crtc mx_crtc_pal_p;     /* 288p */
 extern const struct mx_crtc mx_crtc_480p;      /* 0x50 */
+extern const struct mx_crtc mx_crtc_576p;      /* 0x53: not in all BIOSes (ROM 2.20 has it, 2.00 not) */
 extern const struct mx_crtc mx_crtc_720p;      /* 0x52 */
 extern const struct mx_crtc mx_crtc_1080i;     /* 0x51 */
 extern const struct mx_crtc mx_crtc_vesa_1a;   /* 640x480 60 Hz */
