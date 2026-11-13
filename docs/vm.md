@@ -150,6 +150,7 @@ which replays it with other page sizes, memory sizes and eviction policies:
 | A TLB refill (no entry) reaches handler code 2 (load) or 3 (store), EntryHi = the faulting VPN2, BadVAddr set; the handler's `tlbwi` + `eret` continues the program | | | `probe/p19_tlb.c` | 2026-10-31 |
 | A store to an entry without D reaches handler code 1 (TLB modified) | | | `probe/p19_tlb.c mod` | 2026-10-31 |
 | **An access to an entry whose half is invalid (V = 0) hangs the PS2**: the handler (counting its calls) is not reached, no exception storm, no reset answer | 4 runs | BIOS 2.00 | `probe/p19_tlb.c inv` | 2026-10-31 |
+| **A handler that returns to a CACHE instruction must end with SYNC.L before its ERET** (`sync.l; sync.p; eret`): with `sync.p` alone the fast refill's last stores (its tables) were lost when the instruction that missed was a `cache 0x1a` (DHIN) of `mx_dcache_invalidate`'s loop, about 7 in 10 runs of a Quake timedemo from its second run on; with it none | 22 runs | BIOS 2.00 | Quake `+timedemo demo1` in a row | 2026-11-13 |
 | Refill through the kernel's dispatch + a 12-instruction handler, then the entry cleared from C | 116 cycles each | 64 runs | `probe/p19_tlb.c` | 2026-10-31 |
 | Writing Status (KSU = 0) from user mode to get to kernel mode hung the PS2 (twice) | | | `probe/kdump.c` (first version) | 2026-10-31 |
 | Kernel memory is read by a `SetSyscall` (0x74) handler: the kernel runs it in kernel mode | | | `probe/kdump.c` | 2026-10-31 |

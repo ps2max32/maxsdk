@@ -96,6 +96,7 @@ mx__vm_vector:
 7:	lq $1, VMF_SAVE($27)
 	lq $2, VMF_SAVE + 16($27)
 	lq $3, VMF_SAVE + 32($27)
+	sync.l		# the handler's stores done: the instruction returned to may be a CACHE
 	sync.p
 	eret
 	nop
@@ -205,6 +206,7 @@ full:
 	lui $8, %hi(mx__vm_slow)
 	addiu $8, $8, %lo(mx__vm_slow)
 	mtc0 $8, $14
+	sync.l		# the handler's stores done: the instruction returned to may be a CACHE
 	sync.p
 	eret
 	nop
@@ -244,6 +246,7 @@ full:
 	lq $29, 464($26)
 	lq $30, 480($26)
 	lq $31, 496($26)
+	sync.l		# the handler's stores done: the instruction returned to may be a CACHE
 	sync.p
 	eret
 	nop
@@ -300,6 +303,7 @@ mx__vm_resume_k:
 	lq $29, 464($26)
 	lq $30, 480($26)
 	lq $31, 496($26)
+	sync.l		# the handler's stores done: the instruction returned to may be a CACHE
 	sync.p
 	eret
 	nop

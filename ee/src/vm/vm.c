@@ -259,7 +259,9 @@ static void blk_write(u32 s, u32 pg, u32 b) {
    entry, an instruction on the one reading the other, refilled each other
    for ever). Counted, the first ones kept (the kind: 1 seen at a sync, 2
    left behind at a vblank; the page, its entry, what slot_page said, the
-   space, the refills so far), and put right: the page has no entry. */
+   space, the refills so far), and put right: the page has no entry.
+   The cause found: tlb.S's returns without a SYNC.L, into a CACHE
+   instruction (docs/vm.md, Facts); none seen since, the check stays. */
 u32 mx__vm_dbg_stale[1 + 4 * 6];
 static void stale(u32 kind, u32 bi, u32 s) {
   u32 n = mx__vm_dbg_stale[0]++;

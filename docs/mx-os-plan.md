@@ -608,7 +608,16 @@ one is done, and from here on a step counts as done only once it ran on the PS2.
   (`vm.c`'s `stale`: at each sync, and a check at each vblank), counted and reported at a
   program's end. With it ten runs in a row passed, seven such pages put right in them, the
   same pair each time (pages 699 and 731 of Quake's space, at the same points of the demo).
-  Open: where the two tables come apart. The other form seen before (the main thread asleep
+  Where the tables came apart (found the same day, with a log of every change to them):
+  after a file read into a large buffer the kernel invalidates the buffer's cache lines
+  (CACHE DHIN, a loop over its addresses); each first line of a page not in the TLB takes
+  a refill, and the fast refill's last stores (`page_slot` of the page that had the entry:
+  cleared) were lost when the handler returned to the CACHE instruction: the handlers of
+  vm.c returned with `sync.p; eret`, and a CACHE instruction must have a SYNC.L directly
+  before it (EE Core Restrictions, 12). With `sync.l` before each `eret` of `tlb.S`,
+  `exception.S` and the kernel's `ksys.S` (its interrupt and thread returns had it): 22
+  runs in a row without one such page (before: about 7 runs in 10 had one). The check
+  stays. The other form seen before (the main thread asleep
   in sif.c's `wait_answer`) was not seen again and is not explained.
 - Found 2026-11-13: the same timedemo got slower with every run on one kernel (79.8 to 71.1
   frames a second in 7 runs, the eighth did not end in 60 s): the pinned memory a program's

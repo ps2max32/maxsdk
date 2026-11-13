@@ -297,7 +297,7 @@ restart keeps, and prints them at the next program from `host:` (`hang_log`); th
 packets received, numbered; each thread asleep for an answer with its client, function,
 packet and the number of packets received when it began: so an answer that never came and
 one that came without waking its thread can be told apart), the VM's pages whose TLB entry
-was not their own (`vm.c`'s `stale`: put right when seen, counted, also in the VM's lines at
+was not their own (`vm.c`'s `stale`; the cause was a return without SYNC.L, vm.md's facts: put right when seen, counted, also in the VM's lines at
 a program's end), and a wait asked for inside an interrupt handler. At every
 program from `host:` the log also has the last program's crash, if it crashed (its report
 to the host can be lost), and the VM's pool: frames, free, pinned. So after a program hangs: `ps2client reset`, then any run shows

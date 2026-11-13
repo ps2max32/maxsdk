@@ -109,6 +109,7 @@ mx__exception_vector:
 	lui $27, %hi(mx__exception_report)
 	addiu $27, $27, %lo(mx__exception_report)
 	mtc0 $27, $14
+	sync.l		# the handler's stores done: the instruction returned to may be a CACHE
 	sync.p
 	eret
 	nop
