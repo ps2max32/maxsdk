@@ -27,6 +27,24 @@ static const u8 c_yuv[] = {
 #embed "data/mpeg_c.yuv"
 };
 
+static const u8 d_m2v[] = {
+#embed "data/mpeg_d.m2v"
+};
+static const u8 d_yuv[] = {
+#embed "data/mpeg_d.yuv"
+};
+static const u8 e_m2v[] = {
+#embed "data/mpeg_e.m2v"
+};
+static const u8 e_yuv[] = {
+#embed "data/mpeg_e.yuv"
+};
+static const u8 f_m1v[] = {
+#embed "data/mpeg_f.m1v"
+};
+static const u8 f_yuv[] = {
+#embed "data/mpeg_f.yuv"
+};
 static const u8 a_mpg[] = {
 #embed "data/mpeg_a.mpg"
 };
@@ -139,6 +157,66 @@ static void stream(const char *name, const u8 *es, u32 es_size, const u8 *yuv, u
   CHECK_EQ(qw, MX_MPEG_CHAIN_QW(m.mbw * m.mbh));
 }
 
+/* A stream with P and B pictures (mx_mpeg_refs): every picture comes out, in
+   the order of display, and is ffmpeg's within a margin (the two IDCTs'
+   differences add up from picture to picture). */
+static void stream_refs(const char *name, const u8 *es, u32 es_size, const u8 *yuv, u32 yuv_size, u32 w,
+                        u32 h) {
+  static u8 frames[MX_MPEG_REF_BYTES(5, 4)];
+  static u8 row[MX_MPEG_ROW_BYTES(5)] MX_ALIGNED(64) MX_CORE_BSS;
+  u32 size = es_size;
+  memset(buf, 0, sizeof buf);
+  memcpy(buf, es, es_size);
+  buf[size + 2] = 1;
+  buf[size + 3] = 0xB7;
+  size += 4 + MX_MPEG_AHEAD;
+  mx_dcache_writeback(buf, sizeof buf);
+
+  struct mx_mpeg m;
+  mx_mpeg_init(&m, 0);
+  u32 pos = 0, shown = 0, frame_bytes = w * h * 3 / 2, worst = 0, sum = 0, errors = 0, types = 0;
+  int refs = 0, ended = 0;
+  for (;;) {
+    int r = mx_mpeg_headers(&m, buf, size, &pos);
+    if (r == MX_MPEG_PICTURE) {
+      if (!refs)
+        mx_mpeg_refs(&m, frames, row, 0);
+      refs = 1;
+      types |= 1u << m.type;
+      r = mx_mpeg_picture(&m, buf, size, &pos, out);
+      errors += m.errors;
+      CHECK(r == MX_MPEG_PICTURE || r == MX_MPEG_NONE);
+      if (r != MX_MPEG_PICTURE && r != MX_MPEG_NONE)
+        break;
+    } else {
+      CHECK_EQ(r, MX_MPEG_END);
+      ended = 1;
+      r = mx_mpeg_flush(&m, out);
+    }
+    if (r == MX_MPEG_PICTURE && (shown + 1) * frame_bytes <= yuv_size) {
+      int max, mean;
+      mx_dcache_invalidate(out, sizeof out);
+      compare(&m, yuv + shown * frame_bytes, 0, &max, &mean);
+      if ((u32)max > worst)
+        worst = (u32)max;
+      sum += (u32)mean;
+      if (max > 24)
+        mx_printf("mpeg: %s: picture %u (in the order shown): largest difference %d, mean %d.%02d\n",
+                  name, shown, max, mean / 100, mean % 100);
+      shown++;
+    }
+    if (ended)
+      break;
+  }
+  mx_printf("mpeg: %s: %u pictures, difference to ffmpeg's: largest %u, mean %u.%02u; %u errors\n", name,
+            shown, worst, shown ? sum / shown / 100 : 0, shown ? sum / shown % 100 : 0, errors);
+  CHECK_EQ(shown * frame_bytes, yuv_size);
+  CHECK_EQ(types & 0xE, 0xE); /* I, P and B pictures */
+  CHECK_EQ(errors, 0);
+  CHECK(worst <= 24);
+  CHECK(shown && sum / shown < (mx_ipu_qsc_is_scale() ? 400u : 150u)); /* PCSX2: stream b's note */
+}
+
 /* The buffer ends inside a picture: MX_MPEG_MORE, and the picture decodes
    when the rest is there. */
 static void more(void) {
@@ -248,6 +326,9 @@ int main(void) {
   more();
   damaged();
   program_stream();
+  stream_refs("d (MPEG-2, I P B)", d_m2v, sizeof d_m2v, d_yuv, sizeof d_yuv, 64, 48);
+  stream_refs("e (MPEG-2, I P B, field prediction)", e_m2v, sizeof e_m2v, e_yuv, sizeof e_yuv, 72, 40);
+  stream_refs("f (MPEG-1, I P B)", f_m1v, sizeof f_m1v, f_yuv, sizeof f_yuv, 64, 48);
   mx_ipu_exit();
   return t_done("mpeg");
 }

@@ -9,6 +9,7 @@
 #      the non-linear quantizer scale, 10-bit DC, its own matrices, 72 x 40
 #      (not whole macroblocks)
 #   c: MPEG-1, 64 x 48
+#   d, e, f: as a, b (field prediction and field DCT), c with P and B pictures
 #   mpeg_a.mpg: a in a program stream with LPCM sound; mpeg_a.pcm: its samples
 set -e
 [ -f "$1" ] || { echo "usage: $0 <big buck bunny movie file>" >&2; exit 2; }
@@ -21,6 +22,16 @@ ffmpeg -v error -y -ss 157 -i "$1" $(src 72:40) -c:v mpeg2video -q:v 4 -flags +i
   -intra_vlc 1 -non_linear_quant 1 -qmax 28 -dc 10 -intra_matrix $M -f mpeg2video $D/mpeg_b.m2v
 ffmpeg -v error -y -ss 157 -i "$1" $(src 64:48) -c:v mpeg1video -q:v 3 -f mpeg1video $D/mpeg_c.m1v
 for f in mpeg_a.m2v mpeg_b.m2v mpeg_c.m1v; do
+  ffmpeg -v error -y -i $D/$f -f rawvideo -pix_fmt yuv420p $D/${f%.*}.yuv
+done
+# with P and B pictures: nine frames that follow each other (I B B P B B P B B
+# in the order of display)
+mov() { echo "-vf scale=$1 -frames:v 9 -an -pix_fmt yuv420p -g 9 -bf 2"; }
+ffmpeg -v error -y -ss 163 -i "$1" $(mov 64:48) -c:v mpeg2video -q:v 3 -f mpeg2video $D/mpeg_d.m2v
+ffmpeg -v error -y -ss 163 -i "$1" $(mov 72:40) -c:v mpeg2video -q:v 3 -flags +ildct+ilme \
+  -alternate_scan 1 -intra_vlc 1 -f mpeg2video $D/mpeg_e.m2v
+ffmpeg -v error -y -ss 163 -i "$1" $(mov 64:48) -c:v mpeg1video -q:v 3 -f mpeg1video $D/mpeg_f.m1v
+for f in mpeg_d.m2v mpeg_e.m2v mpeg_f.m1v; do
   ffmpeg -v error -y -i $D/$f -f rawvideo -pix_fmt yuv420p $D/${f%.*}.yuv
 done
 # a as a program stream with sound beside it (LPCM, a tone), and that sound

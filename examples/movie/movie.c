@@ -6,7 +6,9 @@
 
    Make one with: ffmpeg -i in -vf scale=640:448 -c:v mpeg2video -g 1 -bf 0 -q:v 4 \
                     -c:a pcm_s16be -ar 48000 -ac 2 -f vob -muxrate 20000000 clip.mpg
-   (up to 640x512 on a PAL console; 640x384 there for a 16:9 picture). */
+   (up to 640x512 on a PAL console; 640x384 there for a 16:9 picture).
+   Without -g 1 -bf 0 the stream has P and B pictures: smaller, and several
+   times the work to decode (<mx/movie.h>). */
 
 #include <mx/movie.h>
 #include <mx/mx.h>
@@ -67,7 +69,8 @@ int main(int argc, char **argv) {
     if (r < 0)
       break;
   }
-  mx_printf("movie: %u pictures in %u frames, %u slices in error\n", in->pictures, frames, in->errors);
+  mx_printf("movie: %u pictures in %u frames, %u slices in error; decoding a picture %u us%s\n",
+            in->pictures, frames, in->errors, in->decode_us, in->predicted ? " (P and B pictures)" : "");
   if (in->sound)
     mx_printf("movie: sound: %d ms behind the picture at the end, %u jumps, %u times dry\n",
               in->sound_behind_ms, in->sound_jumps, in->sound_dry);

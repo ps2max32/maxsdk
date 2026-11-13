@@ -145,6 +145,7 @@ int main(int argc, char **argv) {
   mx_printf("moviehd: %u pictures in %u vblanks (%u expected), %u vblanks behind, %u slices in error\n",
             pictures, fields, pictures ? (u32)((u64)pictures * mode.hz * in->rate_den / in->rate_num) : 0,
             late, in->errors);
+  mx_printf("moviehd: decoding a picture: %u us%s\n", in->decode_us, in->predicted ? " (P and B pictures)" : "");
   report("getting a picture (decoding, and the file when it is behind)", &t_dec);
   report("sending it to the GS, the file's packets apart beside it", &t_send);
   if (in->sound)

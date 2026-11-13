@@ -17,6 +17,7 @@ static struct {
   u32 total, mbq; /* quadwords fromIPU was started with, and a macroblock's; 0: no output */
 } cur;
 static u8 table[64] MX_ALIGNED(64) MX_CORE_BSS; /* SETIQ's and SETVQ's, sent by DMA */
+static u8 direct;                               /* mx_ipu_direct */
 static u8 qsc_is_scale;                         /* IDEC's QSC is taken as the scale (PCSX2) */
 static u8 q_type;                               /* IPU_CTRL.QST as last written */
 
@@ -88,6 +89,7 @@ int mx_ipu_init(void) {
 }
 
 void mx_ipu_exit(void) {
+  direct = 0;
   mx_ipu_reset();
   mx_irq_intc(MX_INTC_IPU, 0, 0);
   mx_irq_dmac(MX_CH_FROMIPU, 0, 0);
@@ -96,6 +98,17 @@ void mx_ipu_exit(void) {
     mx_sema_delete(sema);
   sema = -1;
 }
+
+void mx_ipu_direct(int on) {
+  if (sema < 0 || direct == !!on)
+    return;
+  direct = !!on;
+  mx_irq_intc(MX_INTC_IPU, on ? 0 : wake, 0);
+  mx_irq_dmac(MX_CH_FROMIPU, on ? 0 : wake, 0);
+  mx_irq_dmac(MX_CH_TOIPU, on ? 0 : wake, 0);
+}
+
+u32 mx_ipu_result(void) { return (u32)MX_R64(MX_IPU_CMD); }
 
 void mx_ipu_ctrl(u32 bits) {
   q_type = (u8)MX_GET(IPU_CTRL_QST, bits);
@@ -113,6 +126,13 @@ void mx_ipu_ctrl(u32 bits) {
    what it holds, looked at every 100 us. */
 static int wait_cmd(int out) {
   int idle = 0;
+  if (direct) {
+    /* a command of microseconds: looked at until it has ended; if it has
+       not by then it waits for the stream or its output */
+    for (int i = 0; i < 2000; i++)
+      if (!(MX_R32(MX_IPU_CTRL) & MX_BIT(IPU_CTRL_BUSY)))
+        return MX_IPU_OK;
+  }
   for (;;) {
     u32 c = MX_R32(MX_IPU_CTRL);
     if (!(c & MX_BIT(IPU_CTRL_BUSY)))
@@ -128,7 +148,10 @@ static int wait_cmd(int out) {
       continue;
     }
     idle = 0;
-    mx_sema_wait(sema);
+    if (direct)
+      mx_sleep_us(100);
+    else
+      mx_sema_wait(sema);
   }
 }
 
@@ -176,8 +199,12 @@ void mx_ipu_input_end(void) {
 }
 
 void mx_ipu_more(const void *bs, u32 qwc) {
-  while (mx_dma_busy(MX_CH_TOIPU))
-    mx_sema_wait(sema);
+  while (mx_dma_busy(MX_CH_TOIPU)) {
+    if (direct)
+      mx_sleep_us(100);
+    else
+      mx_sema_wait(sema);
+  }
   fed += qwc;
   send(bs, qwc);
 }
@@ -255,9 +282,13 @@ int mx_ipu_idec(u32 fb, u32 qsc, u32 flags, void *out, u32 mbs) {
   return finish();
 }
 
-int mx_ipu_bdec(u32 fb, u32 qsc, u32 flags, void *out) {
+void mx_ipu_bdec_start(u32 fb, u32 qsc, u32 flags, void *out) {
   output(out, 1, MX_IPU_MB_RAW16);
   CMD(BDEC, (flags & 0x0E000000u) | (qsc & 31) << 16 | (fb & 63));
+}
+
+int mx_ipu_bdec(u32 fb, u32 qsc, u32 flags, void *out) {
+  mx_ipu_bdec_start(fb, qsc, flags, out);
   return finish();
 }
 

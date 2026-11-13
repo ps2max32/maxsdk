@@ -60,6 +60,16 @@ void mx_ipu_exit(void);
    bits are to be set again. */
 void mx_ipu_reset(void);
 
+/* For decoding macroblock by macroblock (FDEC, VDEC and BDEC by the
+   thousand a picture, each over in microseconds): on, the three interrupts
+   are off and a command's end is looked for a few microseconds before the
+   caller sleeps 100 us at a time. Off (the default): every command is
+   waited for asleep. Between commands. */
+void mx_ipu_direct(int on);
+/* What VDEC or FDEC decoded, after mx_ipu_wait for one that had returned
+   starved. */
+u32 mx_ipu_result(void);
+
 /* How the bit stream is coded, from the picture's headers: IPU_CTRL's IDP,
    AS, IVF, QST, MP1 and PCT, e.g. MX_SET(IPU_CTRL_IDP, 1) | MX_BIT(IPU_CTRL_AS). */
 void mx_ipu_ctrl(u32 bits);
@@ -144,6 +154,9 @@ int mx_ipu_qsc_is_scale(void);
    of another (from its coded_block_pattern on; blocks not coded are 0).
    Returns 1 (a macroblock written), 0 with ECD set, or MX_IPU_STARVED. */
 int mx_ipu_bdec(u32 fb, u32 qsc, u32 flags, void *out);
+/* The same without waiting: the caller works while the IPU decodes, then
+   mx_ipu_wait gives mx_ipu_bdec's value. */
+void mx_ipu_bdec_start(u32 fb, u32 qsc, u32 flags, void *out);
 
 /* CSC: mbs macroblocks RAW8 at raw8 to RGB32 or RGB16 (flags: MX_IPU_RGB16,
    MX_IPU_DITHER) at out; at most 1023 at once as RGB32, 2047 as RGB16.

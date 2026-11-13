@@ -5,10 +5,11 @@
    an elementary stream's headers are read on the EE, its pictures decoded
    by the IPU. docs/video-plan.md says what is there and what is to come.
 
-   Now: I pictures (frame pictures, 4:2:0), a slice an IDEC command. Other
-   pictures are skipped (MX_MPEG_SKIPPED), so a stream of I pictures only
-   plays in full (ffmpeg -c:v mpeg2video -g 1) and any other shows its I
-   pictures.
+   I pictures (frame pictures, 4:2:0) are decoded a slice an IDEC command.
+   Other pictures are skipped (MX_MPEG_SKIPPED) unless mx_mpeg_refs gave
+   the memory for them: a stream of I pictures only plays in full that way
+   (ffmpeg -c:v mpeg2video -g 1 -bf 0), at four times the speed of the
+   other.
 
    The stream is in memory, in a buffer the DMAC reads too: 16-byte
    aligned, in one physical piece (core memory, or VM pinned with
@@ -32,9 +33,10 @@
 
 enum {
   MX_MPEG_MORE = 0,    /* the buffer ends before the headers or the picture do */
-  MX_MPEG_PICTURE = 1, /* a picture's headers were read / the picture is decoded */
+  MX_MPEG_PICTURE = 1, /* a picture's headers were read / a picture is in out */
   MX_MPEG_END = 2,     /* sequence_end_code */
   MX_MPEG_SKIPPED = 3, /* a picture this decoder does not decode: passed over */
+  MX_MPEG_NONE = 4,    /* decoded, and no picture to show yet (mx_mpeg_refs: the order) */
   MX_MPEG_BAD = -1,    /* no sequence header before the picture, or a size of 0 */
 };
 
@@ -61,6 +63,14 @@ struct mx_mpeg {
   u16 errors;  /* slices that ended in an error (their rest keeps what out held) */
   /* private */
   u8 have_seq, dc_prec, frame_dct, conceal, q_type, vlc_fmt, alt_scan;
+  u8 f_code[2][2]; /* [forward, backward][horizontal, vertical] */
+  u8 full_pel[2];  /* MPEG-1: vectors in whole pixels */
+  u8 *frames;      /* mx_mpeg_refs: three pictures in Y, Cb, Cr */
+  u8 *row;         /* a row of macroblocks as RAW8, for the conversion */
+  s16 *block;      /* where BDEC writes a macroblock */
+  u8 ref[2], spare; /* the frames of the older and the newer reference picture, and the third */
+  u8 nrefs;        /* reference pictures decoded (2: both there) */
+  u8 held;         /* the newer reference has not been given out yet */
   u8 iq_load[2];   /* the IPU has not got iq[n] yet */
   u8 iq[2][64];    /* intra, non-intra quantizer matrix (zigzag order) */
   u32 flags;
@@ -75,12 +85,41 @@ void mx_mpeg_init(struct mx_mpeg *m, u32 flags);
    MX_MPEG_END: *pos is after the code. */
 int mx_mpeg_headers(struct mx_mpeg *m, const u8 *buf, u32 size, u32 *pos);
 
+/* The type of the next picture whose header starts at or after pos
+   (MX_MPEG_I/P/B), 0 if the buffer has none: a look ahead, e.g. from a first
+   picture's slices at whether the stream has other pictures than I. */
+int mx_mpeg_next_type(const u8 *buf, u32 size, u32 pos);
+
 /* Decode the picture whose slices are at *pos (after mx_mpeg_headers) to
    out: mbw * mbh macroblocks. MX_MPEG_PICTURE: done, *pos after it.
    MX_MPEG_SKIPPED: not an I frame picture; *pos after it, out untouched.
    MX_MPEG_MORE: *pos unchanged (out may be written in part). out is
    written by the DMAC: mx_dcache_invalidate it before reading it. */
 int mx_mpeg_picture(struct mx_mpeg *m, const u8 *buf, u32 size, u32 *pos, void *out);
+
+/* P and B pictures too (without this they are skipped): memory for the
+   pictures that others are predicted from. After mx_mpeg_headers has found
+   the first picture (the sizes come from it):
+     frames   MX_MPEG_REF_BYTES(mbw, mbh) bytes that only the EE reads
+     row      MX_MPEG_ROW_BYTES(mbw) bytes the DMAC reads (16-byte aligned, one
+              physical piece)
+     block    768 bytes the DMAC writes, a macroblock at a time: best in the
+              scratchpad (0: its first 768 bytes, 0x7000_0000), else as row
+   Every picture is then decoded a macroblock a BDEC command to Y, Cb, Cr,
+   the prediction added on the EE, and converted to RGB a row of macroblocks
+   a CSC command when it is its turn to be shown: mx_mpeg_picture gives the
+   pictures in the order of display, a reference picture when the next one
+   has been decoded (MX_MPEG_NONE: nothing to show for this one), and
+   mx_mpeg_flush the last. Frame pictures with frame and field prediction;
+   field pictures and dual prime are skipped. Several times the IDEC path's
+   time (docs/ipu.md). frames is best pinned memory: as pages of VM its
+   reads all over would cost the TLB's entries. */
+#define MX_MPEG_REF_BYTES(mbw, mbh) (3u * (mbw) * (mbh) * 384u)
+#define MX_MPEG_ROW_BYTES(mbw) ((mbw) * 384u)
+void mx_mpeg_refs(struct mx_mpeg *m, void *frames, void *row, void *block);
+/* At the stream's end (MX_MPEG_END): the picture still held, to out.
+   MX_MPEG_PICTURE, or MX_MPEG_NONE if there is none. */
+int mx_mpeg_flush(struct mx_mpeg *m, void *out);
 
 /* The source chain (for the GIF channel, PATH3: mx_dma_chain(MX_CH_GIF, tags, 0),
    or called from a chain of a frame) that writes the decoded picture at mbs

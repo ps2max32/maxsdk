@@ -74,7 +74,7 @@ Each step counts once it ran on the PS2.
 | V0 | `<mx/ipu.h>`, `tests/ps2/ipu.c` (every command on streams made in the test), the registers in `ee/gen/hw_desc.py` | done: PS2 and PCSX2, 2026-11-13 |
 | V1 | `<mx/mpeg.h>`: sequence and picture headers, I pictures by `IDEC`, the upload chain; `tests/ps2/mpeg.c` on streams made by ffmpeg from Big Buck Bunny (`tools/mpeg-fixtures.sh`) against ffmpeg's decoding; `examples/movie` plays an `.m2v` from `host:` as it reads it, `examples/moviehd` one of 1920 x 1080 in 1080i | decodes right on the PS2 and PCSX2; the example ran on the PS2 (its picture on the TV not yet confirmed); open: the upload's time, RGB16 into a CT16 buffer, 1280 x 720 |
 | V2 | `<mx/movie.h>`: a movie from a file for any program: the program stream taken apart (`<mx/mpegps.h>`), a reading thread, LPCM sound through `mx_snd`'s stream with its rate steered to the picture (a linear interpolation on the EE, 3 parts in a thousand at most; a jump when far off), buffers from the pinned and the pageable heap. `mx_movie_update` once a frame for a frame loop (`examples/movie`), or `mx_movie_decode` / `mx_movie_shown` / `mx_movie_poll` for a player that times pictures itself (`examples/moviehd`) | done on the PS2, 2026-11-13: 1920 x 1080 at 24 a second with sound, no picture late, the sound within -3 .. 9 ms of the picture by the stream's count (SCPH-90006); 640 x 384 in a 50 Hz frame loop, 720 pictures in 1502 frames (SCPH-70004). To do: MPEG audio layer II; time stamps beyond the start; pause, seek, loop; the end of the sound's queue played out |
-| V3 | P and B pictures: `BDEC`, motion compensation in C, `CSC`; field pictures | |
+| V3 | P and B pictures (`mx_mpeg_refs`): the macroblock's header and vectors by `VDEC`/`FDEC`, its blocks by `BDEC` (the IPU's interrupts off, its commands looked at: `mx_ipu_direct`), the prediction in C eight pixels at a time in 64-bit registers while the IPU decodes, three pictures in Y, Cb, Cr, the picture to show converted a row of macroblocks a `CSC`; frame pictures with frame and field prediction, MPEG-2 and MPEG-1; `<mx/movie.h>` finds such a stream out by its second picture | decodes right on the PS2 (three streams against ffmpeg's decoding, mean difference 0.05 of 255) and PCSX2. Speed (`ipu.md`): 640 x 384 at 24 a second plays with sound (24.8 ms a picture); 720 x 576 does not hold 24 a second yet (34.9 ms in the mean, B pictures more). To do: speed (below); field pictures, dual prime, concealment vectors |
 | V4 | `<mx/pic.h>`: stills (I picture, JPEG baseline, PNG) to a texture; RGB16 with dither and `PACK`'s 4-bit CLUT for textures that must be small | |
 | V5 | libgl: a picture as a texture; stop and go on for the home button; the shell's use (backgrounds, previews) | |
 
@@ -106,6 +106,26 @@ which is the buffer shown: no second buffer, no textures, nothing else on the sc
   buffer. A first version with 7.3 MiB of core did not start: the kernel stopped while
   loading it (after "VM pool", before "loaded") and the console had to be switched off. With
   5.5 MiB it runs. For the kernel's side to look at.
+
+## P and B pictures: where the time goes
+
+640 x 384 (960 macroblocks), measured with counters in the decoder before the last two changes:
+of 26.3 ms a picture, the prediction took 8.3 ms, reading the macroblocks' headers and vectors
+from the IPU about 6.5 ms, the conversion for showing 6.5 ms, the blocks into the picture 3.6
+ms, BDEC 2.0 ms.
+
+- The prediction is bound by memory, not by its arithmetic (64-bit registers, `ldl`/`ldr`):
+  a macroblock reads some 35 cache lines of the references that are not in the 8 KiB cache.
+  Sony's way was to fetch the reference blocks by DMA into the scratchpad (toSPR); a prefetch
+  as soon as the vectors are known is the smaller step.
+- Showing a picture copies it from planes into macroblocks for `CSC`. Kept as macroblocks
+  (RAW8) in the first place, a picture would go to `CSC` as it lies; the prediction then reads
+  its reference across macroblocks.
+- The header and vectors cost about 300 cycles a command (a function call, the wait's loop):
+  to be inlined for this path, or parsed on the EE from memory with the IPU only told how
+  many bits to pass over.
+- The blocks into the picture (add and clip, 384 samples): MMI through the compiler's
+  vectors.
 
 Open points:
 

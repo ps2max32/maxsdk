@@ -28,6 +28,10 @@ struct mx_movie {
   u8 *es;
   u32 es_max, ahead, have, pos;
   u8 *pix;
+  u8 *frames, *row; /* a stream with P and B pictures: mx_mpeg_refs' memory */
+  u8 flushed;
+  u32 decoded;
+  u64 dec_cycles;
 
   /* the reading thread: chunk[] filled in turn while one is free */
   u8 *chunk[CHUNKS];
@@ -118,7 +122,7 @@ static void pump(struct mx_movie *m) {
    it a thousandth faster, 3 at most. Far off (the stream's start, a stall):
    a jump, over samples or with silence. */
 static void sync(struct mx_movie *m) {
-  if (!m->started || !m->info.rate_num)
+  if (!m->started || !m->info.rate_num || m->silence)
     return;
   s32 seen = (s32)((u64)m->shown * 48000 * m->info.rate_den / m->info.rate_num) - (s32)m->offset;
   s32 heard = (s32)m->src - (s32)(mx_snd_stream_queued() / 4);
@@ -131,8 +135,7 @@ static void sync(struct mx_movie *m) {
     return;
   }
   if (behind < -2880) {
-    m->silence += (u32)-behind;
-    m->offset += (u32)-behind;
+    m->silence += (u32)-behind; /* the picture catches up while it plays */
     m->info.sound_jumps++;
     return;
   }
@@ -255,8 +258,9 @@ void mx_movie_close(struct mx_movie *m) {
     mx_sema_delete(m->sem_free);
   if (ipu_user == m)
     ipu_user = 0;
-  void *pinned[] = {m->es, m->pix, m->stack}, *paged[] = {m->raw, m->pcm, m->chunk[0], m};
-  for (u32 i = 0; i < 3; i++)
+  void *pinned[] = {m->es, m->pix, m->stack, m->row, m->frames};
+  void *paged[] = {m->raw, m->pcm, m->chunk[0], m};
+  for (u32 i = 0; i < 5; i++)
     if (pinned[i])
       mx_dma_free(pinned[i]);
   for (u32 i = 0; i < 4; i++)
@@ -317,6 +321,22 @@ struct mx_movie *mx_movie_open(const char *path, u32 flags) {
   m->pix = mx_dma_alloc(mbs * (m->info.rgb16 ? 512 : 1024));
   if (!m->pix)
     goto fail;
+  /* other pictures than I: look at the second picture's type (it is within
+     the first megabyte), and take the memory for the references */
+  int next;
+  while (!(next = mx_mpeg_next_type(m->es, m->have, m->pos + 4)) && m->have < (1024u << 10))
+    if (!fill(m, 1))
+      break;
+  if (next == MX_MPEG_P || next == MX_MPEG_B) {
+    /* pinned: read and written all over for every macroblock, which as
+       pages would cost the TLB's entries */
+    m->frames = mx_dma_alloc(MX_MPEG_REF_BYTES(m->mpeg.mbw, m->mpeg.mbh));
+    m->row = mx_dma_alloc(MX_MPEG_ROW_BYTES(m->mpeg.mbw));
+    if (!m->frames || !m->row)
+      goto fail;
+    mx_mpeg_refs(&m->mpeg, m->frames, m->row, 0);
+    m->info.predicted = 1;
+  }
   /* sound, if the file's start had samples */
   if (m->want_sound && m->a_pts_set && mx_snd_init() == 0 && mx_snd_stream_format(48000, 16, 2) == 0)
     m->info.sound = 1;
@@ -352,10 +372,17 @@ int mx_movie_decode(struct mx_movie *m) {
       int r = mx_mpeg_headers(&m->mpeg, m->es, m->have, &m->pos);
       if (r == MX_MPEG_MORE && fill(m, 1))
         continue;
-      if (r != MX_MPEG_PICTURE)
-        return 0;
+      if (r != MX_MPEG_PICTURE) {
+        /* the end: the reference picture still to be shown */
+        if (m->flushed || mx_mpeg_flush(&m->mpeg, m->pix) != MX_MPEG_PICTURE)
+          return 0;
+        m->flushed = 1;
+        m->info.pictures++;
+        return 1;
+      }
       m->at_picture = 1;
     }
+    u32 t0 = mx_count();
     int r = mx_mpeg_picture(&m->mpeg, m->es, m->have, &m->pos, m->pix);
     if (r == MX_MPEG_MORE) {
       if (!fill(m, 1))
@@ -363,10 +390,14 @@ int mx_movie_decode(struct mx_movie *m) {
       continue;
     }
     m->at_picture = 0;
+    if (r == MX_MPEG_PICTURE || r == MX_MPEG_NONE) {
+      m->dec_cycles += mx_count() - t0;
+      m->info.errors += m->mpeg.errors;
+      m->info.decode_us = (u32)(m->dec_cycles * 1000000 / HZ / ++m->decoded);
+    }
     if (r != MX_MPEG_PICTURE)
-      continue; /* not an I picture: passed over */
+      continue; /* passed over, or decoded with nothing to show yet */
     m->info.pictures++;
-    m->info.errors += m->mpeg.errors;
     pump(m);
     return 1;
   }
