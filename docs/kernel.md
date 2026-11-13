@@ -319,6 +319,13 @@ EPC in its own code: not the kernel's below 1 MiB, not the BIOS's in kseg0/kseg1
 into the BIOS's dispatcher; the table is the BIOS's again whenever the interrupt table is
 (`kirq_off`). At the program's end the log has `BIOS syscalls: N, by number:` and the numbers
 with their counts (calls made through the kernel's services are the kernel's and not counted).
+After them, to the host, the calls that waited for the IOP while the program ran (any
+process's; since 2026-11-13): a line for each server and function, `IOP server <id> function
+<n>: <calls> calls, <ms> ms, the longest <us> us` (the server's id as bound: `80000001` the
+file server, `4d58494f` maxsdk's file module, `4d58534e` its sound module; the first 19
+pairs, the rest in one line with server 0). It tells a frame's calls from loading and
+swapping: a Quake 3 demo's waits were page transfers and sound loads, none of them a pad or
+sound call of each frame.
 
 `libmxk` calls the kernel only (2026-11-11, plan step 2h-3b): built with `MX_KERNEL`, its
 thread, semaphore and interrupt handler calls (`ksys.c`) have no BIOS path, its start-up has no

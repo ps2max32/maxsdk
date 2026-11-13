@@ -657,6 +657,9 @@ static int wait_done(struct mx_sif_client *c) { return wait_answer(c, 0); }
 
 int mx_sif_bind(struct mx_sif_client *c, u32 sid) { return mx_sif_bind_tries(c, sid, 1000); }
 
+#ifndef MX_KERNEL
+static void by_bound(u32 server, u32 sid);
+#endif
 int mx_sif_bind_tries(struct mx_sif_client *c, u32 sid, int n) {
   KERNEL(sif_bind_tries(c, sid, n));
   for (int tries = 0; tries < n; tries++) {
@@ -672,6 +675,9 @@ int mx_sif_bind_tries(struct mx_sif_client *c, u32 sid, int n) {
       return -1;
     if (c->server) {
       c->epoch = sif_epoch;
+#ifndef MX_KERNEL
+      by_bound(c->server, sid);
+#endif
       return 0;
     }
   }
@@ -730,18 +736,71 @@ int mx_sif_wait(struct mx_sif_client *c) {
    to reset. Cycles, 0: none. Each call that gave up counts. */
 u32 mx__sif_wait_limit, mx__sif_timeouts;
 
+#ifndef MX_KERNEL
+/* A kernel's count of the calls that waited, by server and function, for
+   its report at a program's end (which of a program's calls wait for the
+   IOP: a frame's pad, sound and console calls): the server's id as bound,
+   the calls, their time, the longest. The first BY_N pairs seen; the rest
+   in the last one (server 0). */
+#define BY_N 20
+static struct {
+  u32 server, n, us, max_us;
+  int fno;
+} by[BY_N];
+static struct {
+  u32 server, sid;
+} sid_of[16];
+static void by_bound(u32 server, u32 sid) {
+  for (u32 i = 0; i < 16; i++)
+    if (!sid_of[i].server || sid_of[i].server == server) {
+      sid_of[i].server = server, sid_of[i].sid = sid;
+      return;
+    }
+}
+static void by_count(u32 server, int fno, u32 us) {
+  u32 i = 0;
+  while (i < BY_N - 1 && by[i].n && (by[i].server != server || by[i].fno != fno))
+    i++;
+  if (i == BY_N - 1)
+    server = 0, fno = 0;
+  by[i].server = server, by[i].fno = fno;
+  by[i].n++, by[i].us += us;
+  if (us > by[i].max_us)
+    by[i].max_us = us;
+}
+void mx__sif_by_reset(void) { __builtin_memset(by, 0, sizeof by); }
+int mx__sif_by_line(u32 i, char *buf, u32 size) {
+  if (i >= BY_N || !by[i].n)
+    return 0;
+  u32 sid = 0;
+  for (u32 k = 0; k < 16; k++)
+    if (sid_of[k].server == by[i].server)
+      sid = sid_of[k].sid;
+  mx_snprintf(buf, size, "IOP server %08x function %d: %u calls, %u ms, the longest %u us", sid, by[i].fno,
+              by[i].n, by[i].us / 1000, by[i].max_us);
+  return 1;
+}
+#endif
+
 int mx__sif_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize, void *recv,
                  u32 rsize, u32 wait) {
   sif_send_call(c, fno, send, ssize, recv, rsize);
+#ifndef MX_KERNEL
+  u32 t0 = mx_count(), server = c->server;
+#endif
   if (!wait)
     wait = mx__sif_wait_limit;
+  int r = 0;
   if (!wait)
-    return wait_done(c);
-  if (wait_answer(c, (int)wait) < 0) {
+    r = wait_done(c);
+  else if (wait_answer(c, (int)wait) < 0) {
     mx__sif_timeouts++;
-    return -2;
+    r = -2;
   }
-  return 0;
+#ifndef MX_KERNEL
+  by_count(server, fno, (mx_count() - t0) / (MX_EE_HZ / 1000000u));
+#endif
+  return r;
 }
 
 static void sif_send_call(struct mx_sif_client *c, int fno, const void *send, u32 ssize,
