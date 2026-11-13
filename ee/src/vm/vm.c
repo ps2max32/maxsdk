@@ -101,6 +101,12 @@ struct vm_space {
 };
 static struct vm_space space0;
 static struct vm_space *vs = &space0; /* the running thread's (mx__vm_space_switch) */
+/* the space whose page the writer writes now (0: none): it does not go
+   meanwhile (mx__vm_space_free waits) */
+static struct vm_space *volatile wspace;
+/* the space whose program asked for the writer (0: the first's, by
+   mx_vm_init): with it gone nothing is written ahead */
+static struct vm_space *wfor;
 /* every space; a frame's page is of spaces[frame_space[f]] (one LRU over
    all of them: oldest, evict, the writer) */
 #define MAX_SPACES 4
@@ -764,6 +770,14 @@ void mx__vm_space_free(struct vm_space *n) {
   if (!n || n == vs || n == &space0)
     return;
   lock();
+  /* the writer has a page of it on its way to the swap file: after that */
+  while (wspace == n) {
+    unlock();
+    mx_sleep_us(1000);
+    lock();
+  }
+  if (wfor == n) /* its program asked for the writer: nothing ahead from now */
+    wfor = 0, vm.clean_frames = 0;
   int was = mx_di();
   for (u32 f = 0; f < vm.nframes; f++)
     if (page_in(f) >= 0 && space_in(f) == n) {
@@ -1281,10 +1295,18 @@ static u32 oldest(u32 k, u32 *out) { return oldest_of(k, out, 0); }
 /* A dirty page to write ahead: of the pages eviction takes next (as many
    as clean_frames, less the free frames), the oldest dirty one; -1 if
    none. The lock is held. */
+static u32 resident(struct vm_space *s);
 static int dirty_candidate(void) {
   int was = mx_di();
   u32 k = vm.nfree < vm.clean_frames ? vm.clean_frames - vm.nfree : 0, pg[16];
-  u32 n = oldest(k, pg);
+  /* the space that asked has a limit of its own (mx_vm_config.frames): its
+     pages go at that limit, whatever the pool has free */
+  struct vm_space *own = wfor && wfor->max_frames ? wfor : 0;
+  if (own) {
+    u32 has = resident(own), room = own->max_frames > has ? own->max_frames - has : 0;
+    k = room < vm.clean_frames ? vm.clean_frames - room : 0;
+  }
+  u32 n = oldest_of(k, pg, own);
   int q = -1;
   for (u32 i = 0; i < n && q < 0; i++)
     if (OUT_SPACE(pg[i])->flags[OUT_PAGE(pg[i])] & PG_DIRTY)
@@ -1294,6 +1316,7 @@ static int dirty_candidate(void) {
 }
 
 static u8 wstack[8192] MX_ALIGNED(16);
+static int wthread;
 
 static void writer(void *arg) {
   (void)arg;
@@ -1320,9 +1343,11 @@ static void writer(void *arg) {
       mx_irq_restore(was);
       if (!s->slot_of[pg])
         s->slot_of[pg] = slot_take(pg);
+      wspace = s;
       unlock();
       swap_io_s(s, pg, f, 1);
       lock();
+      wspace = 0;
       was = mx_di();
       s->pins[pg]--;
       s->flags[pg] |= PG_SWAP;
@@ -1351,8 +1376,35 @@ static void writer_start(u32 clean) {
   if (id < 0) {
     mx_printf("mx_vm_init: clean_frames: the writer thread did not start\n");
     vm.wsema = -1;
-  } else
+  } else {
     mx__thread_keep(id);
+    wthread = id;
+  }
+}
+
+/* A program that got a space (mx__vm_space_new: the VM was on already)
+   asks for the writer, mx_vm_config.clean_frames, after its swap file is
+   there. 1: the thread was started now, in this program's call: ids are
+   the thread, its semaphore and the VM's lock, for a kernel to give the
+   first two to the process the VM ends with. 0: nothing started (it runs
+   already and now keeps clean frames clean for this space's program, or
+   no swap file, or none asked for). */
+int mx__vm_writer(u32 clean, int ids[3]) {
+  if (!vm.active || !clean || vm.fd < 0)
+    return 0;
+  wfor = vs;
+  if (vm.wsema >= 0) {
+    vm.clean_frames = clean < vm.nframes / 2 ? clean : vm.nframes / 2;
+    /* its process waits for this program, its threads suspended (a second
+       program started by the one the VM ends with): this one goes on */
+    mx_bios_resume_thread(wthread);
+    return 0;
+  }
+  writer_start(clean);
+  if (vm.wsema < 0)
+    return 0;
+  ids[0] = wthread, ids[1] = vm.wsema, ids[2] = vm.lock;
+  return 1;
 }
 
 /* Take a frame: a free one, or the one of the page used longest ago (LRU

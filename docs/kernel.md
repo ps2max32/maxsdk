@@ -23,7 +23,7 @@ of the VM's inside, which run with the VM in the program. Programs do not link i
 The kernel is `apps/mxos`, resident at 0x88000-0xFF800. `libmxk` calls it through
 `struct mxk_services` (`<mx/kernel.h>`), a table the loader passes. Only `libmxk` sees how
 a call reaches the kernel, so that can change without changing programs. Kernel code runs
-in the caller's thread; the VM's writer and pager are threads of the kernel. Functions are
+in the caller's thread; the VM's writer and pager are threads of the kernel (the writer, started in the call of a program that got a space, is given to the process that has the VM's lock: `kvm_init`, vm.md). Functions are
 only added at the end of the table, so older programs keep working. `libmxk` needs a table
 of at least `MX_KERNEL_MIN` (5); what came later it uses only when the kernel's table has it,
 else its own code (the pad: version 6), so a new program still runs on an older kernel.
