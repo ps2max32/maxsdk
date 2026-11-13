@@ -43,6 +43,8 @@ extern const struct mx_video_mode mx_video_vga_1280;  /* VESA 1280 x 1024, 60 Hz
 extern const struct mx_video_mode mx_video_720p50;    /* 1280 x 720 */
 extern const struct mx_video_mode mx_video_1080i50;   /* 1920 x 1080 */
 extern const struct mx_video_mode mx_video_1080p30;   /* 1920 x 1080 */
+extern const struct mx_video_mode mx_video_1080p25;   /* 1920 x 1080, 25 Hz */
+extern const struct mx_video_mode mx_video_1080p24;   /* 1920 x 1080, 24 Hz: film */
 
 /* The console's own TV mode: mx_video_pal on a European console (the
    region letter of ROMVER in the BIOS ROM is 'E', as gsKit's

@@ -424,6 +424,17 @@
 #define MX_DMAC_MFIFO 0xE
 #define MX_DMAC_BUSERR 0xF
 
+#define MX_IPU_BCLR 0x0
+#define MX_IPU_IDEC 0x1
+#define MX_IPU_BDEC 0x2
+#define MX_IPU_VDEC 0x3
+#define MX_IPU_FDEC 0x4
+#define MX_IPU_SETIQ 0x5
+#define MX_IPU_SETVQ 0x6
+#define MX_IPU_CSC 0x7
+#define MX_IPU_PACK 0x8
+#define MX_IPU_SETTH 0x9
+
 #define MX_TAG_REFE 0x0
 #define MX_TAG_CNT 0x1
 #define MX_TAG_NEXT 0x2

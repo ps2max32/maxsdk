@@ -20,6 +20,8 @@ const struct mx_video_mode mx_video_vga_1280  = {0x4A, 0, 0, 60, 1280, 1024, 350
 const struct mx_video_mode mx_video_720p50    = {0x00, 0, 0, 50, 1280, 720, 306, 24, &mx_crtc_720p50};
 const struct mx_video_mode mx_video_1080i50   = {0x00, 1, 0, 50, 1920, 1080, 236, 38, &mx_crtc_1080i50};
 const struct mx_video_mode mx_video_1080p30   = {0x00, 0, 0, 30, 1920, 1080, 236, 40, &mx_crtc_1080p30};
+const struct mx_video_mode mx_video_1080p25   = {0x00, 0, 0, 25, 1920, 1080, 236, 40, &mx_crtc_1080p25};
+const struct mx_video_mode mx_video_1080p24   = {0x00, 0, 0, 24, 1920, 1080, 236, 40, &mx_crtc_1080p24};
 // clang-format on
 
 const struct mx_video_mode *mx_video_default(void) {

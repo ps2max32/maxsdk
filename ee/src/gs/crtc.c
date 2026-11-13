@@ -126,6 +126,9 @@ const struct mx_crtc mx_crtc_vesa_4b = {135000000, MX_CRTC_VESA, 1, 0, 0, 144, 2
 const struct mx_crtc mx_crtc_720p50  = {74250000, MX_CRTC_HD,  1, 0, 0, 104, 195, 1280, 401,  40,  5, 0, 20,  720, 0,  5};
 const struct mx_crtc mx_crtc_1080i50 = {74250000, MX_CRTC_HD,  1, 1, 0, 104, 131, 1920, 485,  44, 10, 2, 28, 1080, 0,  5};
 const struct mx_crtc mx_crtc_1080p30 = {74250000, MX_CRTC_HD,  1, 0, 0, 104, 131, 1920,  45,  44,  5, 0, 36, 1080, 0,  4};
+/* film's rates: the same with the line of 2640 (25 Hz) and 2750 (24 Hz) clocks */
+const struct mx_crtc mx_crtc_1080p25 = {74250000, MX_CRTC_HD,  1, 0, 0, 104, 131, 1920, 485,  44,  5, 0, 36, 1080, 0,  4};
+const struct mx_crtc mx_crtc_1080p24 = {74250000, MX_CRTC_HD,  1, 0, 0, 104, 131, 1920, 595,  44,  5, 0, 36, 1080, 0,  4};
 // clang-format on
 
 const struct mx_crtc *mx_crtc_for_code(int code, int interlace) {

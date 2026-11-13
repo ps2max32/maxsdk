@@ -82,5 +82,7 @@ extern const struct mx_crtc mx_crtc_vesa_4b;   /* 1280x1024 75 Hz */
 extern const struct mx_crtc mx_crtc_1080i50;   /* 1920x1080 interlaced, 50 Hz */
 extern const struct mx_crtc mx_crtc_720p50;    /* 1280x720, 50 Hz */
 extern const struct mx_crtc mx_crtc_1080p30;   /* 1920x1080 progressive, 30 Hz (74.25 MHz) */
+extern const struct mx_crtc mx_crtc_1080p25;   /* 25 Hz */
+extern const struct mx_crtc mx_crtc_1080p24;   /* 24 Hz */
 
 #endif

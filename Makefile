@@ -138,6 +138,12 @@ $(K_STAY_TESTS:%=$(OUT)/tests/%.elf): $(LIBK) $(HERE)/ee/ld/maxsdk-vm.ld
 $(OUT)/examples/display.elf: MX_TARGET = mxos
 $(OUT)/examples/display.elf: MX_VM_TEXT = core
 $(OUT)/examples/display.elf: $(LIBK)
+# the movie example and the IPU's tests run on the PS2, so under the kernel
+$(OUT)/examples/movie.elf $(OUT)/examples/moviehd.elf: MX_TARGET = mxos
+$(OUT)/examples/movie.elf $(OUT)/examples/moviehd.elf: $(LIBK) $(HERE)/ee/ld/maxsdk-vm.ld
+# tests/ps2/mpeg.c: its streams (tools/mpeg-fixtures.sh), embedded
+$(OUT)/tests/mpeg.elf: CFLAGS += -Wno-c23-extensions
+$(OUT)/tests/mpeg.elf: $(wildcard $(HERE)/tests/ps2/data/mpeg_*)
 # k37: an IOP module of its own (tests/iop/chantest), embedded
 $(OUT)/tests/k37_iopchan.elf: CFLAGS += --embed-dir=$(IOP_OUT) -Wno-c23-extensions
 $(OUT)/tests/k37_iopchan.elf: $(IOP_OUT)/chantest.irx

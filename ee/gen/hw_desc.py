@@ -2,7 +2,7 @@
 #
 # gen.py turns this into include/mx/hw/*.h, src/base/syscalls.S and
 # tests/host/test_gen.c. Field positions are from the EE User's Manual (DMAC
-# ch. 5, VIF ch. 6, GIF ch. 7, INTC/timers ch. 4, 10), the GS User's Manual
+# ch. 5, VIF ch. 6, GIF ch. 7, IPU ch. 8, INTC/timers ch. 4, 10), the GS User's Manual
 # and the VU User's Manual. Each field is (name, lsb, width).
 
 # ---------------------------------------------------------------------------
@@ -36,6 +36,16 @@ REGS = [
         ("M3R", 0, 1), ("M3P", 1, 1), ("IMT", 2, 1), ("PSE", 3, 1), ("IP3", 5, 1),
         ("P3Q", 6, 1), ("P2Q", 7, 1), ("P1Q", 8, 1), ("OPH", 9, 1), ("APATH", 10, 2),
         ("DIR", 12, 1), ("FQC", 24, 5)]),
+
+    # IPU (EE User's Manual ch. 8). IPU_CMD: CODE/OPTION written; read, the low
+    # 32 bits are the value VDEC/FDEC decoded and BUSY says it is not there yet
+    ("IPU_CMD", 0x10002000, 64, [("OPTION", 0, 28), ("CODE", 28, 4), ("BUSY", 63, 1)]),
+    ("IPU_CTRL", 0x10002010, 32, [
+        ("IFC", 0, 4), ("OFC", 4, 4), ("CBP", 8, 6), ("ECD", 14, 1), ("SCD", 15, 1),
+        ("IDP", 16, 2), ("AS", 20, 1), ("IVF", 21, 1), ("QST", 22, 1), ("MP1", 23, 1),
+        ("PCT", 24, 3), ("RST", 30, 1), ("BUSY", 31, 1)]),
+    ("IPU_BP", 0x10002020, 32, [("BP", 0, 7), ("IFC", 8, 4), ("FP", 16, 2)]),
+    ("IPU_TOP", 0x10002030, 64, [("BSTOP", 0, 32), ("BUSY", 63, 1)]),
 
     # GS privileged registers (64 bit)
     ("GS_PMODE", 0x12000000, 64, [
@@ -206,6 +216,9 @@ ENUMS = [
     ("DMAC", {"VIF0": 0, "VIF1": 1, "GIF": 2, "FROMIPU": 3, "TOIPU": 4, "SIF0": 5,
               "SIF1": 6, "SIF2": 7, "FROMSPR": 8, "TOSPR": 9, "STALL": 13, "MFIFO": 14,
               "BUSERR": 15}),
+    # IPU commands (IPU_CMD.CODE)
+    ("IPU", {"BCLR": 0, "IDEC": 1, "BDEC": 2, "VDEC": 3, "FDEC": 4, "SETIQ": 5,
+             "SETVQ": 6, "CSC": 7, "PACK": 8, "SETTH": 9}),
     # DMA source chain tag IDs
     ("TAG", {"REFE": 0, "CNT": 1, "NEXT": 2, "REF": 3, "REFS": 4, "CALL": 5, "RET": 6,
              "END": 7}),
@@ -248,6 +261,7 @@ ENUMS = [
 # Fixed addresses that are not registers with fields
 ADDRS = [
     ("VIF0_FIFO", 0x10004000), ("VIF1_FIFO", 0x10005000), ("GIF_FIFO", 0x10006000),
+    ("IPU_OUT_FIFO", 0x10007000), ("IPU_IN_FIFO", 0x10007010),
     ("VU0_MICRO", 0x11000000), ("VU0_DATA", 0x11004000),
     ("VU1_MICRO", 0x11008000), ("VU1_DATA", 0x1100C000),
     ("SPR", 0x70000000), ("SIO_TXFIFO", 0x1000F180), ("SIO_ISR", 0x1000F130),
