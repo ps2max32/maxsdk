@@ -293,7 +293,14 @@ program runs, the kernel notes every thread (its process, state, priority, epc, 
 VM's last exception (`mx__vm_dbg_last`: the address, the EPC, how many times in a row, the
 page's state), COP0's BadVAddr, EntryHi and EPC and the TLB's entries, in memory that the
 restart keeps, and prints them at the next program from `host:` (`hang_log`); the SIF's own
-"stuck" lines go there too. So after a program hangs: `ps2client reset`, then any run shows
+"stuck" lines go there too. With them the SIF's state (`mx__sif_dbg_line`: the last 32
+packets received, numbered; each thread asleep for an answer with its client, function,
+packet and the number of packets received when it began: so an answer that never came and
+one that came without waking its thread can be told apart), the VM's pages whose TLB entry
+was not their own (`vm.c`'s `stale`: put right when seen, counted, also in the VM's lines at
+a program's end), and a wait asked for inside an interrupt handler. At every
+program from `host:` the log also has the last program's crash, if it crashed (its report
+to the host can be lost), and the VM's pool: frames, free, pinned. So after a program hangs: `ps2client reset`, then any run shows
 where it stood.
 
 The kernel runs MXOS programs only (2026-11-11, mx OS plan step 2h-2; `apps/mxos/ee/exec.c`):

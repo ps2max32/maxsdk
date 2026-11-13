@@ -599,16 +599,41 @@ one is done, and from here on a step counts as done only once it ran on the PS2.
 - Found 2026-11-13: the shell started a game again right after it ended, when the button that
   ended the game was still down (the shell's `input_wait`: no button counts until all are let
   go).
-- Open, 2026-11-13: Quake hangs now and then while it loads a map, from the shell (USB) and
-  from the host alike (`+timedemo demo1` in a row: within 1 to 8 runs): no message, no crash
-  report, the home button dead, the host's reset still works. Two forms in the kernel's
-  report of a hang (kernel.md): the main thread running on in `Mod_LoadTextures` over data
-  that is not the map's, or asleep in sif.c's `wait_answer` on its client's semaphore with no
-  "SIF stuck" line. Not found yet; next, the SIF's state in that report (who sleeps on which
-  client, the packets under way, the last ones received).
-- Open, 2026-11-13: the same timedemo gets slower with every run on one kernel (79.8 to 70.8
-  frames a second in 7 runs) and later runs swap: something is not given back at a program's
-  end.
+- Found 2026-11-13, by `+timedemo demo1` in a row from the host (it hung within 1 to 8 runs:
+  no message, no crash report, the home button dead, the host's reset still works): two
+  pages of the VM with one TLB entry. The kernel's report of a hang (kernel.md) showed the
+  main thread at one instruction, a load, whose code page and another page both had entry
+  5 in `page_slot` while `slot_page` gave it to one of them: each refill of the one put the
+  other out, 22 million refills. Now a page whose entry is not its own gets a new one
+  (`vm.c`'s `stale`: at each sync, and a check at each vblank), counted and reported at a
+  program's end. With it ten runs in a row passed, seven such pages put right in them, the
+  same pair each time (pages 699 and 731 of Quake's space, at the same points of the demo).
+  Open: where the two tables come apart. The other form seen before (the main thread asleep
+  in sif.c's `wait_answer`) was not seen again and is not explained.
+- Found 2026-11-13: the same timedemo got slower with every run on one kernel (79.8 to 71.1
+  frames a second in 7 runs, the eighth did not end in 60 s): the pinned memory a program's
+  heaps take from the VM's pool (`mem.c`, 92 frames a run of Quake) stayed pinned after its
+  end, and from the fourth run on the VM swapped. Now a pinned frame knows the address space
+  that was in use when it was taken and goes back to the pool with that space
+  (`mx__vm_space_free`). Ten runs in a row after it: 79.6 to 80.0 frames a second, no swap,
+  the pool at 959 free and 0 pinned before each.
+- Open, 2026-11-13: in the runs where memory ran out, a program now and then ended with
+  status 255 while it loaded: the kernel's `ksched_pick` found no thread to run, not even the
+  idle one (a store at address 0x2c0). Not seen since the pool is given back; the kernel now
+  keeps the idle thread's state for the next start's log when it happens, and counts a
+  wait asked for inside an interrupt handler. After three of
+  these crashes the kernel once did not come through its own restart (a black screen).
+- Found 2026-11-13, while adding that count: `k_sleep_thread` and `k_wait_sema`
+  (`apps/mxos/ee/ksched.c`) may keep nothing on the stack over their switch of threads. A
+  call to a function that was not inlined made the compiler save ra and s0-s3 there, and a
+  program that started another and waited for it came back at address 1 or 2 (`vm26_launch`,
+  `k29_stay`; the same on PCSX2, where it was found). The build now fails when either uses
+  the stack (`apps/mxos/tools/wait-stack-check.sh`). Open: why a frame there does not
+  survive (the kernel's own waits run as a syscall on the kernel's one syscall stack), and
+  the other calls that switch with a frame (`k_signal_sema`, `k_wakeup_thread`,
+  `k_start_thread`, `k_resume_thread`, `k_delete_sema`).
+- The series on the PS2 with all of the above (2026-11-13, a SCPH-70004): 34 of 35 passed;
+  `vm22_net` fails without its peer on the host, as before.
 - Fixed 2026-11-13: replacing the kernel through the host crashed the old kernel while a
   service with VM ran. Now the kernel restarts without the services first (kernel.md, "Another
   kernel replaces this one").

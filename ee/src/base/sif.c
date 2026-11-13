@@ -208,6 +208,16 @@ static struct mx_sif_client *volatile sleepers[NSLEEP];
    for the calls of threads that are gone, not of another process's beside */
 static s16 sleeper_tid[NSLEEP];
 
+/* For a kernel's report of a hang: what each sleeper waits for (its call's
+   function and packet, and how many packets had come when it began), and
+   the last 32 packets received (cid | command << 8 | size << 16, word 7: an
+   answer's client), numbered as mx__sif_rx_count. */
+static struct {
+  u32 fno, pkt, rx_at;
+} sleeper_dbg[NSLEEP];
+static u32 dbg_rx[32][3];
+static u32 dbg_rx_n;
+
 static void wake_sleepers(void) {
   for (int i = 0; i < NSLEEP; i++) {
     struct mx_sif_client *c = sleepers[i];
@@ -336,6 +346,8 @@ static int sif0_handler(int ch, void *arg, void *addr) {
     u32 *l = mx__sif_rx_log[mx__sif_rx_n++ % 8];
     l[0] = (pkt[2] & 0xFF) | (pkt[8] & 0xFF) << 8 | psize << 16;
     l[1] = pkt[7];
+    u32 *d = dbg_rx[dbg_rx_n++ % 32];
+    d[0] = l[0], d[1] = pkt[7], d[2] = mx__sif_rx_count;
   }
 
   switch (pkt[2]) {
@@ -513,8 +525,12 @@ static int sleep_wait(struct mx_sif_client *c, u32 limit, u32 t0, int *r) {
   for (int i = 0; i < NSLEEP && slot < 0; i++)
     if (!sleepers[i])
       sleepers[i] = c, slot = i, sleeper_tid[i] = (s16)mx_bios_get_thread_id();
-  if (slot >= 0)
+  if (slot >= 0) {
     c->sleeping = 1;
+    sleeper_dbg[slot].fno = c->pkt ? uw(c->pkt)[8] : ~0u;
+    sleeper_dbg[slot].pkt = c->pkt ? (u32)((u8 *)c->pkt - pkt_pool[0]) / RPC_PKT_SIZE : ~0u;
+    sleeper_dbg[slot].rx_at = mx__sif_rx_count;
+  }
   mx_irq_restore(was);
   if (slot < 0)
     return 0;
@@ -537,6 +553,46 @@ static int sleep_wait(struct mx_sif_client *c, u32 limit, u32 t0, int *r) {
   sleepers[slot] = 0;
   mx_irq_restore(was);
   mx_bios_poll_sema(c->sema - 1); /* a wake that came after the answer */
+  return 1;
+}
+
+/* Line i of the SIF's state for a kernel's report of a hang (0 when there is
+   no such line): the counts and the channels, the last packets received,
+   the sleepers. A sleeper's client is read only where it is the kernel's
+   (below 1 MiB): a program's may be in another address space. */
+int mx__sif_dbg_line(u32 i, char *buf, u32 size) {
+  if (i == 0) {
+    u32 s[8];
+    mx__sif_dma_state(s);
+    mx_snprintf(buf, size, "SIF: rx %u (empty %u, running %u) busy %04x deferred %u given up %u; SIF0 chcr %x; "
+                "SIF1 own %u written %u cur %u chcr %x tadr %x",
+                mx__sif_rx_count, mx__sif_rx_empty, mx__sif_rx_running, (u32)pkt_busy, (u32)ndeferred,
+                given_up, MX_R32(MX_DMA_SIF0_CHCR), s[0], s[2], s[3], s[4], s[5]);
+    return 1;
+  }
+  if (i <= 8) {
+    u32 n = (u32)mx_snprintf(buf, size, "SIF rx:");
+    for (u32 k = 0; k < 4; k++) {
+      const u32 *d = dbg_rx[(dbg_rx_n + (i - 1) * 4 + k) % 32]; /* oldest first */
+      if (d[2] && n < size)
+        n += (u32)mx_snprintf(buf + n, size - n, " #%u %06x/%08x", d[2], d[0], d[1]);
+    }
+    return n > 7;
+  }
+  i -= 9;
+  if (i >= NSLEEP)
+    return 0;
+  struct mx_sif_client *c = sleepers[i];
+  if (!c) {
+    buf[0] = 0;
+    return -1; /* an empty slot: no line, more may follow */
+  }
+  u32 n = (u32)mx_snprintf(buf, size, "SIF sleeper %u: client %08x tid %d fno %x pkt %u since rx #%u", i,
+                           (u32)(uintptr_t)c, (int)sleeper_tid[i], sleeper_dbg[i].fno, sleeper_dbg[i].pkt,
+                           sleeper_dbg[i].rx_at);
+  if ((u32)(uintptr_t)c < 0x00100000u && n < size)
+    mx_snprintf(buf + n, size - n, " done %d sleeping %d sema %d server %x", (int)c->done, (int)c->sleeping,
+                c->sema - 1, c->server);
   return 1;
 }
 

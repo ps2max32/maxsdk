@@ -254,6 +254,22 @@ static void blk_write(u32 s, u32 pg, u32 b) {
   tlb_write(s, PM4K, (page_va(pg) + b * BLK) | mx__asid, lo, lo + (4096 >> 12 << 6));
 }
 
+/* A page whose entry is not its own: page_slot names an entry that
+   slot_page gives to another page (found 2026-11-13: two pages with one
+   entry, an instruction on the one reading the other, refilled each other
+   for ever). Counted, the first ones kept (the kind: 1 seen at a sync, 2
+   left behind at a vblank; the page, its entry, what slot_page said, the
+   space, the refills so far), and put right: the page has no entry. */
+u32 mx__vm_dbg_stale[1 + 4 * 6];
+static void stale(u32 kind, u32 bi, u32 s) {
+  u32 n = mx__vm_dbg_stale[0]++;
+  if (n < 4) {
+    u32 *d = mx__vm_dbg_stale + 1 + n * 6;
+    d[0] = kind, d[1] = bi, d[2] = s, d[3] = s < TLB_N ? F.slot_page[s] : ~0u, d[4] = vs->id, d[5] = F.refills;
+  }
+  vs->page_slot[bi] = 0;
+}
+
 /* Page pg's entry as lo[] says: written (a new one if it has none) when
    mapped, taken out of the TLB when not. With a trace, the entries of its
    blocks: those in the TLB rewritten, no new ones (blk_fill). Interrupts
@@ -269,6 +285,10 @@ static void tlb_sync_s(struct vm_space *s, u32 pg) {
   u32 lo = vs->lo[pg];
   for (u32 b = 0; b < vm.bpp; b++) {
     u32 bi = pg * vm.bpp + b, s = vs->page_slot[bi];
+    if (s && F.slot_page[s] != bi + 1) {
+      stale(1, bi, s);
+      s = 0;
+    }
     if (!(lo & LO_V)) {
       if (s) {
         tlb_clear(s);
@@ -374,6 +394,13 @@ static void vblank(void) {
       F.slot_page[i] = 0;
     }
   }
+  /* no page has an entry now */
+  const u32 *w = (const u32 *)(const void *)vs->page_slot;
+  for (u32 i = 0, n = npages_all() / 4; i < n; i++)
+    if (w[i])
+      for (u32 k = 0; k < 4; k++)
+        if (vs->page_slot[i * 4 + k])
+          stale(2, i * 4 + k, vs->page_slot[i * 4 + k]);
 }
 
 void mx_vm_trace_mark(u32 tag) {
@@ -740,6 +767,14 @@ void mx__vm_space_free(struct vm_space *n) {
     if (page_in(f) >= 0 && space_in(f) == n) {
       vm.page_of[f] = 0;
       vm.nfree++;
+    } else if (vm.page_of[f] == FRAME_PINNED && vm.frame_space[f] == n->id) {
+      /* pinned memory taken while it was the space in use (its program's
+         heaps, mem.c): the program is gone, and nothing gave it back
+         (found 2026-11-13: 92 frames a run of Quake stayed pinned, and
+         the fourth run swapped) */
+      vm.page_of[f] = 0;
+      vm.nfree++;
+      vm.pinned_frames--;
     }
   for (u32 pg = 0; pg < n->npages + n->nmap + n->nheap; pg++)
     slot_give(n->slot_of[pg]);
@@ -1843,6 +1878,7 @@ void *mx__vm_frames_take_aligned(u32 bytes, u32 align) {
       vacate(fr, (u32)f0, (u32)f0 + n);
     int was = mx_di();
     vm.page_of[fr] = FRAME_PINNED;
+    vm.frame_space[fr] = (u8)vs->id; /* whose: back to the pool with its space */
     vm.nfree--;
     mx_irq_restore(was);
   }
@@ -2105,6 +2141,14 @@ void mx__vm_report(void) {
             "about %u ms; %u entries); %u frames pinned\n",
             s.us_lock / 1000, s.io_calls, s.refills, s.refills_i,
             s.refills / (MX_EE_HZ / 1000 / MX_VM_REFILL_CYCLES), s.tlb_entries, s.pinned_frames);
+  if (mx__vm_dbg_stale[0]) {
+    const u32 *d = mx__vm_dbg_stale;
+    mx_printf("maxsdk: VM: %u pages with an entry not their own, put right; the first:", d[0]);
+    for (u32 i = 0; i < d[0] && i < 4; i++)
+      mx_printf(" [kind %u page %u entry %u held %u space %u at %u]", d[1 + i * 6], d[2 + i * 6], d[3 + i * 6],
+                d[4 + i * 6], d[5 + i * 6], d[6 + i * 6]);
+    mx_printf("\n");
+  }
   if (vm.tr.cap)
     mx_printf("maxsdk: VM trace %u events (%u lost), every %u ms\n", vm.tr.n, vm.tr.lost,
               vm.tr.every_ms);
