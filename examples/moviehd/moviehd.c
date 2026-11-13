@@ -142,6 +142,11 @@ int main(int argc, char **argv) {
     }
   }
   u32 fields = mx_gs.vsync - v0;
+  /* the last picture stays while its sound plays out */
+  for (int i = 0; i < 200 && in->sound && in->sound_left_ms; i++) {
+    mx_movie_poll(mv);
+    mx_sleep_us(5000);
+  }
   mx_printf("moviehd: %u pictures in %u vblanks (%u expected), %u vblanks behind, %u slices in error\n",
             pictures, fields, pictures ? (u32)((u64)pictures * mode.hz * in->rate_den / in->rate_num) : 0,
             late, in->errors);

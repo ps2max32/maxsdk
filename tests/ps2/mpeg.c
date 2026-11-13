@@ -152,6 +152,17 @@ static void stream(const char *name, const u8 *es, u32 es_size, const u8 *yuv, u
   CHECK_EQ(frames, 2);
   CHECK_EQ(frames * frame_bytes, yuv_size);
 
+  /* the last picture as lines: each pixel where its macroblock has it */
+  if (!(flags & MX_IPU_RGB16)) {
+    static u32 lines[80 * 64];
+    u32 bad = 0, lw = m.mbw * 16u;
+    mx_mpeg_raster(&m, out, lines, lw * 4);
+    for (u32 y = 0; y < m.mbh * 16u; y++)
+      for (u32 x = 0; x < lw; x++)
+        bad += lines[y * lw + x] != out[((y >> 4) * m.mbw + (x >> 4)) * 256 + (y & 15) * 16 + (x & 15)];
+    CHECK_EQ(bad, 0);
+  }
+
   u32 qw = mx_mpeg_chain(tags, &m, out, 0, 2, flags & MX_IPU_RGB16 ? MX_GS_PSM_CT16 : MX_GS_PSM_CT32,
                          0, 0, MX_TAG_END);
   CHECK_EQ(qw, MX_MPEG_CHAIN_QW(m.mbw * m.mbh));

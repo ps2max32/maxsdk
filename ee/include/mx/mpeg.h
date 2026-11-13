@@ -117,6 +117,13 @@ void mx_mpeg_refs(struct mx_mpeg *m, void *frames, void *block);
    MX_MPEG_PICTURE, or MX_MPEG_NONE if there is none. */
 int mx_mpeg_flush(struct mx_mpeg *m, void *out);
 
+/* The decoded picture at mbs as lines of pixels (the same format: 4 bytes a
+   pixel, or 2 for RGB16) at out, mbw * 16 pixels wide and mbh * 16 lines
+   high, a line stride bytes after the one before: for what wants a picture
+   as an image (a texture of a graphics library, software). For the GS
+   itself mx_mpeg_chain needs no copy. */
+void mx_mpeg_raster(const struct mx_mpeg *m, const void *mbs, void *out, u32 stride);
+
 /* The source chain (for the GIF channel, PATH3: mx_dma_chain(MX_CH_GIF, tags, 0),
    or called from a chain of a frame) that writes the decoded picture at mbs
    to GS memory: buffer dbp (in 64-word blocks) of width dbw (in 64 pixels)

@@ -2,7 +2,7 @@
    one. Each frame asks the movie whether a new picture is due and sends the
    picture into the frame's buffer.
 
-     movie.elf host:clip.mpg       (or a video stream alone, .m2v)
+     movie.elf host:clip.mpg [times]      (or a video stream alone, .m2v)
 
    Make one with: ffmpeg -i in -vf scale=640:448 -c:v mpeg2video -g 1 -bf 0 -q:v 4 \
                     -c:a pcm_s16be -ar 48000 -ac 2 -f vob -muxrate 20000000 clip.mpg
@@ -60,13 +60,14 @@ int main(int argc, char **argv) {
 
   /* the frame loop: a frame a vblank, each with the picture that is current
      (both buffers get it in turn) */
+  int times = argc > 2 ? argv[2][0] - '0' : 1;
   u32 frames = 0;
   for (;;) {
     int b = mx_gs_frame_begin();
     int r = mx_movie_update(mv);
     mx_gs_frame_submit(tags[b]);
     frames++;
-    if (r < 0)
+    if (r < 0 && (--times <= 0 || mx_movie_rewind(mv) < 0)) /* over: again, or done */
       break;
   }
   mx_printf("movie: %u pictures in %u frames, %u slices in error; decoding a picture %u us%s\n",

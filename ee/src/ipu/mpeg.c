@@ -835,6 +835,20 @@ int mx_mpeg_picture(struct mx_mpeg *m, const u8 *buf, u32 size, u32 *pos, void *
   return MX_MPEG_PICTURE;
 }
 
+/* ---- to lines of pixels ------------------------------------------------------- */
+
+void mx_mpeg_raster(const struct mx_mpeg *m, const void *mbs, void *out, u32 stride) {
+  u32 px = m->flags & MX_IPU_RGB16 ? 2 : 4, mb = 256 * px, row = 16 * px;
+  mx_dcache_invalidate(mbs, (u32)m->mbw * m->mbh * mb); /* the DMAC wrote it */
+  for (u32 r = 0; r < m->mbh; r++)
+    for (u32 c = 0; c < m->mbw; c++) {
+      const u8 *s = (const u8 *)mbs + (r * m->mbw + c) * mb;
+      u8 *d = (u8 *)out + r * 16 * stride + c * row;
+      for (u32 y = 0; y < 16; y++, s += row, d += stride)
+        memcpy(d, s, row);
+    }
+}
+
 /* ---- to GS memory ------------------------------------------------------------ */
 
 u32 mx_mpeg_chain(u64 *tags, const struct mx_mpeg *m, const void *mbs, u32 dbp, u32 dbw, u32 psm,

@@ -17,7 +17,7 @@
 
    The pixels are pinned memory (<mx/mem.h>): mx_gs_upload or mx_tex_upload
    send them as they are. Decoding is the EE's work alone and takes its
-   time: 640 x 384 as a JPEG 0.08 s, as a PNG 0.45 s, read from host:
+   time: 640 x 384 as a JPEG 0.08 s, as a PNG 0.3 s, read from host:
    included (docs/video-plan.md). */
 
 #include <mx/types.h>

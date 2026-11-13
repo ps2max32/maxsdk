@@ -30,6 +30,8 @@ struct mx_movie {
   u8 *pix;
   u8 *frames; /* a stream with P and B pictures: mx_mpeg_refs' memory */
   u8 flushed;
+  u8 loop, paused, over;
+  u32 played; /* pictures given out since the start or the last rewind */
   u32 decoded;
   u64 dec_cycles;
 
@@ -86,6 +88,7 @@ static void pump(struct mx_movie *m) {
   s16 out[256 * 2];
   if (!m->started)
     return;
+  m->info.sound_left_ms = (m->pcm_wr - m->pcm_rd + mx_snd_stream_queued() / 4) / 48;
   u32 room = mx_snd_stream_room() / 4;
   if (room && m->src && mx_snd_stream_queued() == 0)
     m->info.sound_dry++;
@@ -237,17 +240,15 @@ static void ahead(struct mx_movie *m) {
     ;
 }
 
+static void reader_stop(struct mx_movie *m);
+static int reader_start(struct mx_movie *m);
+
 /* ---- the calls ---------------------------------------------------------------- */
 
 void mx_movie_close(struct mx_movie *m) {
   if (!m)
     return;
-  if (m->thread >= 0) {
-    /* the reader is in a read, or waits for a free chunk */
-    m->stop = 1;
-    mx_sema_signal(m->sem_free);
-    mx_thread_join(m->thread);
-  }
+  reader_stop(m);
   if (m->started)
     mx_snd_stream_stop();
   if (m->fd >= 0)
@@ -276,6 +277,7 @@ struct mx_movie *mx_movie_open(const char *path, u32 flags) {
   m->sem_ready = m->sem_free = m->thread = -1;
   m->step = 65536;
   m->info.rgb16 = (flags & MX_MOVIE_RGB16) != 0;
+  m->loop = (flags & MX_MOVIE_LOOP) != 0;
   m->want_sound = !(flags & MX_MOVIE_NO_SOUND);
   m->fd = mx_fio_open(path, MX_FIO_RDONLY);
   if (m->fd < 0)
@@ -293,16 +295,11 @@ struct mx_movie *mx_movie_open(const char *path, u32 flags) {
   m->raw = mx_heap_alloc(mx_heap_paged, RAW_MAX, 64);
   m->pcm = mx_heap_alloc(mx_heap_paged, PCM_FRAMES * 4, 64);
   m->chunk[0] = mx_heap_alloc(mx_heap_paged, CHUNKS * READ, 64);
-  m->sem_ready = mx_sema_create(0, CHUNKS);
-  m->sem_free = mx_sema_create(CHUNKS, CHUNKS);
-  if (!m->es || !m->stack || !m->raw || !m->pcm || !m->chunk[0] || m->sem_ready < 0 || m->sem_free < 0)
+  if (!m->es || !m->stack || !m->raw || !m->pcm || !m->chunk[0])
     goto fail;
   for (u32 i = 1; i < CHUNKS; i++)
     m->chunk[i] = m->chunk[0] + i * READ;
-  /* above the caller's priority: a read is asked for as soon as the one
-     before is done; the thread sleeps while the IOP works */
-  m->thread = mx_thread_start(reader, m, m->stack, 16384, mx_thread_prio(mx_thread_self()) - 1);
-  if (m->thread < 0)
+  if (reader_start(m) < 0)
     goto fail;
 
   mx_mpeg_init(&m->mpeg, m->info.rgb16 ? MX_IPU_RGB16 | MX_IPU_DITHER : 0);
@@ -345,12 +342,67 @@ fail:
   return 0;
 }
 
+/* The reader stopped: it is in a read, or waits for a free chunk. */
+static void reader_stop(struct mx_movie *m) {
+  if (m->thread < 0)
+    return;
+  m->stop = 1;
+  mx_sema_signal(m->sem_free);
+  mx_thread_join(m->thread);
+  m->thread = -1;
+  m->stop = 0;
+}
+
+static int reader_start(struct mx_movie *m) {
+  if (m->sem_ready >= 0)
+    mx_sema_delete(m->sem_ready);
+  if (m->sem_free >= 0)
+    mx_sema_delete(m->sem_free);
+  m->sem_ready = mx_sema_create(0, CHUNKS);
+  m->sem_free = mx_sema_create(CHUNKS, CHUNKS);
+  if (m->sem_ready < 0 || m->sem_free < 0)
+    return -1;
+  m->next = 0;
+  /* above the caller's priority: a read is asked for as soon as the one
+     before is done; the thread sleeps while the IOP works */
+  m->thread = mx_thread_start(reader, m, m->stack, 16384, mx_thread_prio(mx_thread_self()) - 1);
+  return m->thread < 0 ? -1 : 0;
+}
+
+int mx_movie_rewind(struct mx_movie *m) {
+  reader_stop(m);
+  mx_fio_lseek(m->fd, 0, MX_FIO_SEEK_SET);
+  m->at_end = m->at_picture = m->flushed = m->over = 0;
+  m->have = m->pos = m->raw_have = 0;
+  if (m->frames)
+    mx_mpeg_refs(&m->mpeg, m->frames, 0);
+  /* the sound starts again with the first picture shown; what mxsnd still
+     holds plays out */
+  m->started = 0;
+  m->pcm_rd = m->pcm_wr = m->phase = m->src = m->silence = m->offset = 0;
+  m->step = 65536;
+  m->v_pts_set = m->a_pts_set = 0;
+  m->shown = m->played = 0;
+  m->running = 0;
+  m->cycles = 0;
+  return reader_start(m);
+}
+
+void mx_movie_pause(struct mx_movie *m, int on) {
+  m->paused = on != 0;
+  m->last = mx_count();
+}
+
 const struct mx_movie_info *mx_movie_info(const struct mx_movie *m) { return &m->info; }
 void *mx_movie_picture(const struct mx_movie *m) { return m->pix; }
 
 u32 mx_movie_chain(const struct mx_movie *m, u64 *tags, u32 dbp, u32 dbw, u32 psm, u32 x, u32 y,
                    u32 end_id) {
   return mx_mpeg_chain(tags, &m->mpeg, m->pix, dbp, dbw, psm, x, y, end_id);
+}
+
+void mx_movie_raster(const struct mx_movie *m, void *out, u32 stride) {
+  mx_mpeg_raster(&m->mpeg, m->pix, out, stride);
 }
 
 void mx_movie_poll(struct mx_movie *m) {
@@ -370,20 +422,35 @@ int mx_movie_decode(struct mx_movie *m) {
       if (r == MX_MPEG_MORE && fill(m, 1))
         continue;
       if (r != MX_MPEG_PICTURE) {
-        /* the end: the reference picture still to be shown */
-        if (m->flushed || mx_mpeg_flush(&m->mpeg, m->pix) != MX_MPEG_PICTURE)
+        /* the end: the reference picture still to be shown, then from the
+           start again or over */
+        if (!m->flushed && mx_mpeg_flush(&m->mpeg, m->pix) == MX_MPEG_PICTURE) {
+          m->flushed = 1;
+          m->info.pictures++;
+          m->played++;
+          return 1;
+        }
+        if (!m->loop || !m->played || mx_movie_rewind(m) < 0) {
+          m->over = 1;
           return 0;
-        m->flushed = 1;
-        m->info.pictures++;
-        return 1;
+        }
+        continue;
       }
       m->at_picture = 1;
     }
     u32 t0 = mx_count();
     int r = mx_mpeg_picture(&m->mpeg, m->es, m->have, &m->pos, m->pix);
     if (r == MX_MPEG_MORE) {
-      if (!fill(m, 1))
-        return 0;
+      if (!fill(m, 1)) { /* cut off inside a picture */
+        m->at_picture = 0;
+        m->have = m->pos; /* nothing more to decode: the end's turn */
+        if (m->have + 4 + MX_MPEG_AHEAD <= m->es_max) {
+          memset(m->es + m->have, 0, 4 + MX_MPEG_AHEAD);
+          m->es[m->have + 2] = 1, m->es[m->have + 3] = 0xB7;
+          mx_dcache_writeback(m->es + (m->have & ~63u), 128);
+          m->have += 4 + MX_MPEG_AHEAD;
+        }
+      }
       continue;
     }
     m->at_picture = 0;
@@ -395,6 +462,7 @@ int mx_movie_decode(struct mx_movie *m) {
     if (r != MX_MPEG_PICTURE)
       continue; /* passed over, or decoded with nothing to show yet */
     m->info.pictures++;
+    m->played++;
     pump(m);
     return 1;
   }
@@ -421,21 +489,35 @@ void mx_movie_shown(struct mx_movie *m) {
 
 int mx_movie_update(struct mx_movie *m) {
   u32 now = mx_count();
+  if (m->paused)
+    return 0;
+  if (m->over) {
+    /* the last picture is out: over once its sound is too */
+    pump(m);
+    if (m->started && m->info.sound_left_ms > 0 && m->cycles < 2 * HZ) {
+      m->cycles += now - m->last;
+      m->last = now;
+      return 0;
+    }
+    return -1;
+  }
   if (!m->running) {
     m->running = 1;
     m->last = now;
   }
   m->cycles += now - m->last;
   m->last = now;
-  u64 due = m->info.rate_num ? (u64)m->info.pictures * m->info.rate_den * HZ / m->info.rate_num : 0;
+  u64 due = m->info.rate_num ? (u64)m->played * m->info.rate_den * HZ / m->info.rate_num : 0;
   if (m->cycles < due) {
     mx_movie_poll(m);
     return 0;
   }
   if (m->cycles - due > HZ / 2) /* the program stood still: go on from here */
     m->cycles = due;
-  if (!mx_movie_decode(m))
-    return -1;
+  if (!mx_movie_decode(m)) {
+    m->cycles = 0; /* now the time the sound gets to end */
+    return m->started ? 0 : -1;
+  }
   mx_movie_shown(m);
   return 1;
 }

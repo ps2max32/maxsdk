@@ -46,29 +46,57 @@ static u32 bits(struct inflate *s, u32 n) {
   return v;
 }
 
-/* A Huffman code as its lengths' counts and its symbols in the codes' order:
-   decoded a bit at a time, the canonical way (the codes of a length follow
-   each other, the first one twice the last of the length before plus 1). */
+/* A Huffman code: by the stream's next 9 bits, the symbol and its length for
+   the codes that short (most of what a stream holds); and the lengths'
+   counts with the symbols in the codes' order, for the canonical way a bit
+   at a time (the codes of a length follow each other, the first one twice
+   the last of the length before plus 1). */
 struct code {
+  u16 fast[512]; /* symbol | length << 12; 0: a longer code */
   u16 count[16];
   u16 symbol[288];
 };
 
 static void build(struct code *c, const u8 *len, u32 n) {
-  u16 at[16];
+  u16 at[16], next[16];
   memset(c->count, 0, sizeof c->count);
+  memset(c->fast, 0, sizeof c->fast);
   for (u32 i = 0; i < n; i++)
     c->count[len[i]]++;
   c->count[0] = 0;
-  at[1] = 0;
-  for (u32 l = 1; l < 15; l++)
+  at[1] = 0, next[1] = 0;
+  for (u32 l = 1; l < 15; l++) {
     at[l + 1] = (u16)(at[l] + c->count[l]);
-  for (u32 i = 0; i < n; i++)
-    if (len[i])
-      c->symbol[at[len[i]]++] = (u16)i;
+    next[l + 1] = (u16)((next[l] + c->count[l]) << 1);
+  }
+  for (u32 i = 0; i < n; i++) {
+    u32 l = len[i];
+    if (!l)
+      continue;
+    c->symbol[at[l]++] = (u16)i;
+    u32 code = next[l]++;
+    if (l <= 9) {
+      /* the stream has a code's first bit lowest */
+      u32 rev = 0;
+      for (u32 k = 0; k < l; k++)
+        rev |= (code >> k & 1) << (l - 1 - k);
+      for (u32 f = rev; f < 512; f += 1u << l)
+        c->fast[f] = (u16)(i | l << 12);
+    }
+  }
 }
 
 static u32 symbol(struct inflate *s, const struct code *c) {
+  while (s->bits < 9) { /* the stream's end has four bytes more than its codes */
+    s->buf |= byte(s) << s->bits;
+    s->bits += 8;
+  }
+  u32 e = c->fast[s->buf & 511];
+  if (e) {
+    s->buf >>= e >> 12;
+    s->bits -= e >> 12;
+    return e & 0xFFF;
+  }
   u32 code = 0, first = 0, index = 0;
   for (u32 l = 1; l < 16; l++) {
     code |= bits(s, 1);

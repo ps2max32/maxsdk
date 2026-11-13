@@ -44,6 +44,7 @@
 
 #define MX_MOVIE_RGB16 1u    /* pictures as RGB16 with dither (CT16); else RGB32 (CT32) */
 #define MX_MOVIE_NO_SOUND 2u /* leave the sound of the file */
+#define MX_MOVIE_LOOP 4u     /* at the end, from the start again */
 
 struct mx_movie;
 
@@ -61,6 +62,7 @@ struct mx_movie_info {
   u32 sound_dry;          /* times the sound's stream ran empty */
   u32 sound_jumps;        /* times the sound was set right by a jump */
   s32 sound_behind_ms;    /* the sound behind the picture at the last look (ahead: negative) */
+  u32 sound_left_ms;      /* sound read and not heard yet */
 };
 
 /* Open the file, read its start and the first picture's headers. Returns 0
@@ -77,11 +79,26 @@ void *mx_movie_picture(const struct mx_movie *m);
 u32 mx_movie_chain(const struct mx_movie *m, u64 *tags, u32 dbp, u32 dbw, u32 psm, u32 x, u32 y,
                    u32 end_id);
 
+/* The picture as lines of pixels (mx_mpeg_raster): mbw * 16 wide, mbh * 16
+   high, CT32's pixels or CT16's, for a texture of a graphics library:
+     mx_movie_raster(mv, pixels, mbw * 16 * 4);
+     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, mbw * 16, mbh * 16, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+   A copy of the picture (0.4 MiB a 100 000 pixels): where the program
+   writes GS memory itself, mx_movie_chain is the way without one. */
+void mx_movie_raster(const struct mx_movie *m, void *out, u32 stride);
+
 /* Once a frame: decodes the next picture when its time has come (by the
    EE's clock from the first call) and keeps the sound going. Returns 1: a
-   new picture is in the buffer; 0: not yet; -1: the movie is over. A
-   program that falls behind gets one picture a call until it is level. */
+   new picture is in the buffer; 0: not yet; -1: the movie is over (its last
+   sound heard too). A program that falls behind gets one picture a call
+   until it is level. */
 int mx_movie_update(struct mx_movie *m);
+/* Hold the movie (mx_movie_update gives no picture and the sound runs out
+   within a tenth of a second), and go on. */
+void mx_movie_pause(struct mx_movie *m, int on);
+/* From the start again. Returns 0, or -1 if the reading thread cannot be
+   started. */
+int mx_movie_rewind(struct mx_movie *m);
 
 /* Decode the next picture now (sleeps for the file if it must). Returns 1,
    or 0 at the end. */
