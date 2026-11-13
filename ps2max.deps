@@ -1,0 +1,6 @@
+# The commits of the ps2max repos this one builds with, for the CI
+# (ps2max32/docker: scripts/fetch-deps.sh). Written by scripts/deps.sh of
+# ps2max32/docker from a ps2max tree: the ones it was built and tested with.
+LLVM_REF=b0afe6262a44b4902b9eb53b9f1c98fa02744fe0
+PICOLIBC_REF=db4d0fe5952d5ecd714781e3212d4086d970735a
+LWIP_REF=77dcd25a72509eb83f72b033d219b1d40cd8eb95
