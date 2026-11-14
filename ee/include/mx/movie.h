@@ -57,6 +57,7 @@ struct mx_movie_info {
   u8 sound;               /* it plays sound */
   u8 rgb16;
   u8 predicted;           /* the stream has P or B pictures */
+  u32 duration_ms;        /* the length from the time stamps of a program stream (0: unknown) */
   /* so far */
   u32 pictures;           /* given out */
   u32 decode_us;          /* what decoding one took, the mean */
@@ -101,6 +102,17 @@ void mx_movie_pause(struct mx_movie *m, int on);
 /* From the start again. Returns 0, or -1 if the reading thread cannot be
    started. */
 int mx_movie_rewind(struct mx_movie *m);
+
+/* To ms from the start: the stream is read from near that place (the
+   file's mean rate, then once corrected) and goes on from the first
+   sequence header there, so it lands within a group of pictures (a stream of
+   I pictures only: on it), and a second off for a stream of varying rate. A
+   picture that needs the one before it (a B picture of an open group) can
+   look wrong for a moment. Program streams only: -1 if the length is
+   unknown, or no picture follows; the movie then plays from the start. */
+int mx_movie_seek(struct mx_movie *m, u32 ms);
+/* The time of the picture given out last, ms from the start. */
+u32 mx_movie_time_ms(const struct mx_movie *m);
 
 /* Decode the next picture now (sleeps for the file if it must). Returns 1,
    or 0 at the end. */

@@ -62,11 +62,24 @@ int main(int argc, char **argv) {
      (both buffers get it in turn) */
   int times = argc > 2 ? argv[2][0] - '0' : 1;
   u32 frames = 0;
+  int seek_ms = -1;
+  for (const char *a = argc > 3 ? argv[3] : 0; a && *a >= '0' && *a <= '9'; a++)
+    seek_ms = (seek_ms < 0 ? 0 : seek_ms * 10) + (*a - '0');
+  /* after 100 frames: jump to this time (ms) */
+  int seek_rc = 0;
+  if (in->duration_ms)
+    mx_printf("movie: %u ms long\n", in->duration_ms);
   for (;;) {
     int b = mx_gs_frame_begin();
     int r = mx_movie_update(mv);
     mx_gs_frame_submit(tags[b]);
     frames++;
+    if (seek_ms >= 0 && frames == 100) {
+      u32 before = mx_movie_time_ms(mv);
+      seek_rc = mx_movie_seek(mv, (u32)seek_ms);
+      mx_printf("movie: at %u ms, seek to %d ms: %d, now at %u ms\n", before, seek_ms, seek_rc,
+                mx_movie_time_ms(mv));
+    }
     if (r < 0 && (--times <= 0 || mx_movie_rewind(mv) < 0)) /* over: again, or done */
       break;
   }
@@ -78,6 +91,6 @@ int main(int argc, char **argv) {
   u32 pictures = in->pictures;
   mx_movie_close(mv);
   mx_ipu_exit();
-  MX_TEST_END(pictures ? 0 : 1);
+  MX_TEST_END(pictures && !seek_rc ? 0 : 1);
   return 0;
 }

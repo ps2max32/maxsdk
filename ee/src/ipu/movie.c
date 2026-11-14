@@ -4,6 +4,7 @@
 
 #include <mx/cpu.h>
 #include <mx/mem.h>
+#include <mx/mx.h>
 #include <mx/movie.h>
 #include <mx/mp2.h>
 #include <mx/mpegps.h>
@@ -61,6 +62,12 @@ struct mx_movie {
   u32 offset;        /* the sound's first frame belongs this many frames after picture 0 */
   u32 v_pts, a_pts;
   u8 v_pts_set, a_pts_set;
+  u32 pts0;          /* the first picture's time stamp */
+  u32 size;          /* the file's bytes */
+  u32 t0_ms;         /* the time of the first picture given out since the start or the last seek */
+  u8 seeking;        /* reading on to the first sequence header */
+  u8 seek_pts_ok;
+  u32 seek_pts;
   u32 shown;         /* pictures shown */
 
   /* mx_movie_update's clock */
@@ -120,6 +127,23 @@ static void put_mpa(struct mx_movie *m, const u8 *data, u32 bytes) {
     memmove(m->mpa, m->mpa + at, m->mpa_have - at);
     m->mpa_have -= at;
   }
+}
+
+/* After a seek: the first sequence header in the video that came (a picture
+   can be decoded from there). Else pos goes with the end, so the buffer
+   keeps only the last bytes. */
+static void seek_scan(struct mx_movie *m, u32 from, const struct mx_ps_packet *p) {
+  if (p->has_pts)
+    m->seek_pts = p->pts, m->seek_pts_ok = 1;
+  for (u32 i = from >= 3 ? from - 3 : 0; i + 4 <= m->have; i++)
+    if (!m->es[i] && !m->es[i + 1] && m->es[i + 2] == 1 && m->es[i + 3] == 0xB3) {
+      m->pos = i;
+      m->seeking = 0;
+      m->v_pts = m->seek_pts;
+      m->v_pts_set = m->seek_pts_ok;
+      return;
+    }
+  m->pos = m->have >= 3 ? m->have - 3 : 0;
 }
 
 static void pump(struct mx_movie *m) {
@@ -241,8 +265,11 @@ static int fill(struct mx_movie *m, int wait) {
       if (r == MX_PS_VIDEO && p.stream == 0 && m->have + p.bytes <= m->es_max) {
         if (p.has_pts && !m->v_pts_set)
           m->v_pts = p.pts, m->v_pts_set = 1;
+        u32 at = m->have;
         memcpy(m->es + m->have, p.data, p.bytes);
         m->have += p.bytes;
+        if (m->seeking)
+          seek_scan(m, at, &p);
       } else if (r == MX_PS_LPCM && p.stream == 0 && p.bits == 16 && p.channels == 2 &&
                  p.rate == 48000 && !m->mpa_seen) {
         if (p.has_pts && !m->a_pts_set)
@@ -313,6 +340,23 @@ void mx_movie_close(struct mx_movie *m) {
       mx_heap_free(mx_heap_paged, paged[i]);
 }
 
+/* The last video time stamp of the file: its last 256 KiB looked through
+   (in the pump's chunk memory, before the reader is started). 0: none. */
+static u32 tail_pts(struct mx_movie *m) {
+  u32 n = m->size < CHUNKS * READ ? m->size : CHUNKS * READ, at = 0, last = 0;
+  struct mx_ps_packet p;
+  int r;
+  mx_fio_lseek(m->fd, (int)(m->size - n), MX_FIO_SEEK_SET);
+  int got = mx_fio_read(m->fd, m->chunk[0], n);
+  mx_fio_lseek(m->fd, 0, MX_FIO_SEEK_SET);
+  if (got <= 0)
+    return 0;
+  while ((r = mx_ps_next(m->chunk[0], (u32)got, &at, &p)) != MX_PS_MORE && r != MX_PS_END)
+    if (r == MX_PS_VIDEO && p.has_pts)
+      last = p.pts;
+  return last;
+}
+
 struct mx_movie *mx_movie_open(const char *path, u32 flags) {
   struct mx_movie *m = mx_heap_alloc(mx_heap_paged, sizeof *m, 64);
   if (!m)
@@ -331,6 +375,8 @@ struct mx_movie *mx_movie_open(const char *path, u32 flags) {
   mx_fio_read(m->fd, head, 4);
   mx_fio_lseek(m->fd, 0, MX_FIO_SEEK_SET);
   m->is_ps = head[0] == 0 && head[1] == 0 && head[2] == 1 && head[3] == 0xBA;
+  m->size = (u32)mx_fio_lseek(m->fd, 0, MX_FIO_SEEK_END);
+  mx_fio_lseek(m->fd, 0, MX_FIO_SEEK_SET);
 
   /* the larger buffer until the picture's size is known */
   m->es_max = 1536u << 10;
@@ -343,6 +389,8 @@ struct mx_movie *mx_movie_open(const char *path, u32 flags) {
     goto fail;
   for (u32 i = 1; i < CHUNKS; i++)
     m->chunk[i] = m->chunk[0] + i * READ;
+  if (m->is_ps)
+    m->info.duration_ms = tail_pts(m);
   if (reader_start(m) < 0)
     goto fail;
 
@@ -354,6 +402,13 @@ struct mx_movie *mx_movie_open(const char *path, u32 flags) {
   if (r != MX_MPEG_PICTURE)
     goto fail;
   m->at_picture = 1;
+  m->pts0 = m->v_pts;
+  if (m->info.duration_ms && m->v_pts_set) {
+    s32 d = (s32)(m->info.duration_ms - m->pts0) / 90; /* last pts, until now */
+    m->info.duration_ms = d > 0 ? (u32)d : 0;
+  } else {
+    m->info.duration_ms = 0;
+  }
   m->info.width = m->mpeg.width, m->info.height = m->mpeg.height;
   m->info.mbw = m->mpeg.mbw, m->info.mbh = m->mpeg.mbh;
   m->info.rate_num = m->mpeg.rate_num, m->info.rate_den = m->mpeg.rate_den;
@@ -413,9 +468,12 @@ static int reader_start(struct mx_movie *m) {
   return m->thread < 0 ? -1 : 0;
 }
 
-int mx_movie_rewind(struct mx_movie *m) {
+/* From byte offset at of the file; seek: to the first sequence header after it. */
+static int restart(struct mx_movie *m, u32 at, int seek) {
   reader_stop(m);
-  mx_fio_lseek(m->fd, 0, MX_FIO_SEEK_SET);
+  mx_fio_lseek(m->fd, (int)at, MX_FIO_SEEK_SET);
+  m->seeking = (u8)seek;
+  m->seek_pts_ok = 0;
   m->at_end = m->at_picture = m->flushed = m->over = 0;
   m->have = m->pos = m->raw_have = 0;
   if (m->frames)
@@ -431,7 +489,48 @@ int mx_movie_rewind(struct mx_movie *m) {
   m->shown = m->played = 0;
   m->running = 0;
   m->cycles = 0;
+  m->t0_ms = 0;
   return reader_start(m);
+}
+
+int mx_movie_rewind(struct mx_movie *m) { return restart(m, 0, 0); }
+
+u32 mx_movie_time_ms(const struct mx_movie *m) {
+  return m->t0_ms + (m->info.rate_num ? (u32)((u64)m->shown * m->info.rate_den * 1000 / m->info.rate_num) : 0);
+}
+
+/* A landing at a byte: the picture's time in ms (the stream's, from its
+   first picture), or -1 if no sequence header follows. */
+static s32 land(struct mx_movie *m, u32 at) {
+  if (restart(m, at & ~2047u, 1) < 0)
+    return -1;
+  while (m->seeking && fill(m, 1))
+    ;
+  if (m->seeking) {
+    restart(m, 0, 0);
+    return -1;
+  }
+  m->t0_ms = m->v_pts_set ? (u32)((s32)(m->v_pts - m->pts0) / 90) : 0;
+  return (s32)m->t0_ms;
+}
+
+int mx_movie_seek(struct mx_movie *m, u32 ms) {
+  u32 dur = m->info.duration_ms;
+  if (!m->is_ps || !dur || !m->size)
+    return -1;
+  if (ms >= dur)
+    ms = dur - 1;
+  /* by the mean rate of the file; then once more with the error found */
+  u32 at = (u32)((u64)m->size * ms / dur);
+  s32 t = land(m, at);
+  if (t >= 0 && (t > (s32)ms + 300 || t < (s32)ms - 300)) {
+    s32 err = (s32)ms - t;
+    s32 d = (s32)((s64)m->size * err / (s32)dur);
+    u32 b = d < 0 && (u32)-d > at ? 0 : at + (u32)d;
+    t = land(m, b < m->size ? b : m->size - 1);
+  }
+  m->paused = 0;
+  return t < 0 ? -1 : 0;
 }
 
 void mx_movie_pause(struct mx_movie *m, int on) {
