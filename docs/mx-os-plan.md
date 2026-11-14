@@ -718,6 +718,12 @@ host link's service are known to the kernel by their paths.
     PCSX2. The kernel's data is nearly full (about 1 KiB left below its stack, after the
     hang report went from 48 to 40 lines): what later parts keep per process has to come
     out of something else (the 35 KiB of `mxio_frames`, the stacks) or above 1 MiB.
+    4b done 2026-11-14: a waiting or beside program's records (exec.c's park slot, end.c's,
+    kproc.c's side with its VU0 registers) and the copy of its kernel state are one block
+    in its own core heap, reached through MX_PHYS_WIN under any ASID and freed when it is in
+    front again; the kernel keeps pointers. 2 KiB of the kernel's data free again. The series
+    (`k46_spawnloop` 60 rounds) and Quake on the SCPH-70004, `k31_beside` above a service on
+    PCSX2. The stacks (at most two waiting, two beside) are still there: 4c and 4d.
   - 4b: the kernel's state of a process in its entry, exchanged per entry rather than front
     and one side (still copied: libmxkern's heaps, threads, pad keep their statics; moving
     those behind a pointer is a maxsdk change of its own, after this step).

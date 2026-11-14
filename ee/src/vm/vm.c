@@ -1290,7 +1290,6 @@ static u32 oldest_of(u32 k, u32 *out, struct vm_space *only) {
   }
   return n;
 }
-static u32 oldest(u32 k, u32 *out) { return oldest_of(k, out, 0); }
 
 /* A dirty page to write ahead: of the pages eviction takes next (as many
    as clean_frames, less the free frames), the oldest dirty one; -1 if
