@@ -637,10 +637,23 @@ one is done, and from here on a step counts as done only once it ran on the PS2.
   call to a function that was not inlined made the compiler save ra and s0-s3 there, and a
   program that started another and waited for it came back at address 1 or 2 (`vm26_launch`,
   `k29_stay`; the same on PCSX2, where it was found). The build now fails when either uses
-  the stack (`apps/mxos/tools/wait-stack-check.sh`). Open: why a frame there does not
-  survive (the kernel's own waits run as a syscall on the kernel's one syscall stack), and
-  the other calls that switch with a frame (`k_signal_sema`, `k_wakeup_thread`,
-  `k_start_thread`, `k_resume_thread`, `k_delete_sema`).
+  the stack (`apps/mxos/tools/wait-stack-check.sh`). Cause found 2026-11-14 (on PCSX2, by
+  putting the frame back): not the syscall stack. The program that waits for the one it
+  started is parked while that one has the core; its thread, asleep in the kernel's loop
+  `while (!done) sleep`, is woken by anything (the loop expects it), runs, and a frame
+  read on return comes from the waiter's stack, which maps the other's memory then. Without
+  a frame the thread only loops back to sleep. Now the waiter holds itself while parked
+  not beside (`ksched_hold_self_unless`, main.c's launch; `exec_unpark` releases it), and
+  `vm26_launch`, `k29_stay` pass on PCSX2 with the frame back. The build check stays for
+  the kernel's own threads. The other calls that switch with a frame are the same case.
+- Found 2026-11-14 (a photo of the SCPH-90006 after Quake 3, and before after MXSHELL2):
+  the kernel's restart after a program that changed the IOP hung at "IOP modules: reading"
+  with "SIF stuck send": it reads its modules from the card through the IOP as the program
+  left it, and that IOP took nothing more on SIF1. Now that try waits at most a second a
+  call (`mx__sif_wait_limit` bounds the send too), then the IOP is reset with the ROM's card
+  drivers; a SIF1 transfer that does not end is dropped before the reset
+  (`mx__sif1_abort`). Not reproduced on demand: the series, the launch tests, Quake and
+  module-loading programs in a row pass with it on the SCPH-70004.
 - The series on the PS2 with all of the above (2026-11-13, a SCPH-70004): 34 of 35 passed;
   `vm22_net` fails without its peer on the host, as before.
 - Fixed 2026-11-13: replacing the kernel through the host crashed the old kernel while a

@@ -308,6 +308,18 @@ void mx__sif_dchain(int intr) {
   mx_irq_restore(was);
 }
 
+/* SIF1 stopped if it runs (only before an IOP reset: what it was sending
+   is lost); the next transfer starts from the ring's next tag */
+void mx__sif1_abort(void) {
+  if (!own || !busy())
+    return;
+  int was = mx_di();
+  w32(MX_DMA_SIF1_CHCR, R32(MX_DMA_SIF1_CHCR) & ~CHCR_STR);
+  w32(MX_DMA_SIF1_QWC, 0);
+  (void)R32(MX_DMA_SIF1_CHCR);
+  mx_irq_restore(was);
+}
+
 void mx__sif_stop_dma(void) {
   if (!own) {
     mx_bios_sif_stop_dma();

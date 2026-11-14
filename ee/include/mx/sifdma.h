@@ -20,5 +20,6 @@ extern void (*mx__kpoke32)(u32 a, u32 v);
 extern u32 (*mx__kpeek32)(u32 a);
 /* own, want, written, cur, SIF1's CHCR, TADR, QWC, MADR (a stuck SIF's report) */
 void mx__sif_dma_state(u32 s[8]);
+void mx__sif1_abort(void);
 
 #endif

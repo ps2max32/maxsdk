@@ -135,6 +135,7 @@ static void stuck_check1(int *told, u32 t0, int where, struct mx_sif_client *c) 
 }
 #define stuck_check(told, t0, where) stuck_check1(told, t0, where, 0)
 
+extern u32 mx__sif_wait_limit, mx__sif_timeouts;
 static u32 send_cmd(int intr, u32 cid, void *pkt, u32 psize, mx_paddr src, u32 dest,
                     u32 dsize) {
   volatile u32 *h = uw(pkt);
@@ -169,8 +170,16 @@ static u32 send_cmd(int intr, u32 cid, void *pkt, u32 psize, mx_paddr src, u32 d
   }
   u32 t0 = mx_count();
   int told = 0;
-  while (!(id = mx__sif_dma_set(t, n, 0)))
+  while (!(id = mx__sif_dma_set(t, n, 0))) {
     stuck_check(&told, t0, 1);
+    /* the kernel's limit (mx__sif_wait_limit): an IOP that takes nothing
+       more is reset, not waited for (0: not sent; an RPC's wait then gives
+       up too) */
+    if (mx__sif_wait_limit && mx_count() - t0 > mx__sif_wait_limit) {
+      mx__sif_timeouts++;
+      return 0;
+    }
+  }
   return id;
 }
 
@@ -1838,6 +1847,9 @@ int mx_iop_reset(const char *arg) {
   mx_dcache_writeback(&pkt, sizeof pkt);
 
   mx__sif_stop_dma();
+  /* an IOP that stopped taking SIF1 (a transfer that does not end): the
+     transfer dropped, the reset goes in its place */
+  mx__sif1_abort();
   struct sif_dma t = {(u32)(uintptr_t)&pkt, mx__sif_get_reg(SYSREG_SUBADDR),
                       (s32)sizeof pkt, DMA_ERT | DMA_INT_O};
   mx__sif_set_reg(REG_SMFLAG, SMFLAG_BOOTEND);
