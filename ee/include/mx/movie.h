@@ -105,9 +105,8 @@ int mx_movie_rewind(struct mx_movie *m);
 
 /* To ms from the start: the stream is read from near that place (the
    file's mean rate, then once corrected) and goes on from the first
-   sequence header there, so it lands within a group of pictures (a stream of
-   I pictures only: on it), and a second off for a stream of varying rate. A
-   picture that needs the one before it (a B picture of an open group) can
+   sequence header there, and the pictures before ms are decoded and
+   dropped (up to 100), so it lands on the picture asked for. A picture that needs the one before it (a B picture of an open group) can
    look wrong for a moment. Program streams only: -1 if the length is
    unknown, or no picture follows; the movie then plays from the start. */
 int mx_movie_seek(struct mx_movie *m, u32 ms);

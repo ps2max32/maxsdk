@@ -530,7 +530,21 @@ int mx_movie_seek(struct mx_movie *m, u32 ms) {
     t = land(m, b < m->size ? b : m->size - 1);
   }
   m->paused = 0;
-  return t < 0 ? -1 : 0;
+  if (t < 0)
+    return -1;
+  /* on to the picture asked for: decoded and dropped (a few: the group's) */
+  u32 skip = t < (s32)ms && m->info.rate_den ? (u32)((u64)(ms - (u32)t) * m->info.rate_num / (m->info.rate_den * 1000ull)) : 0;
+  u32 done = 0;
+  while (done < skip && done < 100 && mx_movie_decode(m))
+    done++;
+  if (done) {
+    m->t0_ms += (u32)((u64)done * m->info.rate_den * 1000 / m->info.rate_num);
+    m->v_pts += (u32)((u64)done * m->info.rate_den * 90000 / m->info.rate_num);
+    m->played = 0; /* the clock starts over from the picture to come */
+    m->running = 0;
+    m->cycles = 0;
+  }
+  return 0;
 }
 
 void mx_movie_pause(struct mx_movie *m, int on) {
