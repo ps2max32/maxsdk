@@ -1848,8 +1848,11 @@ int mx_iop_reset(const char *arg) {
 
   mx__sif_stop_dma();
   /* an IOP that stopped taking SIF1 (a transfer that does not end): the
-     transfer dropped, the reset goes in its place */
+     transfer dropped, the reset goes in its place (the kernel's ring:
+     libmxk has none, and resets through the kernel above) */
+#ifndef MX_KERNEL
   mx__sif1_abort();
+#endif
   struct sif_dma t = {(u32)(uintptr_t)&pkt, mx__sif_get_reg(SYSREG_SUBADDR),
                       (s32)sizeof pkt, DMA_ERT | DMA_INT_O};
   mx__sif_set_reg(REG_SMFLAG, SMFLAG_BOOTEND);
