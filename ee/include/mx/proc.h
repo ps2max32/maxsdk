@@ -46,6 +46,14 @@ int mx_proc_wait(int id, int *status, int nohang);
    id is not that one, is the caller, or cannot end without a restart. Its
    end follows soon after: mx_proc_wait for it. */
 int mx_proc_kill(int id, int status);
+/* Kernel version 24 (mx OS plan step 4d): process id (one that waits or runs
+   beside, not the service) in front. The program in front until now is
+   paused: its threads stop, its interrupt handlers are taken out, and it is
+   in front again when the new one ends or another mx_proc_front brings it
+   back, with its memory, kernel state and VU0 registers. 0, or -1 (id not there, or no
+   program in front that can wait). Called by the program in front itself,
+   it comes back when it is in front again. */
+int mx_proc_front(int id);
 
 /* Kernel version 15: the kernel's events to this process, as messages on
    one of its ports (<mx/msg.h>): from process 0, a struct mx_event each,

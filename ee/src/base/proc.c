@@ -40,6 +40,7 @@ int mx_proc_wait(int id, int *status, int nohang) {
   return CALLV(14, proc_wait, (id, status, nohang));
 }
 int mx_proc_kill(int id, int status) { return CALLV(14, proc_kill, (id, status)); }
+int mx_proc_front(int id) { return CALLV(24, proc_front, (id)); }
 int mx_proc_events(int port) { return CALLV(15, proc_events, (port)); }
 int mx_log_read(u32 *pos, void *buf, u32 max, int *proc, int wait) {
   return CALLV(16, log_read, (pos, buf, max, proc, wait));

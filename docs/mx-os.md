@@ -125,7 +125,10 @@ Retail PS2s have 32 MiB; never count on more.
     and interrupt handlers go on while the other runs: they may not use the pad meanwhile,
     and the other runs in front. Since 2026-11-14 (mx OS plan step 4c) a program beside may
     end (`mx_exit`, returning from `main`) or crash while the other runs: it ends alone and
-    the one in front goes on; before, its end ended the one in front.
+    the one in front goes on; before, its end ended the one in front. `mx_proc_front(id)`
+    (version 24) brings a process that waits or runs beside in front; the one in front is
+    paused (threads stopped, its memory, kernel state and VU0 registers kept) until that one
+    ends or it is brought back.
     `mx_proc_spawn` (version 14) starts it without a waiting thread: `mx_proc_wait` for its
     end and exit status, `mx_proc_kill` to end it. `mx_proc_events` (version 15) sends the
     kernel's events, such as that end, as messages to a port of yours. `mx_log_read` (version

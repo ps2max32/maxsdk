@@ -727,6 +727,10 @@ host link's service are known to the kernel by their paths.
     4c begun 2026-11-14: a process beside ends or crashes alone (kernel.md); `k47_sideend`
     (exit and crash, also above a service) and the process tests pass on PCSX2. Not yet by
     tag: files, sockets, IOP memory.
+    4d begun 2026-11-14: kernel version 24, `mx_proc_front` (the one in front paused, the
+    other in front, back when that ends); up to six waiting and four beside. `k48_turns`
+    (two processes taking turns) and the process tests pass on PCSX2, also above a service.
+    A test with three in turn and the home button bringing the shell in front: still to do.
   - 4b: the kernel's state of a process in its entry, exchanged per entry rather than front
     and one side (still copied: libmxkern's heaps, threads, pad keep their statics; moving
     those behind a pointer is a maxsdk change of its own, after this step).

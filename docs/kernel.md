@@ -129,7 +129,18 @@ server's lock by its process tag (`end_side_off`), its slot out of the sides and
 its VM space and pinned core back to the VM; the kernel's `mx__vm_shutdown` service does
 nothing for it (its exit calls it). Its files, sockets and IOP memory are not tagged yet; its
 core, when a run of its own, stays unused until those above it end. The one in front goes
-on. `tests/ps2/k47_sideend.c` (exit and crash). `mx_sleep_us` is the
+on. `tests/ps2/k47_sideend.c` (exit and crash).
+
+Version 24 (mx OS plan step 4d, 2026-11-14): `proc_front` (`mx_proc_front`). The command thread
+(`exec_front_switch`) parks the program in front as if it waited for the other (its record
+in its own heap, its handlers out, all its threads suspended, its VU0 registers kept in the
+record) on top of the list, and brings the chosen one (waiting or beside, not the service)
+in front as `exec_unpark` does, without the end of a child: its mapping, kernel state, VM
+space, path and VU0 registers. When that one ends, the paused one is in front again; another
+`proc_front` may bring it back first. `proc_wait` answers from the process table for a process
+that is not the caller's last child. Since 4b the records are in the programs' own memory, so
+the lists hold up to six waiting and four beside (TLB entries for the cores beside are the
+limit in practice). `tests/ps2/k48_turns.c`. `mx_sleep_us` is the
 kernel's (`sleep_us`): timer 0 is one for all processes, and a program's own (as before
 version 14) set it for itself and stopped it at its end, so the other's sleepers were never
 woken. Since version 19 it is one of the kernel's software timers (below). A program's arguments are copied into its own memory at its
