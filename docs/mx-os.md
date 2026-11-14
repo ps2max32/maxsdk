@@ -128,7 +128,8 @@ Retail PS2s have 32 MiB; never count on more.
     the one in front goes on; before, its end ended the one in front. `mx_proc_front(id)`
     (version 24) brings a process that waits or runs beside in front; the one in front is
     paused (threads stopped, its memory, kernel state and VU0 registers kept) until that one
-    ends or it is brought back.
+    ends or it is brought back. While a program waits (for the one it started, or paused),
+    its interrupt handlers do not run and its timers fire only when it is in front again.
     `mx_proc_spawn` (version 14) starts it without a waiting thread: `mx_proc_wait` for its
     end and exit status, `mx_proc_kill` to end it. `mx_proc_events` (version 15) sends the
     kernel's events, such as that end, as messages to a port of yours. `mx_log_read` (version

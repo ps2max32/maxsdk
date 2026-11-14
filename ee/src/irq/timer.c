@@ -143,6 +143,13 @@ static MX_CORE_FN void tick(void *arg) {
       mx_isema_signal(slot[i].sema - 1);
       continue;
     }
+    /* -1: its process is paused (it waits, its memory not mapped): not run
+       now, tried again in 10 ms (a one-shot one is not lost) */
+    int sw = mx__timer_enter ? mx__timer_enter(slot[i].proc) : 0;
+    if (sw < 0) {
+      slot[i].due = now + MX_EE_HZ / 100;
+      continue;
+    }
     mx_irq_fn fn = slot[i].fn;
     void *a = slot[i].arg;
     if (slot[i].period) {
@@ -152,9 +159,8 @@ static MX_CORE_FN void tick(void *arg) {
     } else {
       slot[i].armed = 0, slot[i].kind = FREE, slot[i].gen++;
     }
-    int sw = mx__timer_enter ? mx__timer_enter(slot[i].proc) : 0;
     fn(a);
-    if (sw)
+    if (sw > 0)
       mx__timer_leave();
   }
   arm(); /* also acknowledges: the mode is written with EQUF set */

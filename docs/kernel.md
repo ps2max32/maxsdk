@@ -46,7 +46,9 @@ else its own code (the pad: version 6), so a new program still runs on an older 
 
 The program's first call gives the kernel its core memory after `_end` and its VM part;
 the heaps and the program break work in those. It also gives the program an ASID of its own
-(1-255 in turn; `mx__asid_set`, `apps/mxos/ee/exec.c`): the VM's entries are written under
+(1-255 in turn, skipping those that a parked program, a program beside or a service still
+has: `asid_new`, `apps/mxos/ee/exec.c`; before 2026-11-14 the turn came round to them after
+255 starts and the new program's TLB entries were theirs): the VM's entries are written under
 it and not global, so they match only that program's address space (`docs/mx-os-plan.md`,
 step 2b). The kernel is at ASID 0 again at the program's end (`tlb_restore`). Programs not on
 `libmxk` stay at ASID 0.
@@ -140,7 +142,12 @@ space, path and VU0 registers. When that one ends, the paused one is in front ag
 `proc_front` may bring it back first. `proc_wait` answers from the process table for a process
 that is not the caller's last child. Since 4b the records are in the programs' own memory, so
 the lists hold up to six waiting and four beside (TLB entries for the cores beside are the
-limit in practice). `tests/ps2/k48_turns.c`. `mx_sleep_us` is the
+limit in practice). `tests/ps2/k48_turns.c`, `tests/ps2/k49_three.c`. A process that waits
+(paused, or for its child) is not mapped, so its handlers in the kernel's table do not run
+(`kproc_handler_enter` answers -1 from the process table, `ksched_dispatch` skips them) and
+its timers are put off by 10 ms until it is in front again (`tick` in `src/irq/timer.c`; a
+one-shot one is not lost): before, a libgl program's timer ran in its child's memory and
+crashed the kernel. `mx_sleep_us` is the
 kernel's (`sleep_us`): timer 0 is one for all processes, and a program's own (as before
 version 14) set it for itself and stopped it at its end, so the other's sleepers were never
 woken. Since version 19 it is one of the kernel's software timers (below). A program's arguments are copied into its own memory at its
