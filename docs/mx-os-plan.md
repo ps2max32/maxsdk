@@ -675,6 +675,12 @@ one is done, and from here on a step counts as done only once it ran on the PS2.
   - at a program's end a packet number may be given up while its request is still under way
     (`mx__sif_calls_finish`): the IOP's answer then shares a slot with a later one.
 
+- Closed 2026-11-14 by the user's decision (stable enough to build on), with open: the gate's
+  "a game from USB, quit, ten times" was not done (a host-driven pad for it exists as a
+  patch, not in the kernel); the four SIF items above; "no thread to run" in `ksched_pick`
+  under memory pressure (seen once); a swap file that once named the program's ELF
+  (reported by a Quake 3 run on the SCPH-90006, not reproduced).
+
 ### Step 4: a process table
 
 Today a process is a place in a stack: one program in front, at most two waiting for it
@@ -702,6 +708,27 @@ host link's service are known to the kernel by their paths.
   kernel brings in front at the home button and when the program in front ends.
 - Tests: the `k3x` and `k4x` tests as they are; new ones for a service that ends or crashes
   beside a running program, and for three processes that take turns in front.
+- Order of work (2026-11-14), each part on PCSX2 and then the PS2 before the next:
+  - 4a: one table (`kproc.c`): the park slots (`exec.c`) and the sides (`kproc.c`) become
+    entries of it, with their role (front, waits, beside, service), parent and exit status;
+    the stack order kept for now. No change of behaviour: the tests as they are.
+    Begun 2026-11-14: `apps/mxos/ee/ptab.c` (8 entries, kept over the restart): state, the
+    service flag, parent, exit status, core, name; `mx_proc_list` reads it. The park slots
+    and sides still hold the memory and kernel state. The `k3x`/`k4x` process tests pass on
+    PCSX2. The kernel's data is nearly full (about 1 KiB left below its stack, after the
+    hang report went from 48 to 40 lines): what later parts keep per process has to come
+    out of something else (the 35 KiB of `mxio_frames`, the stacks) or above 1 MiB.
+  - 4b: the kernel's state of a process in its entry, exchanged per entry rather than front
+    and one side (still copied: libmxkern's heaps, threads, pad keep their statics; moving
+    those behind a pointer is a maxsdk change of its own, after this step).
+  - 4c: a process beside ends or crashes alone: its threads, handlers, files, ports, timers
+    and VM space go by its owner tag, the one in front goes on. Test: a service that ends,
+    and one that crashes, beside a running program.
+  - 4d: "in front" a role moved by the kernel: three processes taking turns in front (the
+    test), the home button bringing the shell in front (what step 5 builds on).
+  - 4e: the VM's own parts made at the kernel's boot (lock, swap semaphore, writer, pager),
+    not by the first program with VM; the shell and services as roles from the card's
+    configuration.
 
 ### Step 5: graphics and sound have an owner, and home is the shell
 
