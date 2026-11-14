@@ -119,7 +119,17 @@ command thread's `exec_park_started`), with its process, and goes on beside it; 
 not start. `proc_wait` waits for (or, with `nohang`, asks about) the end of the program it
 started, and gives its exit status (the last one's, also after its end). `proc_kill` ends
 the program in front for another process the way its `mx_exit` would, without the restart
-(which would end the caller too): the command thread's `program_ended`. `mx_sleep_us` is the
+(which would end the caller too): the command thread's `program_ended`.
+
+A process beside that ends (its `mx_exit`, or a crash in one of its threads) ends alone (mx OS
+plan step 4c, 2026-11-14): `mxlink_return` sees that the caller is not the process in front,
+records its status (`ptab.c`) and has the command thread take it away (`side_end_now`,
+`exec_side_ended`): its threads, semaphores, interrupt handlers, ports, timers and the file
+server's lock by its process tag (`end_side_off`), its slot out of the sides and park lists,
+its VM space and pinned core back to the VM; the kernel's `mx__vm_shutdown` service does
+nothing for it (its exit calls it). Its files, sockets and IOP memory are not tagged yet; its
+core, when a run of its own, stays unused until those above it end. The one in front goes
+on. `tests/ps2/k47_sideend.c` (exit and crash). `mx_sleep_us` is the
 kernel's (`sleep_us`): timer 0 is one for all processes, and a program's own (as before
 version 14) set it for itself and stopped it at its end, so the other's sleepers were never
 woken. Since version 19 it is one of the kernel's software timers (below). A program's arguments are copied into its own memory at its

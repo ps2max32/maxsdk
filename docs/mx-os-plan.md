@@ -724,6 +724,9 @@ host link's service are known to the kernel by their paths.
     front again; the kernel keeps pointers. 2 KiB of the kernel's data free again. The series
     (`k46_spawnloop` 60 rounds) and Quake on the SCPH-70004, `k31_beside` above a service on
     PCSX2. The stacks (at most two waiting, two beside) are still there: 4c and 4d.
+    4c begun 2026-11-14: a process beside ends or crashes alone (kernel.md); `k47_sideend`
+    (exit and crash, also above a service) and the process tests pass on PCSX2. Not yet by
+    tag: files, sockets, IOP memory.
   - 4b: the kernel's state of a process in its entry, exchanged per entry rather than front
     and one side (still copied: libmxkern's heaps, threads, pad keep their statics; moving
     those behind a pointer is a maxsdk change of its own, after this step).
