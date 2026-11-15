@@ -127,7 +127,7 @@ $(VM_TESTS:%=$(OUT)/tests/%.elf): $(LIBK) $(HERE)/ee/ld/maxsdk-vm.ld
 # (frame.c, fpresent.c under the kernel) as well: the frame pipeline without VM is the
 # standalone frame and fpresent's
 K_TESTS = k37_iopchan k43_phys k44_read k45_alldir k40_frame k41_present
-K_STAY_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k38_service k42_timers k46_spawnloop k47_sideend k48_turns k49_three k50_home k51_notify k52_settings k53_pads
+K_STAY_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k38_service k42_timers k46_spawnloop k47_sideend k48_turns k49_three k50_home k51_notify k52_settings k53_pads k54_isshell
 $(K_TESTS:%=$(OUT)/tests/%.elf): MX_TARGET = mxos
 $(K_TESTS:%=$(OUT)/tests/%.elf): MX_VM_TEXT = core
 $(K_TESTS:%=$(OUT)/tests/%.elf): $(LIBK) $(HERE)/ee/ld/maxsdk-vm-coretext.ld

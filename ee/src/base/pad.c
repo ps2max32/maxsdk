@@ -244,12 +244,11 @@ int mx_pad_connected(int port) {
 }
 
 /* the shell (kernel version 25): the home button is one of its buttons */
+/* asked when the home button is pressed, not kept: a program can become
+   the shell, and the answer at its very start may not be the final one */
 static int is_shell(void) {
 #ifdef MX_KERNEL
-  static int known = -1;
-  if (known < 0)
-    known = mx__kernel && mx__kernel->version >= 25 && mx__kernel->proc_shell() == 1;
-  return known;
+  return mx__kernel && mx__kernel->version >= 25 && mx__kernel->proc_shell() == 1;
 #else
   return 0;
 #endif
