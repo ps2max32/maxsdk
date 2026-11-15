@@ -245,13 +245,14 @@ int mx_pad_connected(int port) {
 
 /* the shell (kernel version 25): the home button is one of its buttons */
 /* asked when the home button is pressed, not kept: a program can become
-   the shell, and the answer at its very start may not be the final one */
+   the shell, and the answer at its very start may not be the final one. At
+   run time, not by MX_KERNEL: this file is built once, for libmx and libmxk
+   alike (only LIBK_SRCS are built with MX_KERNEL), so an #ifdef here made
+   every program, the shell too, end at the home button */
 static int is_shell(void) {
-#ifdef MX_KERNEL
-  return mx__kernel && mx__kernel->version >= 25 && mx__kernel->proc_shell() == 1;
-#else
-  return 0;
-#endif
+  return mx__kernel && mx__kernel->version >= 25 &&
+         mx__kernel->size >= __builtin_offsetof(struct mxk_services, proc_shell) + sizeof(void *) &&
+         mx__kernel->proc_shell() == 1;
 }
 
 u32 mx_pad_buttons(int port) {

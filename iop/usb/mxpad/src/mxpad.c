@@ -775,6 +775,7 @@ int mxpad_open(int kind, const u8 addr[6]) {
     memcpy(p->addr, addr, 6), p->has_addr = 1;
     p->now.id = mxpad_id(addr);
     p->now.kind = (u8)kind;
+    p->now.flags = MXPAD_BT; /* already in the first record, before its first report */
     p->now.battery = 255;
     p->now.lx = p->now.ly = p->now.rx = p->now.ry = 128;
     if (claim_slot(p) < 0) {

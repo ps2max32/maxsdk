@@ -6,7 +6,8 @@
        boot of the kernel, test.k52.keep read back from the file; removed)
      not as the shell: k52_settings.elf noshell     (status 0: reads, but
        mx_setting_set refused)
-     k52_settings.elf log: the kernel's log lines about the settings */
+     k52_settings.elf log: the kernel's log as it is (every process's lines
+       but this one's) */
 #include <mx/log.h>
 #include <mx/msg.h>
 #include <mx/proc.h>
@@ -55,18 +56,17 @@ int main(int argc, char **argv) {
   show(0);
 
   if (!strcmp(what, "log")) {
-    /* the kernel's pieces, joined into lines */
+    /* every process's pieces, joined into lines (their processes' lines
+       may be mixed) */
     static char line[512];
     u32 pos = 0, n = 0;
     char piece[65];
     int proc, got;
     while ((got = mx_log_read(&pos, piece, 64, &proc, 0)) > 0) {
-      if (proc)
-        continue;
       for (int i = 0; i < got; i++) {
         if (piece[i] == '\n' || n == sizeof line - 1) {
           line[n] = 0;
-          if (has(line, "settings") || has(line, "shell") || has(line, "service"))
+          if (!has(line, "k52"))
             mx_printf("k52 log: %s\n", line);
           n = 0;
         } else
