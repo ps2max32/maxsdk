@@ -2606,6 +2606,50 @@ void mx__vm_swap_gone(void) {
   unlock();
 }
 
+/* Every page the swap file holds back in a frame, so that the file can be
+   detached (a host's run's own swap file, which goes with its run: the
+   pages of the processes that stay, which went out during the run): each
+   resident and dirty from now on (its copy in the file goes), its slot
+   given back. 0, or -1 when the frames ran out (the rest stays in the
+   file). */
+int mx__vm_swap_drain(void) {
+  if (!vm.active || vm.fd < 0)
+    return 0;
+  int r = 0;
+  lock();
+  for (u32 k = 0; k < MAX_SPACES && !r; k++) {
+    struct vm_space *s = spaces[k];
+    for (u32 pg = 0; s && pg < s->npages + s->nmap + s->nheap; pg++) {
+      if (!(s->flags[pg] & PG_SWAP))
+        continue;
+      if (!s->frame_of[pg]) {
+        int f = frame_take();
+        if (f < 0) {
+          r = -1;
+          break;
+        }
+        int was = mx_di();
+        s->flags[pg] |= PG_BUSY;
+        mx_irq_restore(was);
+        swap_io_s(s, pg, (u32)f, 0);
+        code_sync();
+        vm.st.swap_ins++;
+        was = mx_di();
+        s->flags[pg] &= (u8)~PG_BUSY;
+        frame_give_s(s, pg, (u32)f);
+        mx_irq_restore(was);
+      }
+      int was = mx_di();
+      slot_give(s->slot_of[pg]);
+      s->slot_of[pg] = 0;
+      s->flags[pg] = (u8)((s->flags[pg] & ~PG_SWAP) | PG_DIRTY);
+      mx_irq_restore(was);
+    }
+  }
+  unlock();
+  return r;
+}
+
 /* The swap file holds pages (its slots taken) */
 int mx__vm_swap_used(void) {
   for (u32 i = 0; i < MAX_SLOTS / 32; i++)
