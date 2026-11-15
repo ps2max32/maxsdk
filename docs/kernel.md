@@ -153,6 +153,63 @@ version 14) set it for itself and stopped it at its end, so the other's sleepers
 woken. Since version 19 it is one of the kernel's software timers (below). A program's arguments are copied into its own memory at its
 start: the kernel's are the next program's once it starts another.
 
+Version 26 (mx OS plan step 4e, 2026-11-15): the shell is a role of the card's configuration.
+`mc0:/MXOS/SHELL.CFG` (on PCSX2 `host:shell.txt`) names its path (`shell_path`, `ee/main.c`, read
+once when the card is there); without it the shell is `MXSHELL.ELF` in the kernel's directory, as
+before. The process table keeps the roles (`ptab_shell`, `ptab_service`) and `mx_proc_list` gives
+them in `flags` (`MX_PROC_SHELL`, `MX_PROC_SERVICE`; the field was padding, 0 before). mxlink's app
+finds the shell by that flag on this kernel, by the file's name on an older one. `k50_home` checks
+the flags; on PCSX2 `host:shell.txt` names the shell.
+
+Also version 26: the VM is the kernel's, made at its boot (`kvm_boot`, `ee/exec.c`, after the
+IOP's modules are loaded: they were read to 16 MiB, the programs' memory) rather than by the first
+program with VM and handed on at its end. maxsdk's `mx__vm_boot` (`ee/src/vm/vm.c`): the frames are
+the memory from 1 MiB to 64 KiB below the top, where the VM's tables are (the physical allocator
+given that range first); `space0` is the kernel's, of one page and no windows, and the spaces of
+programs get the windows (`new_nmap`, `new_nheap`) and, without a size of their own, 128 MiB with
+a swap file or the frames without. The writer and the pager are threads of the kernel at priority
+1, made there (`writer_make`, `pager_make`): the writer keeps no frames clean until a program asks
+(`mx_vm_config.clean_frames`, `mx__vm_writer`). From then on the kernel is as while a program
+with VM waited (phase 3a), for every program (`VM_KEPT`): each program's core is pinned frames
+(`core_place`), its VM a space (`kvm_init`), and its end gives both back (`kvm_front_gone`, the
+kernel's space in front again); the VM's vblank hook stays (`end_cleanup`). The swap file is
+MXOS's only (`SWAP.CFG`, opened at the boot or at the first program with VM once the card reads):
+a program's or a launch's own is not used. A program without VM that would take all memory is
+refused ("takes all memory"); one whose core finds no frames ("no memory for its core"). A page
+fault on a thread whose stack is in the kernel's memory (from 0x80000) is served too (`to_thread`:
+the boot's test of the TLB). The kernel's restart turns the VM off first (`kvm_restart`: the
+BIOS's TLB and handlers back, the swap file closed by the boot's IOP cleanup), a kernel that
+replaces this one too (`kvm_off`); the chime loaded at a program's end without mxsnd goes through
+pinned frames, not 16 MiB. Without the VM (PCSX2's recompiler raises no TLB misses) programs are
+placed as before. On PCSX2 the swap file's setting is `host:swap.txt`.
+
+Also version 26: devices, notifications and the swap file (`ee/dev.c`, `ee/swap.c`; `<mx/dev.h>`,
+`<mx/notify.h>`). The kernel loads the storage drivers after mxpad (`bdm`, `bdmfs_fatfs`,
+`usbmass_bd`, `mxata`; `mx4sio_bd` not: it keeps probing slot 2 and mcman then finds no memory
+card there). mxio watches the devices (`MXIO_WATCH`, `common/include/mxio.h`): bdm's callback
+(`bdm_RegisterCallback`, found by its export table: bdm loads after mxio) for the drives, and
+`dopen` of `mc0:`/`mc1:` every second for the cards; it writes its list with a counter by SIF DMA
+into `.padarea` (above the kernel's code, as mxpad's), and a device that went stays listed, not
+present, for one change. The kernel's vblank hook (`dev_vblank`) sees the counter change and
+wakes the command thread (`dev_now`), which compares the list with the names it knew (the first
+list after the boot is taken as it is), adds notifications, tells swap.c and posts
+`MX_EVENT_DEVICE` to every process with events (`kmsg_post_all`: not to one that waits or is
+paused, and not while one of the same type is still queued for it). Twice a second the command
+thread also looks at the controllers (`pad_watch`, `ee/pad.c`): mxpad's records (kind, cable,
+battery) and the SIO2 ports while a program has them open; a change is a notification and
+`MX_EVENT_PAD`. The notifications are a ring of 32 in `.padarea`, written through the uncached
+alias (programs may not write there), each with an id, a seq that changes when it changes (an
+urgent one resolved, `knotify_resolve`), the seconds since the boot, kind, urgent, action
+(`MX_NOTIFY_ACTION_*`: the shell's page to open), the source (the program's file name, "" for
+the kernel), title and text. swap.c attaches the swap file from the setting (`SWAP.CFG`) when its
+device is there (`kswap_device`), opening it first to know whether it is made now, and on the
+device's removal calls maxsdk's `mx__vm_swap_gone`: a resident page whose copy was in the file is
+dirty again, one that was only there `PG_LOST` (its fault ends the program). `mx_swap_set` (the
+shell only) writes the setting and attaches at once; while the old file holds pages
+(`mx__vm_swap_detach` refuses) the new place counts from the next start. `tests/ps2/k51_notify.c`
+prints the list, the swap state and every event and notification while devices and controllers
+are plugged in and out (by hand).
+
 Version 25 (mx OS plan step 4d, 2026-11-15): `proc_shell`, and the home button brings the shell in
 front. When the shell (the program the kernel started as its shell, `exec_shell_next`) waits for the
 program in front or runs beside it (`mx_proc_spawn`), `home_run` (`ee/home.c`, at the program's

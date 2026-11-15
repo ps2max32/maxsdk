@@ -31,7 +31,32 @@ enum {
   MXIO_SIZE,  /* fd; answer: the file's size or < 0 */
   MXIO_LOG,   /* text, to the host's console; < 0 without a host */
   MXIO_STATS, /* answer: frames, doubles, drops, asked again (the fast path) */
-  MXIO_CLOSE_ALL /* what a program left open */
+  MXIO_CLOSE_ALL, /* what a program left open */
+  MXIO_WATCH      /* EE address of a struct mxio_devs (64-byte aligned); answer:
+                     MXIO_DEVS_VERSION. mxio then writes the devices there by DMA
+                     at every change (kernel version 26) */
+};
+
+/* The storage devices (MXIO_WATCH): mxio sees USB drives, MX4SIO and the HDD
+   come and go through bdm's callback, and the memory cards by looking every
+   second. gen changes when a device came or went; flags (files open on it)
+   change without it. A device that went stays in the list, not present,
+   until the next change. Kinds and fs as <mx/dev.h>'s MX_DEV_*. */
+#define MXIO_DEVS_VERSION 1
+#define MXIO_DEVS 8
+#define MXIO_DEV_BUSY 2 /* <mx/dev.h>'s MX_DEV_BUSY: files open on it */
+struct mxio_dev {
+  char name[12]; /* "usb0:", "mc1:" */
+  unsigned char kind, present, fs, flags;
+  unsigned int size_lo, size_hi; /* bytes, 0 when not known */
+  unsigned int files;            /* files open on it */
+  char label[24];
+  unsigned int free_lo, free_hi; /* bytes free, 0 when not known */
+  unsigned int pad;
+};
+struct mxio_devs {
+  unsigned int gen, n, version, pad;
+  struct mxio_dev d[MXIO_DEVS];
 };
 
 #endif

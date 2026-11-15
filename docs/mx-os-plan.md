@@ -734,6 +734,15 @@ host link's service are known to the kernel by their paths.
     button brings a waiting or beside shell in front (`MX_EVENT_HOME`), `mx_proc_kill` ends a
     paused process; `k50_home` passes on PCSX2 (as the shell, `poll`) and on both PS2s with the
     frame pipeline, the shell and the game each in their own video mode.
+    4e begun 2026-11-15: kernel version 26, the shell's path from `SHELL.CFG` and the roles in
+    `mx_proc_list` (`MX_PROC_SHELL`, `MX_PROC_SERVICE`); PCSX2. Decided for the VM at the boot
+    (user, 2026-11-15): a program without VM that takes all memory (no `MX_CORE_HEAP`) is
+    refused, and only MXOS's swap file is used (a program's own swap path is ignored). The VM
+    at the boot (`kvm_boot`, `mx__vm_boot`): the process tests and the VM tests pass on PCSX2
+    (with a `host:swap.txt`). Devices, notifications and the swap file as a setting (user, 2026-11-15:
+    hotplug with a message both ways, the swap file's device a warning, no swap file a warning;
+    agreed with MXSHELL): `<mx/dev.h>`, `<mx/notify.h>`, `MX_EVENT_DEVICE/NOTIFY/PAD`; USB
+    drives, memory cards in both slots and controllers checked on a SCPH-70004 (`k51_notify`).
   - 4b: the kernel's state of a process in its entry, exchanged per entry rather than front
     and one side (still copied: libmxkern's heaps, threads, pad keep their statics; moving
     those behind a pointer is a maxsdk change of its own, after this step).

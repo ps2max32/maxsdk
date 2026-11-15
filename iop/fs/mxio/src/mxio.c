@@ -7,10 +7,12 @@
 #include <sifman.h>
 #include <sysclib.h>
 #include <thbase.h>
+#include <timrman.h>
 #include <mxfast.h>
 #include <mxio.h>
 #include <io_common.h>
 #include <sifrpc.h>
+#include <stdio.h>
 
 IRX_ID("mxio", 1, 0);
 
@@ -20,7 +22,8 @@ IRX_ID("mxio", 1, 0);
 
 static struct {
   int used, host, h;
-  u32 pos; /* of a driver's file: where it is now */
+  u32 pos;     /* of a driver's file: where it is now */
+  char dev[12]; /* its device, "usb0:" (MXIO_WATCH's files) */
 } files[MXIO_FILES];
 
 static u32 rpc_in[MXIO_BUFFER / 4] __attribute__((aligned(16)));
@@ -82,6 +85,11 @@ static int do_open(int flags, const char *path) {
   if (h < 0)
     return h;
   files[fd].used = 1, files[fd].h = h;
+  u32 n = 0;
+  while (n < sizeof files[fd].dev - 1 && path[n] && path[n] != ':')
+    n++;
+  memcpy(files[fd].dev, path, n);
+  files[fd].dev[n] = ':', files[fd].dev[n + 1 < sizeof files[fd].dev ? n + 1 : n] = 0;
   rpc_out[1] = MXIO_MAX_WRITE, rpc_out[2] = MXIO_MAX_WRITE;
   return fd;
 }
@@ -130,6 +138,215 @@ static int driver_write(int fd, u32 pos, u32 size) {
   if (r > 0)
     files[fd].pos = pos + (u32)r;
   return r;
+}
+
+/* ---- the devices (MXIO_WATCH) ------------------------------------------- */
+
+/* bdm's block devices (ps2sdk's bdm.h, by its export table: bdm is loaded
+   after mxio, or not at all) */
+struct block_device {
+  void *priv;
+  char *name;
+  unsigned int devNr, parNr;
+  unsigned char parId;
+  unsigned int sectorSize;
+  u64 sectorOffset, sectorCount;
+  void *read, *write, *flush, *stop;
+  char *path; /* the device's prefix: "usb" for usb0: */
+};
+static void **bdm(void) {
+  static iop_library_t lib;
+  static void **table;
+  if (!table) {
+    memset(&lib, 0, sizeof lib);
+    lib.version = 0x101;
+    memcpy(lib.name, "bdm\0\0\0\0\0", 8);
+    table = QueryLibraryEntryTable(&lib);
+  }
+  return table;
+}
+typedef void bdm_cb_fn(int event);
+typedef void bdm_register_fn(bdm_cb_fn *cb);
+typedef void bdm_get_bd_fn(struct block_device **pbd, unsigned int count);
+
+static struct mxio_devs devs __attribute__((aligned(64)));
+static u32 devs_ee;
+static int watch_tid;
+static volatile int bdm_changed = 1;
+
+static void bdm_event(int event) {
+  (void)event;
+  bdm_changed = 1;
+  if (watch_tid > 0)
+    WakeupThread(watch_tid);
+}
+
+static int present(const char *dev) {
+  char p[16];
+  u32 n = strlen(dev);
+  memcpy(p, dev, n);
+  p[n] = '/', p[n + 1] = 0;
+  int fd = dopen(p, 0);
+  if (fd < 0)
+    return 0;
+  dclose(fd);
+  return 1;
+}
+
+static void add(struct mxio_devs *t, const char *name, int kind, int fs, u64 size) {
+  if (t->n >= MXIO_DEVS)
+    return;
+  struct mxio_dev *d = &t->d[t->n++];
+  memset(d, 0, sizeof *d);
+  u32 n = strlen(name);
+  memcpy(d->name, name, n < sizeof d->name ? n : sizeof d->name - 1);
+  d->kind = (unsigned char)kind, d->present = 1, d->fs = (unsigned char)fs;
+  d->size_lo = (u32)size, d->size_hi = (u32)(size >> 32);
+}
+
+static int kind_of(const char *path) {
+  if (!strncmp(path, "ata", 3))
+    return 4; /* MX_DEV_HDD */
+  if (!strncmp(path, "mx4sio", 6) || !strncmp(path, "sdc", 3))
+    return 3; /* MX_DEV_MX4SIO */
+  return 2;   /* MX_DEV_USB */
+}
+
+/* what is there now, in t; the block devices only when bdm said so */
+static struct mxio_devs scan_t, bdm_t;
+static void scan(struct mxio_devs *t, int bdm_too) {
+  memset(t, 0, sizeof *t);
+  t->version = MXIO_DEVS_VERSION;
+  if (present("mc0:"))
+    add(t, "mc0:", 1, 1, 8u << 20);
+  if (present("mc1:"))
+    add(t, "mc1:", 1, 1, 8u << 20);
+  void **b = bdm();
+  if (b && bdm_too) {
+    memset(&bdm_t, 0, sizeof bdm_t);
+    struct block_device *bd[16];
+    memset(bd, 0, sizeof bd);
+    ((bdm_get_bd_fn *)b[8])(bd, 16);
+    /* each prefix: its units as fatfs numbers them (mounted ones, in the
+       order they came); a disk with partitions mounts those */
+    for (int i = 0; i < 16; i++) {
+      if (!bd[i] || !bd[i]->path)
+        continue;
+      int seen = 0;
+      for (int k = 0; k < i; k++)
+        seen |= bd[k] && bd[k]->path && !strcmp(bd[k]->path, bd[i]->path);
+      if (seen)
+        continue;
+      int parts = 0;
+      for (int k = i; k < 16; k++)
+        parts |= bd[k] && bd[k]->path && !strcmp(bd[k]->path, bd[i]->path) && bd[k]->parNr;
+      int unit = 0;
+      for (int k = i; k < 16 && unit < 4; k++) {
+        if (!bd[k] || !bd[k]->path || strcmp(bd[k]->path, bd[i]->path) || (parts && !bd[k]->parNr))
+          continue;
+        char name[12];
+        u32 n = strlen(bd[i]->path);
+        if (n > 6)
+          n = 6;
+        memcpy(name, bd[i]->path, n);
+        name[n] = (char)('0' + unit), name[n + 1] = ':', name[n + 2] = 0;
+        if (present(name))
+          add(&bdm_t, name, kind_of(bd[i]->path), 2, bd[k]->sectorCount * bd[k]->sectorSize);
+        unit++;
+      }
+    }
+  }
+  for (u32 i = 0; i < bdm_t.n && t->n < MXIO_DEVS; i++)
+    t->d[t->n++] = bdm_t.d[i];
+}
+
+/* the files open on each device: flags without a new gen */
+static void count_files(struct mxio_devs *t) {
+  for (u32 i = 0; i < t->n; i++) {
+    struct mxio_dev *d = &t->d[i];
+    d->files = 0;
+    for (int f = 0; f < MXIO_FILES; f++)
+      d->files += files[f].used && !files[f].host && !strcmp(files[f].dev, d->name);
+    d->flags = d->files ? MXIO_DEV_BUSY : 0;
+  }
+}
+
+static int same(const struct mxio_dev *a, const struct mxio_dev *b) {
+  return !strcmp(a->name, b->name) && a->present == b->present && a->size_lo == b->size_lo &&
+         a->size_hi == b->size_hi;
+}
+
+/* the new list against the one the EE has: gen up when a device came or
+   went; one that went stays, not present, until the next change */
+static void publish(struct mxio_devs *t) {
+  int changed = t->n != devs.n;
+  for (u32 i = 0; i < t->n && !changed; i++)
+    changed = !same(&t->d[i], &devs.d[i]);
+  if (changed) {
+    /* those that went */
+    for (u32 i = 0; i < devs.n; i++) {
+      if (!devs.d[i].present)
+        continue;
+      int there = 0;
+      for (u32 k = 0; k < t->n; k++)
+        there |= !strcmp(t->d[k].name, devs.d[i].name);
+      if (!there && t->n < MXIO_DEVS) {
+        t->d[t->n] = devs.d[i];
+        t->d[t->n++].present = 0;
+      }
+    }
+    changed = t->n != devs.n;
+    for (u32 i = 0; i < t->n && !changed; i++)
+      changed = !same(&t->d[i], &devs.d[i]);
+  }
+  t->gen = devs.gen + (changed ? 1 : 0);
+  count_files(t);
+  int flags = 0;
+  for (u32 i = 0; i < t->n && !flags && !changed; i++)
+    flags = t->d[i].flags != devs.d[i].flags;
+  if (!changed && !flags)
+    return;
+  if (changed) {
+    printf("mxio: devices (%u):", t->gen);
+    for (u32 i = 0; i < t->n; i++)
+      printf(" %s%s", t->d[i].name, t->d[i].present ? "" : "(gone)");
+    printf("\n");
+  }
+  devs = *t;
+  if (devs_ee)
+    wait_dma(to_ee(&devs, devs_ee, sizeof devs));
+}
+
+static void watch(void *arg) {
+  (void)arg;
+  int hooked = 0;
+  for (;;) {
+    if (!hooked && bdm()) {
+      ((bdm_register_fn *)bdm()[9])(bdm_event);
+      hooked = 1, bdm_changed = 1;
+    }
+    int b = bdm_changed;
+    bdm_changed = 0;
+    if (b) /* a drive is mounted a moment after bdm calls */
+      DelayThread(200 * 1000);
+    scan(&scan_t, b);
+    publish(&scan_t);
+    /* the cards every second, or at once when bdm calls */
+    iop_sys_clock_t c;
+    USec2SysClock(1000 * 1000, &c);
+    SetAlarm(&c, (unsigned int (*)(void *))iWakeupThread, (void *)watch_tid);
+    SleepThread();
+    CancelAlarm((unsigned int (*)(void *))iWakeupThread, (void *)watch_tid);
+  }
+}
+
+static void watch_start(void) {
+  if (watch_tid > 0)
+    return;
+  iop_thread_t t = {TH_C, 0, watch, 0x800, 0x60}; /* below the file service */
+  watch_tid = CreateThread(&t);
+  if (watch_tid > 0)
+    StartThread(watch_tid, 0);
 }
 
 static void *rpc(int fno, void *data, int size) {
@@ -183,6 +400,20 @@ static void *rpc(int fno, void *data, int size) {
   case MXIO_STATS:
     if (fast())
       FAST(stats, 6)((int *)rpc_out);
+    break;
+  case MXIO_WATCH:
+    devs_ee = a[0];
+    /* what is there now (the cards: the drives come when bdm mounts them),
+       so that the EE's first list is not empty */
+    scan(&scan_t, 0);
+    publish(&scan_t);
+    devs.gen++; /* the EE's area: the list written to it now */
+    if (devs_ee)
+      wait_dma(to_ee(&devs, devs_ee, sizeof devs));
+    watch_start();
+    if (watch_tid > 0)
+      WakeupThread(watch_tid);
+    rpc_out[0] = MXIO_DEVS_VERSION;
     break;
   default:
     rpc_out[0] = -22;

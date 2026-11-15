@@ -112,6 +112,22 @@ int main(int argc, char **argv) {
   int id = mx_proc_spawn(2, args, n + (u32)strlen(role) + 1, 0);
   mx_printf("k50: the game is process %d\n", id);
   CHECK(id > 0);
+  /* kernel version 26: the roles in the list, the shell's only for it */
+  if (mx__kernel->version >= 26) {
+    struct mx_proc_info p[8];
+    int n = mx_proc_list(p, 8), seen = 0;
+    for (int i = 0; i < n && i < 8; i++) {
+      if (p[i].id == mx_proc_self()) {
+        CHECK_EQ(p[i].flags & MX_PROC_SHELL, MX_PROC_SHELL);
+        seen++;
+      }
+      if (p[i].id == id) {
+        CHECK_EQ(p[i].flags & MX_PROC_SHELL, 0);
+        seen++;
+      }
+    }
+    CHECK_EQ(seen, 2);
+  }
 
   /* frames: 5 s in front at each press, to be seen on a TV */
   u32 stay = strcmp(role, "game") ? 0 : 5000000;

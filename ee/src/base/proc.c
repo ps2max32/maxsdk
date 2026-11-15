@@ -2,6 +2,8 @@
    version 13 and 14 (docs/kernel.md). libmx and the kernel's own library have none:
    -1. */
 #include <mx/debug.h>
+#include <mx/dev.h>
+#include <mx/notify.h>
 #include <mx/iop.h>
 #include <mx/kernel.h>
 #include <mx/log.h>
@@ -54,4 +56,31 @@ int mx_proc_service(void) {
 int mx_phys_read(u32 phys, void *to, u32 n) { return CALLV(21, phys_read, (phys, to, n)); }
 int mx_phys_write(u32 phys, const void *from, u32 n) {
   return CALLV(21, phys_write, (phys, from, n));
+}
+
+/* kernel version 26: devices, the swap file, notifications (<mx/dev.h>,
+   <mx/notify.h>) */
+int mx_dev_list(struct mx_dev_info *d, int max) { return CALLV(26, dev_list, (d, max)); }
+u32 mx_dev_gen(void) {
+#ifdef MX_KERNEL
+  if (HAS(26, dev_gen))
+    return mx__kernel->dev_gen();
+#endif
+  return 0;
+}
+int mx_dev_eject(const char *name) { return CALLV(26, dev_eject, (name)); }
+int mx_swap_set(const char *path, u32 mib) { return CALLV(26, swap_set, (path, mib)); }
+int mx_swap_info(struct mx_swap_info *s) { return CALLV(26, swap_info, (s)); }
+int mx_notify(u32 kind, int urgent, const char *title, const char *text) {
+  return CALLV(26, notify, (kind, urgent, title, text));
+}
+int mx_notify_read(u32 after_seq, struct mx_notify *n, int max) {
+  return CALLV(26, notify_read, (after_seq, n, max));
+}
+u32 mx_notify_seq(void) {
+#ifdef MX_KERNEL
+  if (HAS(26, notify_seq))
+    return mx__kernel->notify_seq();
+#endif
+  return 0;
 }

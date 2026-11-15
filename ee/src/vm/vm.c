@@ -72,6 +72,7 @@ void mx__thread_keep(int id); /* thread.c: mx_exit leaves it */
 #define PG_FILE 16 /* a file holds it (the program's ELF until PG_SWAP, a mapped file) */
 #define NSEG 12    /* 4 segments of the program's ELF, 8 mapped files */
 #define PG_RAW 32  /* pinned to be overwritten whole: its frame not filled */
+#define PG_LOST 64 /* it was in a swap file whose device went (mx__vm_swap_gone) */
 
 /* What the VM has of one address space (mx OS plan, the address space
    plan's phase 3a): its pages' tables, the files its pages come from, its
@@ -109,8 +110,14 @@ static struct vm_space *volatile wspace;
 static struct vm_space *wfor;
 /* every space; a frame's page is of spaces[frame_space[f]] (one LRU over
    all of them: oldest, evict, the writer) */
-#define MAX_SPACES 4
+#define MAX_SPACES 6
 static struct vm_space *spaces[MAX_SPACES] = {&space0};
+/* The kernel's VM, made at its boot (mx OS plan 4e, mx__vm_boot): space0 is
+   the kernel's, of one page and no windows; the spaces of programs
+   (mx__vm_space_new) get the windows it would have had, and without a size
+   of their own 128 MiB with a swap file, the frames without */
+static int boot0;
+static u32 new_nmap, new_nheap;
 /* the swap file's slots, taken (slot_take, below) */
 #define MAX_SLOTS 8192u /* 256 MiB */
 static u32 slot_bits[MAX_SLOTS / 32];
@@ -603,13 +610,18 @@ struct vm_space *mx__vm_space_new(u32 size) {
   /* its VM: size bytes, or the first space's (which is no more than the
      frames when the VM came on without a swap file: a program that brings
      one, or uses MXOS's, asks for its own size) */
-  u32 np = space0.npages;
+  u32 np = space0.npages, nmap = space0.nmap, nheap = space0.nheap;
+  if (boot0) {
+    nmap = new_nmap, nheap = new_nheap;
+    if (!size)
+      size = vm.fd >= 0 ? 128u << 20 : vm.nframes * PAGE;
+  }
   if (size) {
     if (size > MX_VM_LIMIT - MX_VM_BASE)
       size = MX_VM_LIMIT - MX_VM_BASE;
     np = size / PAGE;
-    if (np + space0.nmap + space0.nheap > 0xFFFE)
-      np = 0xFFFE - space0.nmap - space0.nheap;
+    if (np + nmap + nheap > 0xFFFE)
+      np = 0xFFFE - nmap - nheap;
   }
   u32 id = 1;
   while (id < MAX_SPACES && spaces[id])
@@ -620,7 +632,7 @@ struct vm_space *mx__vm_space_new(u32 size) {
      MX_PHYS_WIN (a global entry): every process's threads may read them
      (the LRU takes any space's pages), not only this program's (its core
      heap is mapped under its ASID) */
-  u32 nt = np + space0.nmap + space0.nheap;
+  u32 nt = np + nmap + nheap;
   u32 head = (sizeof(struct vm_space) + 15) & ~15u;
   u32 bytes = head + nt * (4 + 2 + 2 + 1 + 1 + 1 + 4) + 16 * 7;
   u8 *m = mx__vm_frames_take(bytes);
@@ -639,7 +651,7 @@ struct vm_space *mx__vm_space_new(u32 size) {
   TAKE(page_slot, nt);
 #undef TAKE
   n->id = id;
-  n->npages = np, n->nmap = space0.nmap, n->nheap = space0.nheap;
+  n->npages = np, n->nmap = nmap, n->nheap = nheap;
   n->bytes = bytes;
   int was = mx_di();
   spaces[id] = n;
@@ -764,6 +776,18 @@ void mx__vm_handlers_again(void) {
     bios_handler[c] = mx__set_handler(c, mx__vm_vector);
 }
 
+/* Pins to drop once their DMA has passed (mx_vm_unpin_after). */
+#define NLATER 32
+/* each with its space: the VM is the kernel's and outlives programs (mx OS
+   plan 4e), so one that ended leaves none for the next (mx__vm_space_free) */
+static struct {
+  const void *p;
+  u32 bytes;
+  mx_event e;
+  struct vm_space *s;
+} later[NLATER];
+static u32 nlater;
+
 /* A space not current any more goes: its frames back to the pool (its
    pages are dropped, their swap slots unused from now), its tables freed. */
 void mx__vm_space_free(struct vm_space *n) {
@@ -792,8 +816,17 @@ void mx__vm_space_free(struct vm_space *n) {
       vm.nfree++;
       vm.pinned_frames--;
     }
-  for (u32 pg = 0; pg < n->npages + n->nmap + n->nheap; pg++)
+  for (u32 pg = 0; pg < n->npages + n->nmap + n->nheap; pg++) {
     slot_give(n->slot_of[pg]);
+    if (n->pins[pg]) /* its program pinned it and ended: not counted any more */
+      vm.st.pinned--;
+  }
+  /* its pins still to drop after a transfer: gone with it */
+  for (u32 i = 0; i < nlater;)
+    if (later[i].s == n)
+      later[i] = later[--nlater];
+    else
+      i++;
   spaces[n->id] = 0;
   /* the swap file its program brought: closed with it when no other space
      has a page in it (a host: file is gone with the host's run on the PS2,
@@ -1027,7 +1060,9 @@ static int to_thread(struct mx__vm_x *x) {
     mx__exception_note = "VM: a page fault in the BIOS (a VM pointer passed to a syscall)";
     return VMX_FATAL;
   }
-  if (mx_is_vm((void *)(uintptr_t)sp) || sp < 0x00100000u + VMX_SIZE) {
+  /* a stack from the resident kernel's memory up (0x80000: its threads,
+     mx OS plan 4e: its VM's test at its boot) */
+  if (mx_is_vm((void *)(uintptr_t)sp) || sp < 0x00080000u + VMX_SIZE) {
     mx__exception_note = "VM: a page fault on a thread whose stack is VM (stacks must be core)";
     return VMX_FATAL;
   }
@@ -1357,8 +1392,11 @@ static void writer(void *arg) {
   }
 }
 
+static void writer_make(u32 clean, int prio);
 static void writer_start(u32 clean) {
-  int me = mx_thread_self(), prio = mx_thread_prio(me);
+  writer_make(clean, mx_thread_prio(mx_thread_self()));
+}
+static void writer_make(u32 clean, int prio) {
   if (prio < 1) {
     mx_printf("mx_vm_init: clean_frames: the thread is at priority %d, the writer cannot run "
               "above it; no writer\n",
@@ -1373,7 +1411,7 @@ static void writer_start(u32 clean) {
   vm.clean_frames = clean < vm.nframes / 2 ? clean : vm.nframes / 2;
   int id = vm.wsema < 0 ? -1 : mx_thread_start(writer, 0, wstack, sizeof wstack, prio - 1);
   if (id < 0) {
-    mx_printf("mx_vm_init: clean_frames: the writer thread did not start\n");
+    mx_printf("mx_vm_init: the writer thread did not start\n");
     vm.wsema = -1;
   } else {
     mx__thread_keep(id);
@@ -1472,6 +1510,8 @@ static void place(u32 pg, u32 f, int write) {
   int was = mx_di();
   vs->flags[pg] |= PG_BUSY; /* another thread's fault waits */
   mx_irq_restore(was);
+  if (vs->flags[pg] & PG_LOST)
+    vm_fatal("its page was in the swap file of a device that was removed", pg);
   if (vs->flags[pg] & PG_SWAP) {
     swap_io(pg, f, 0);
     code_sync();
@@ -1770,20 +1810,16 @@ void mx_vm_unpin(const void *p, u32 bytes) {
   mx_irq_restore(was);
 }
 
-/* Pins to drop once their DMA has passed (mx_vm_unpin_after). */
-#define NLATER 32
-static struct {
-  const void *p;
-  u32 bytes;
-  mx_event e;
-} later[NLATER];
-static u32 nlater;
 
 u32 mx_vm_unpin_done(void) {
   int was = mx_di();
   for (u32 i = 0; i < nlater;) {
     if (mx_event_done(later[i].e)) {
+      /* in its own space (interrupts off: no fault sees vs meanwhile) */
+      struct vm_space *now = vs;
+      vs = later[i].s ? later[i].s : vs;
       mx_vm_unpin(later[i].p, later[i].bytes);
+      vs = now;
       later[i] = later[--nlater];
     } else
       i++;
@@ -1799,7 +1835,7 @@ void mx_vm_unpin_after(const void *p, u32 bytes, mx_event e) {
   while (mx_vm_unpin_done() == NLATER)
     ; /* full: the oldest transfers end first */
   int was = mx_di();
-  later[nlater].p = p, later[nlater].bytes = bytes, later[nlater].e = e;
+  later[nlater].p = p, later[nlater].bytes = bytes, later[nlater].e = e, later[nlater].s = vs;
   nlater++;
   mx_irq_restore(was);
 }
@@ -2026,23 +2062,26 @@ static void pager(void *arg) {
   }
 }
 
+/* the pager at prio - 1; psema -2 when it did not start */
+static void pager_make(int prio) {
+  struct {
+    s32 count, max_count, init_count, wait_threads;
+    u32 attr, option;
+  } sp = {0, NPREF, 0, 0, 0, 0};
+  psema = mx_bios_create_sema(&sp);
+  int id = psema < 0 ? -1 : mx_thread_start(pager, 0, pstack, sizeof pstack, prio - 1);
+  if (id < 0) {
+    mx_printf("maxsdk: the VM's pager thread did not start\n");
+    psema = -2;
+  } else
+    mx__thread_keep(id);
+}
+
 void mx__vm_prefetch(const void *p, u32 bytes) {
   if (!vm.active || !mx_is_vm(p) || !in_vm(p, bytes) || mx__vm_resident(p, bytes))
     return;
-  if (psema < 0) {
-    struct {
-      s32 count, max_count, init_count, wait_threads;
-      u32 attr, option;
-    } sp = {0, NPREF, 0, 0, 0, 0};
-    int me = mx_thread_self(), prio = mx_thread_prio(me);
-    psema = mx_bios_create_sema(&sp);
-    int id = psema < 0 ? -1 : mx_thread_start(pager, 0, pstack, sizeof pstack, prio - 1);
-    if (id < 0) {
-      mx_printf("maxsdk: the VM's pager thread did not start\n");
-      psema = -2;
-    } else
-      mx__thread_keep(id);
-  }
+  if (psema == -1)
+    pager_make(mx_thread_prio(mx_thread_self()));
   if (psema < 0 || pref_in - pref_out >= NPREF)
     return; /* asked again later */
   pref[pref_in % NPREF].p = p;
@@ -2382,6 +2421,11 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
     if ((np + nmap) * vm.bpp > 0xFFFE)
       nmap = 0xFFFE / vm.bpp > np ? 0xFFFE / vm.bpp - np : 0;
   }
+  /* the kernel's (mx__vm_boot): its space one page, the windows for the
+     programs' spaces */
+  new_nmap = nmap, new_nheap = nheap;
+  if (boot0)
+    np = 1, nmap = nheap = 0;
   u32 nt = np + nmap + nheap; /* the tables: VM's pages, the file window's, the heap window's */
   vs->lo = table(nt * 4);
   vs->frame_of = table(nt * 2);
@@ -2508,3 +2552,80 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
 /* The kernel at a program's end: the VM's vblank function off (its state is
    set back as linked then, docs/mx-os-plan.md step 2a). */
 void mx__vm_unhook(void) { mx__irq_vbon_unhook(vblank); }
+
+/* ---- the kernel's VM (mx OS plan 4e) ----------------------------------------
+
+   The kernel makes the VM at its boot: the frames are the physical memory
+   [phys_lo, phys_hi), the tables come from the physical allocator (the
+   kernel gives it a range of its own first), and space0 is the kernel's.
+   Every program gets a space of its own (mx__vm_space_new) and its core as
+   pinned frames. The writer and the pager are made here, threads of the
+   kernel at priority prio (above every program's). 0, or -1 (no VM: PCSX2's
+   recompiler, no memory). */
+int mx__vm_boot(u32 phys_lo, u32 phys_hi, int prio) {
+  struct mx_vm_config c;
+  __builtin_memset(&c, 0, sizeof c);
+  c.size = PAGE;
+  boot0 = 1;
+  mx__vm_frames(phys_lo, phys_hi);
+  if (mx_vm_init(&c) < 0) {
+    boot0 = 0;
+    return -1;
+  }
+  wfor = 0;
+  writer_make(0, prio + 1);
+  pager_make(prio + 1);
+  return 0;
+}
+
+/* the VM has a swap file */
+int mx__vm_has_swap(void) { return vm.active && vm.fd >= 0; }
+
+/* The swap file's device went (the kernel saw it go, mx OS plan 4e): the
+   file is not there any more. A resident page whose copy was in it is the
+   only copy now (dirty: it goes to the next swap file); one that was only
+   in it is lost, and a program that touches it ends with that message
+   (PG_LOST). The VM has no swap file from now. */
+void mx__vm_swap_gone(void) {
+  if (!vm.active || vm.fd < 0)
+    return;
+  lock();
+  int was = mx_di();
+  for (u32 k = 0; k < MAX_SPACES; k++) {
+    struct vm_space *s = spaces[k];
+    for (u32 pg = 0; s && pg < s->npages + s->nmap + s->nheap; pg++) {
+      if (s->flags[pg] & PG_SWAP)
+        s->flags[pg] = (u8)((s->flags[pg] & ~PG_SWAP) | (s->frame_of[pg] ? PG_DIRTY : PG_LOST));
+      s->slot_of[pg] = 0;
+    }
+  }
+  __builtin_memset(slot_bits, 0, sizeof slot_bits);
+  vm.fd = -1;
+  swap_owner = 0;
+  mx_irq_restore(was);
+  unlock();
+}
+
+/* The swap file holds pages (its slots taken) */
+int mx__vm_swap_used(void) {
+  for (u32 i = 0; i < MAX_SLOTS / 32; i++)
+    if (slot_bits[i])
+      return 1;
+  return 0;
+}
+
+/* The swap file closed while it holds no page (another place chosen): 0,
+   or -1 when it holds pages */
+int mx__vm_swap_detach(void) {
+  if (!vm.active || vm.fd < 0)
+    return 0;
+  lock();
+  int fd = -1;
+  if (!mx__vm_swap_used())
+    fd = vm.fd, vm.fd = -1, swap_owner = 0;
+  unlock();
+  if (fd < 0)
+    return -1;
+  mx_fio_close(fd);
+  return 0;
+}

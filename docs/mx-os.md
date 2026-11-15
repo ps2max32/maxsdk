@@ -36,13 +36,38 @@ memory: [vm.md](vm.md). Where it goes (a game OS): [mx-os-plan.md](mx-os-plan.md
   (`mx_proc_service`, kernel version 18). The host link is one (kernel version 20):
   `mc0:/MXOS/MXLINK.ELF` takes ps2client's commands but the reset (version 21; 20: execee
   and the ping), ends the shell for them and starts the host's program; without it the kernel
-  serves only the reset, execee and the ping. A program that
-  takes all memory (no core heap of its own) ends the service; it starts again after that one.
+  serves only the reset, execee and the ping.
+- Devices (kernel version 26, `<mx/dev.h>`): the kernel loads the storage drivers at its boot
+  (bdm, its FAT/exFAT file system, USB drives, the HDD) and keeps them; a program never loads a
+  storage IRX. MX4SIO is off: it shares slot 2 with a memory card and keeps the card from being
+  seen (a setting turns it on later). Devices come and go at any time: `mx_dev_list` (name,
+  kind, present, file system, size, free, flags `MX_DEV_SWAP`, `MX_DEV_BUSY`), `mx_dev_gen`,
+  `mx_dev_eject` (refused while the swap file or open files are on it), and the hint
+  `MX_EVENT_DEVICE` to every process with `mx_proc_events`. Free space of FAT and exFAT is not
+  known yet (0).
+- Notifications (`<mx/notify.h>`): the kernel keeps the last 32 and adds its own (a device came
+  or went, a controller came or went or its battery is low, the swap file); any program adds one
+  with `mx_notify`. The shell shows them (`mx_notify_read`, `MX_EVENT_NOTIFY`); over a running
+  game only after plan step 5. `MX_EVENT_PAD` tells of a controller's change. The controller ports
+  (SIO2) are watched while a program has them open (`mx_pad_init`), USB and Bluetooth pads always.
+- The swap file (`mx_swap_set`, `mx_swap_info`; the shell only): attached when its device is
+  there, at the boot or when it comes, never waited for. Notifications: created, in use (urgent:
+  do not remove the device), its device removed (urgent: a program whose pages were only in it
+  ends with "its page was in the swap file of a device that was removed"), none set (urgent:
+  MXOS soon runs out of memory).
+- Memory (kernel version 26, plan step 4e): the kernel turns the VM on at its boot. All memory
+  from 1 MiB is its frames; each program's core is a run of them (pinned) and its VM an address
+  space of its own. A program that would take all memory (without VM and without a core heap
+  of its own) is not started.
+- The shell: the program `mc0:/MXOS/SHELL.CFG` names (its path; kernel version 26), else
+  `mc0:/MXOS/MXSHELL.ELF`. It is a role, not a file name: the kernel starts it when nothing else
+  is in front and brings it in front at the home button, and `mx_proc_list` marks it
+  (`MX_PROC_SHELL`; a service `MX_PROC_SERVICE`).
 - Start: the kernel loads the ELF (from `host:`, `usb0:`, `mx4sio0:`, `ata0:`, ...) and runs it in a thread
   at priority 64: one of the kernel's own threads for a `libmxk` program of version 10, which
   uses the kernel's threads, semaphores and interrupt dispatch (`kernel.md`, Interrupts and
   threads); any other ELF (a standalone one on `libmx`, ps2sdk's, an older `libmxk`, a loader
-  such as ps2link) is refused: mxboot or a legacy loader starts those. End: back to the kernel, then the shell (`mc0:/MXOS/MXSHELL.ELF`) if it started
+  such as ps2link) is refused: mxboot or a legacy loader starts those. End: back to the kernel, then the shell (`SHELL.CFG`'s, by default `mc0:/MXOS/MXSHELL.ELF`) if it started
   the program. A `libmxk` program (version 8 on) ends without a restart: the kernel removes its
   threads, semaphores and interrupt handlers, waits for its IOP calls, resets the units and
   empties the caches (`kernel.md`, The end of a program).
@@ -101,12 +126,11 @@ Retail PS2s have 32 MiB; never count on more.
    up) the start-up asks the BIOS nothing (`kernel.md`).
 5. **Leave the TLB and the exception handlers alone.** Interrupt handlers only through `mx_irq_*`
    (`<mx/irq.h>`): the kernel removes those when the program ends, not ones added to the BIOS directly.
-6. **Swap.** Set `mx_vm_config.swap` to a relative name; the shell's shared
-   `<device>/PS2MAX/swap.bin` replaces it. Never truncate or assume its size.
-   With `mc0:/MXOS/SWAP.CFG` (a path, then the size in MiB, 64 by default) the kernel gives
-   every program that one file in place of its own, shared by all address spaces, and the VM
-   uses at most that size: a program that needs more ends with "the swap file is full"
-   (plan phase 3c).
+6. **Swap.** There is one swap file, MXOS's: `mc0:/MXOS/SWAP.CFG` names it (a path, then the
+   size in MiB, 64 by default), shared by all address spaces, and the VM uses at most that size:
+   a program that needs more ends with "the swap file is full" (plan phase 3c). Since kernel
+   version 26 a program's own `mx_vm_config.swap` (and a launch's) is not used; without
+   `SWAP.CFG` VM programs have only the frames. Never truncate or assume its size.
 7. **DMA.** Tags, chains, DMA buffers, thread stacks and interrupt handler data must be core or
    pinned (`mx_vm_lock`, `mx_vm_pin`, `MX_CORE_FN`, `MX_CORE_DATA`, `MX_CORE_BSS`), never plain
    VM: `mx_paddr_of`, `MX_UNCACHED` and `MX_UCAB` of VM that is not pinned end the program with a

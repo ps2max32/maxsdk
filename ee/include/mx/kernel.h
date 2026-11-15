@@ -21,7 +21,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 25
+#define MX_KERNEL_VERSION 26
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -117,6 +117,9 @@ struct mxk_irq_tables {
   const void *intc_entry, *dmac_entry;
 };
 
+struct mx_dev_info;
+struct mx_swap_info;
+struct mx_notify;
 struct mxk_services {
   u32 magic;   /* MX_KERNEL_MAGIC */
   u32 version; /* MX_KERNEL_VERSION of the kernel */
@@ -254,6 +257,16 @@ struct mxk_services {
      proc_shell: 1 when the caller is the shell (the home button is then one
      of its buttons, not the way out: mx_pad_buttons) */
   int (*proc_shell)(void);
+  /* version 26: devices, MXOS's swap file, notifications (<mx/dev.h>,
+     <mx/notify.h>) */
+  int (*dev_list)(struct mx_dev_info *d, int max);
+  u32 (*dev_gen)(void);
+  int (*dev_eject)(const char *name);
+  int (*swap_set)(const char *path, u32 mib);
+  int (*swap_info)(struct mx_swap_info *s);
+  int (*notify)(u32 kind, int urgent, const char *title, const char *text);
+  int (*notify_read)(u32 after_seq, struct mx_notify *n, int max);
+  u32 (*notify_seq)(void);
 };
 int mx__iop_write_phys(u32 iop, u32 src, u32 size);
 /* the kernel's own writer of the CRTC timing, used by mx_video_set in it

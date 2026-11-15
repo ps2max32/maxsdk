@@ -17,11 +17,17 @@ enum {
   MX_PROC_BESIDE = 2,  /* goes on beside it (mx_loader_launch_beside) */
   MX_PROC_WAITING = 3, /* waits for it to end (mx_loader_launch) */
 };
+/* kernel version 26: mx_proc_info.flags, its roles (from the card's
+   configuration: the shell's path, SERVICES.CFG) */
+enum {
+  MX_PROC_SHELL = 1,   /* the kernel's shell */
+  MX_PROC_SERVICE = 2, /* a service (mx_proc_service) */
+};
 
 struct mx_proc_info {
   u8 id;        /* the process (1-255) */
   u8 state;     /* MX_PROC_* */
-  u16 pad;
+  u16 flags;    /* MX_PROC_SHELL, MX_PROC_SERVICE (kernel version 26; 0 before) */
   u32 core_lo;  /* its core: physical, 0 when at the kernel's default place */
   u32 core_hi;
   char name[48]; /* the path it was started from, cut to fit */
@@ -67,6 +73,15 @@ enum {
      is now paused; this process (the shell) is in front. mx_proc_front(proc)
      brings it back, mx_proc_kill(proc, status) ends it. */
   MX_EVENT_HOME = 2,
+  /* kernel version 26, hints (read the state again; while a process is not
+     in front they are coalesced): a device came or went (<mx/dev.h>;
+     status: mx_dev_gen), a notification was added or changed
+     (<mx/notify.h>; status: mx_notify_seq) */
+  MX_EVENT_DEVICE = 3,
+  MX_EVENT_NOTIFY = 4,
+  /* a controller came or went, or its battery runs low (status: a counter
+     of such changes) */
+  MX_EVENT_PAD = 5,
 };
 struct mx_event {
   u32 type; /* MX_EVENT_* */

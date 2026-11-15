@@ -7,6 +7,11 @@
 #include <mx/string.h>
 #include <mx/vm.h>
 
+/* a VM smaller than the window, so that its top is outside the VM in use
+   (with MXOS's swap file a program gets 128 MiB, the whole window, when it
+   does not say: kernel version 26) */
+const struct mx_vm_config mx_vm_config = {.size = 16u << 20};
+
 __attribute__((noinline)) static int level2(int note) {
   if (note)
     *(volatile u32 *)(uintptr_t)(MX_VM_LIMIT - 64) = 1;
