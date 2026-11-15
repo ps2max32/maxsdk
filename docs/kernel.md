@@ -153,6 +153,36 @@ version 14) set it for itself and stopped it at its end, so the other's sleepers
 woken. Since version 19 it is one of the kernel's software timers (below). A program's arguments are copied into its own memory at its
 start: the kernel's are the next program's once it starts another.
 
+Version 25 (mx OS plan step 4d, 2026-11-15): `proc_shell`, and the home button brings the shell in
+front. When the shell (the program the kernel started as its shell, `exec_shell_next`) waits for the
+program in front or runs beside it (`mx_proc_spawn`), `home_run` (`ee/home.c`, at the program's
+frame boundary, where the kernel's menu would open) asks the command thread for the shell in front
+(`kproc_front_home`): the program is paused as by `proc_front`, and once the switch is done the
+shell gets `MX_EVENT_HOME` with the paused process (sent after the switch: a shell beside that got
+it before found the game still in front). Until the home button is let go the shell sees no buttons
+(`home_hold`, in its kernel state, after the switch); with the shell in front the home button is the
+shell's, without the kernel's menu, and `mx_pad_buttons` does not end the shell at it (`proc_shell`:
+1 for the shell, in front or beside). `proc_kill` of a process that waits or is paused
+(`kproc_front_kill`) brings it in front and ends it there; the caller is paused meanwhile and in
+front again after that end, and a parent gets `MX_EVENT_END` also for a child that came in front by
+such a switch. Front requests are numbered (`front_request`), and after each switch every waiting
+caller is woken and looks whether its own is done: with one caller to wake, a request made while
+another's caller was paused took its wake-up, and that program never came back. A switch closes no
+pad ports, so the one brought back reads its pads as it left them; only when a program's end closed
+the ports meanwhile (`pads_close`, counted) does it open them again at its next `mx_pad_init`. Its
+video mode is set again at the switch (`home_video_again`, pulled forward from step 5): the kernel
+keeps the timing a process last set (`kvideo_crtc_set` copies it, `home_crtc_seen`) and its display
+registers with the rest of its kernel state, and writes both when it is in front again; so a shell
+in 1080i and a game in 576i each get their own mode at home and resume. Not yet at a child's end
+(the parent sets its mode itself, as before), and the GS memory is not kept (step 5). Without a
+shell that waits (a host's program, MXSHELL's `mx_loader_launch` today) the kernel's menu opens as
+before. `tests/ps2/k50_home.c` is the shell and the game in one: on PCSX2 the emulator kernel built
+with `MODULE_DIR=host:` starts `host:MXSHELL.ELF` from `host:mxload.txt` as its shell (`poll`:
+without the frame pipeline, which stalls on PCSX2). The game presses the home button with a line
+`@@PAD <hex buttons> <ms>`, which only a test build of the kernel turns into a pad's buttons (a hook
+kept out of the kernel); on the PS2 such a build also starts the test as its shell, and it passes
+there with the frame pipeline, about 5 s a step to watch the mode switches on a TV.
+
 Version 15: `proc_events` (`mx_proc_events`): the kernel's events to a port of the process
 (`kmsg.c`; up to 4 processes have one). An event is a message without a sender (`from` 0):
 the kernel puts it in a free slot without waiting (`kmsg_post`, from the command thread; it

@@ -169,7 +169,12 @@ from an interrupt); `mx_timer_claim` lends a whole EE timer for a clock of its o
 Provided for every program: the home button (`MX_PAD_HOME`: a USB pad's PS button; on a SIO2 pad
 Select + Start + L1 + R1 held together, which the program then gets as the home button, not as
 those four) opens the kernel's home menu (resume, the pad's settings, quit) for a `libmxk`
-program on maxsdk's frame pipeline, else it ends it (`mx_pad`). It is the system's: any pad's
+program on maxsdk's frame pipeline, else it ends it (`mx_pad`). Since kernel version 25, when the
+shell started the program (and waits for it or runs beside it, `mx_proc_spawn`), the home button
+brings the shell in front instead: the program is paused at its frame boundary and the shell gets
+`MX_EVENT_HOME`; it brings the program back with `mx_proc_front` or ends it with `mx_proc_kill`.
+With the shell in front the home button is the shell's: it does not end the shell. Each gets its
+own video mode back at these switches; what it drew in GS memory is not kept. It is the system's: any pad's
 home button reaches whichever port a program reads. L3 + R3 toggles libgl's counters, off by
 default. Do not bind these.
 

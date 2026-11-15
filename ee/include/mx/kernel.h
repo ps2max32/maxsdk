@@ -21,7 +21,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 24
+#define MX_KERNEL_VERSION 25
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -249,6 +249,11 @@ struct mxk_services {
   /* version 24: another process in front, the one there paused (mx OS plan
      step 4d, <mx/proc.h>) */
   int (*proc_front)(int id);
+  /* version 25: the home button brings the shell in front when it waits or
+     runs beside (MX_EVENT_HOME), proc_kill ends one that waits or is paused;
+     proc_shell: 1 when the caller is the shell (the home button is then one
+     of its buttons, not the way out: mx_pad_buttons) */
+  int (*proc_shell)(void);
 };
 int mx__iop_write_phys(u32 iop, u32 src, u32 size);
 /* the kernel's own writer of the CRTC timing, used by mx_video_set in it

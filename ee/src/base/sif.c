@@ -1024,10 +1024,18 @@ static volatile int fio_owner;
 
 extern const int mx__kernel_self __attribute__((weak));
 
+extern int mx__threads_started __attribute__((weak)); /* thread.c */
+
 static int fio_locks(void) {
   u32 st = mx_status();
   if (fio_nolock || !(st & (1u << 16)) || (st & 6))
     return 0;
+#ifndef MX_KERNEL
+  /* a program of its own (libmx) with a second thread: its threads' file
+     calls (mx_printf's tty too) one at a time, as with VM */
+  if (!&mx__kernel_self && &mx__threads_started && mx__threads_started)
+    return 1;
+#endif
   return mx_vm_active() || (&mx__kernel_self && fio_sema >= 0);
 }
 

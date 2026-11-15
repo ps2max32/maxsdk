@@ -221,12 +221,24 @@ int mx_pad_connected(int port) {
   return pad_get(port, &s, 0);
 }
 
+/* the shell (kernel version 25): the home button is one of its buttons */
+static int is_shell(void) {
+#ifdef MX_KERNEL
+  static int known = -1;
+  if (known < 0)
+    known = mx__kernel && mx__kernel->version >= 25 && mx__kernel->proc_shell() == 1;
+  return known;
+#else
+  return 0;
+#endif
+}
+
 u32 mx_pad_buttons(int port) {
   struct mx_pad_state s;
   pad_get(port, &s, 0);
-  /* the way out of any program: back to the loader (the combination itself
-     from a kernel before the home button) */
-  if ((s.buttons & MX_PAD_HOME) || (s.buttons & MX_PAD_QUIT) == MX_PAD_QUIT)
+  /* the way out of any program but the shell: back to the loader (the
+     combination itself from a kernel before the home button) */
+  if (((s.buttons & MX_PAD_HOME) || (s.buttons & MX_PAD_QUIT) == MX_PAD_QUIT) && !is_shell())
     mx_exit(0);
   return s.buttons;
 }

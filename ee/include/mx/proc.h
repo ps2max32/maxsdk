@@ -44,7 +44,9 @@ int mx_proc_spawn(int argc, const char *args, u32 args_len, const char *swap);
 int mx_proc_wait(int id, int *status, int nohang);
 /* End the program in front, as if it called mx_exit(status): 0, or -1 when
    id is not that one, is the caller, or cannot end without a restart. Its
-   end follows soon after: mx_proc_wait for it. */
+   end follows soon after: mx_proc_wait for it. Since kernel version 25 also
+   one that waits or is paused: it is brought in front and ended there, the
+   caller paused meanwhile (it comes back when that one has ended). */
 int mx_proc_kill(int id, int status);
 /* Kernel version 24 (mx OS plan step 4d): process id (one that waits or runs
    beside, not the service) in front. The program in front until now is
@@ -61,6 +63,10 @@ int mx_proc_front(int id);
    event that finds the kernel's message slots full is dropped. */
 enum {
   MX_EVENT_END = 1, /* a program it started ended: proc, its exit status */
+  /* kernel version 25: the home button was pressed in process proc, which
+     is now paused; this process (the shell) is in front. mx_proc_front(proc)
+     brings it back, mx_proc_kill(proc, status) ends it. */
+  MX_EVENT_HOME = 2,
 };
 struct mx_event {
   u32 type; /* MX_EVENT_* */

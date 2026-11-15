@@ -53,6 +53,11 @@ static void entry(void *p) {
   mx_bios_exit_thread();
 }
 
+/* a thread of its own started: sif.c's file calls take their lock from then
+   on (a program without VM and kernel had none, and two threads' file calls
+   ran into each other: a movie's reader hung beside mx_printf) */
+int mx__threads_started;
+
 int mx_thread_start(void (*fn)(void *), void *arg, void *stack, u32 bytes, int prio) {
   /* a stack in VM would page-fault where nothing can wait (the kernel's
      thread switch, the VM's own fault path): core only */
@@ -81,6 +86,7 @@ int mx_thread_start(void (*fn)(void *), void *arg, void *stack, u32 bytes, int p
   if (id < 0 || id >= MAX_THREADS)
     return -1;
   started[id] = s;
+  mx__threads_started = 1;
   if (mx_bios_start_thread(id, s) < 0)
     return -1;
   return id;
