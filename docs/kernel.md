@@ -197,7 +197,12 @@ list after the boot is taken as it is), adds notifications, tells swap.c and pos
 paused, and not while one of the same type is still queued for it). Twice a second the command
 thread also looks at the controllers (`pad_watch`, `ee/pad.c`): mxpad's records (kind, cable,
 battery) and the SIO2 ports while a program has them open; a change is a notification and
-`MX_EVENT_PAD`. The notifications are a ring of 32 in `.padarea`, written through the uncached
+`MX_EVENT_PAD`. A SIO2 port's change counts when two checks in a row see it, and for 3 s after a
+switch between processes or the ports opened or closed the state is taken without a word
+(`pad_watch_quiet`): a port reads as empty for a moment then, which looked like a pad that went
+and came at every home press. Events are hints in the order the kernel posts them, not tied to a
+waiter: a process's `MX_EVENT_END` of a killed child can come before the thread that waits for
+it is ready, so a thread that drains the event port keeps END and HOME per process. The notifications are a ring of 32 in `.padarea`, written through the uncached
 alias (programs may not write there), each with an id, a seq that changes when it changes (an
 urgent one resolved, `knotify_resolve`), the seconds since the boot, kind, urgent, action
 (`MX_NOTIFY_ACTION_*`: the shell's page to open), the source (the program's file name, "" for
