@@ -153,9 +153,32 @@ version 14) set it for itself and stopped it at its end, so the other's sleepers
 woken. Since version 19 it is one of the kernel's software timers (below). A program's arguments are copied into its own memory at its
 start: the kernel's are the next program's once it starts another.
 
+Version 27 (2026-11-15): the settings store (`apps/mxos/ee/settings.c`, `<mx/setting.h>`).
+One store of the system's settings, keys with dots and text values (key up to 31 bytes, value up
+to 63; 64 of them), in place of the card's separate files: `mc0:/MXOS/SETTINGS.DAT` and
+`SETTINGS.NEW`, a text file ("MXOS settings 1", "seq=N", "key=value" lines, "end") written as
+two copies in turn: a write goes to the one that is not the newest, so a power cut while
+writing leaves the other complete, and at the boot the complete one with the higher seq wins.
+The kernel reads it at its first start (with the loader's IOP, which reads the card) and keeps
+it in `.padarea`, with a magic and its directory, through its restarts (its `.bss` is cleared
+then; `.padarea` is read-only through the TLB, so the store and its file buffer are used through
+the uncached alias); the command thread writes it 3 s after
+the last change (`settings_tick`, from `dev_now`). Without a store the old files are imported
+once: `IPCONFIG.DAT` (`net.ip`, `net.mask`, `net.gw`), `SWAP.CFG` (`swap.path`, `swap.size`),
+`SHELL.CFG` (`shell.path`), `SERVICES.CFG` (`service`); they are not read again after that. The
+kernel's keys: those, `storage.mx4sio` (`on`: `mx4sio_bd` loaded at the boot) and `pad.swap_ports`,
+`pad.swap_xo` (the home menu's toggles, saved). `mx_setting_get`, `mx_setting_list` (the changes
+after a seq, in their order; a removed key is listed with "") and `mx_setting_seq` for every
+program; `mx_setting_set` for the shell only (-1 for another). A change posts
+`MX_EVENT_SETTING` (status: the store's seq) to every process with events. On PCSX2 the store
+is `host:settings.dat`/`host:settings.new`, and a test run's `host:swap.txt`, `host:shell.txt`,
+`host:services.txt` are imported at every boot (a missing one removes its key).
+`tests/ps2/k52_settings.c`: as the shell `set` (get, set, remove, the event, the limits) and,
+after a new boot, `check` (read back from the file); `noshell` (set refused).
+
 Version 26 (mx OS plan step 4e, 2026-11-15): the shell is a role of the card's configuration.
-`mc0:/MXOS/SHELL.CFG` (on PCSX2 `host:shell.txt`) names its path (`shell_path`, `ee/main.c`, read
-once when the card is there); without it the shell is `MXSHELL.ELF` in the kernel's directory, as
+`mc0:/MXOS/SHELL.CFG` (on PCSX2 `host:shell.txt`) names its path (`shell_path`, `ee/main.c`; since
+version 27 the setting `shell.path`); without it the shell is `MXSHELL.ELF` in the kernel's directory, as
 before. The process table keeps the roles (`ptab_shell`, `ptab_service`) and `mx_proc_list` gives
 them in `flags` (`MX_PROC_SHELL`, `MX_PROC_SERVICE`; the field was padding, 0 before). mxlink's app
 finds the shell by that flag on this kernel, by the file's name on an older one. `k50_home` checks
@@ -173,7 +196,7 @@ a swap file or the frames without. The writer and the pager are threads of the k
 with VM waited (phase 3a), for every program (`VM_KEPT`): each program's core is pinned frames
 (`core_place`), its VM a space (`kvm_init`), and its end gives both back (`kvm_front_gone`, the
 kernel's space in front again); the VM's vblank hook stays (`end_cleanup`). The swap file is
-MXOS's only (`SWAP.CFG`, opened at the boot or at the first program with VM once the card reads):
+MXOS's only (`SWAP.CFG`, since version 27 `swap.path`; opened at the boot or at the first program with VM once the card reads):
 a program's or a launch's own is not used. A program without VM that would take all memory is
 refused ("takes all memory"); one whose core finds no frames ("no memory for its core"). A page
 fault on a thread whose stack is in the kernel's memory (from 0x80000) is served too (`to_thread`:
@@ -278,8 +301,8 @@ would have come next (the shell; on PCSX2 `host:mxload.txt`'s). When that one en
 service is not unparked: the end is cleaned up as usual, the service gets `MX_EVENT_END`, and
 the next program in front starts (the shell) unless the service starts one (its
 `mx_proc_spawn` starts a program in front when none runs; -1 while one does). At the boot,
-and after a restart, the kernel starts the service in `mc0:/MXOS/SERVICES.CFG` (a path and
-its arguments; on PCSX2 `host:services.txt`, the runner's `MXSERVICE`) in place of the shell.
+and after a restart, the kernel starts the service in `mc0:/MXOS/SERVICES.CFG` (since version 27 the
+setting `service`; a path and its arguments; on PCSX2 `host:services.txt`, the runner's `MXSERVICE`) in place of the shell.
 With a service beside, the kernel prints no test end marker: it is the service's (2e-4:
 mxlink's, for the host's runs).
 Since 2026-11-12 the parked programs are a stack of two (`exec.c`'s `parks`, `end.c`'s
@@ -330,7 +353,7 @@ is parked: `k40_frame` and `k41_present` have a core heap for that.
 
 One swap file for MXOS (2026-11-12, plan phase 3c; `apps/mxos/ee/main.c`'s `kswap_path`):
 `mc0:/MXOS/SWAP.CFG` (on PCSX2 `host:swap.txt`) names it and, optionally, its size in MiB (64 by
-default); read once, when the card is ready. A program whose launch gave no swap file gets it
+default); since version 27 the settings `swap.path` and `swap.size`. A program whose launch gave no swap file gets it
 (`largs.swap`, in place of its `mx_vm_config.swap`), and the kernel tells vm.c the size before
 the program's `mx_vm_init` (`mx__vm_swap_size`). The VM's slots are a bitmap up to that size
 (at most 256 MiB): a space's go back when it is freed, so the file does not grow with each

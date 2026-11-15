@@ -21,7 +21,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 26
+#define MX_KERNEL_VERSION 27
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -120,6 +120,7 @@ struct mxk_irq_tables {
 struct mx_dev_info;
 struct mx_swap_info;
 struct mx_notify;
+struct mx_setting;
 struct mxk_services {
   u32 magic;   /* MX_KERNEL_MAGIC */
   u32 version; /* MX_KERNEL_VERSION of the kernel */
@@ -267,6 +268,12 @@ struct mxk_services {
   int (*notify)(u32 kind, int urgent, const char *title, const char *text);
   int (*notify_read)(u32 after_seq, struct mx_notify *n, int max);
   u32 (*notify_seq)(void);
+  /* version 27: the system's settings (<mx/setting.h>); setting_set the
+     shell's only */
+  int (*setting_get)(const char *key, char *value, u32 size);
+  int (*setting_set)(const char *key, const char *value);
+  int (*setting_list)(u32 after_seq, struct mx_setting *s, int max);
+  u32 (*setting_seq)(void);
 };
 int mx__iop_write_phys(u32 iop, u32 src, u32 size);
 /* the kernel's own writer of the CRTC timing, used by mx_video_set in it

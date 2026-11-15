@@ -9,6 +9,7 @@
 #include <mx/log.h>
 #include <mx/msg.h>
 #include <mx/proc.h>
+#include <mx/setting.h>
 
 #ifdef MX_KERNEL
 #define HAS(v, f)                                                                          \
@@ -81,6 +82,24 @@ u32 mx_notify_seq(void) {
 #ifdef MX_KERNEL
   if (HAS(26, notify_seq))
     return mx__kernel->notify_seq();
+#endif
+  return 0;
+}
+
+int mx_setting_get(const char *key, char *value, u32 size) {
+  return CALLV(27, setting_get, (key, value, size));
+}
+int mx_setting_set(const char *key, const char *value) {
+  return CALLV(27, setting_set, (key, value));
+}
+int mx_setting_list(u32 after_seq, struct mx_setting *s, int max) {
+  int n = CALLV(27, setting_list, (after_seq, s, max));
+  return n < 0 ? 0 : n;
+}
+u32 mx_setting_seq(void) {
+#ifdef MX_KERNEL
+  if (HAS(27, setting_seq))
+    return mx__kernel->setting_seq();
 #endif
   return 0;
 }

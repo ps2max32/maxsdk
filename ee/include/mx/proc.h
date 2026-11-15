@@ -82,6 +82,9 @@ enum {
   /* a controller came or went, or its battery runs low (status: a counter
      of such changes) */
   MX_EVENT_PAD = 5,
+  /* kernel version 27: a setting changed (<mx/setting.h>; status:
+     mx_setting_seq; mx_setting_list(seq seen before) says which) */
+  MX_EVENT_SETTING = 6,
 };
 struct mx_event {
   u32 type; /* MX_EVENT_* */

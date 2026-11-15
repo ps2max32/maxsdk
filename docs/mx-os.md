@@ -31,6 +31,13 @@ memory: [vm.md](vm.md). Where it goes (a game OS): [mx-os-plan.md](mx-os-plan.md
 - Consoles: the kernel knows two (ROM 2.00, a SCPH-70004; ROM 2.20, a SCPH-90006: `kernel.md`,
   "Other consoles"). On those it sets the video modes itself, 576p (`mx_video_576p`) among them;
   on another a mode is the BIOS's or fails (`mx_video_set` returns -1: set another one). Run `examples/display` on each console the kernel is brought to.
+- Settings (kernel version 27, `<mx/setting.h>`): one store of the system's settings,
+  `mc0:/MXOS/SETTINGS.DAT` (keys such as `net.ip`, `swap.path`, `shell.path`, `service`,
+  `storage.mx4sio`, `pad.swap_xo`, `video.mode`; values are text). Any program reads them
+  (`mx_setting_get`, `mx_setting_list`); only the shell changes them (`mx_setting_set`), and every
+  process with events gets `MX_EVENT_SETTING`. The kernel writes the file a few seconds after the
+  last change. The files below (`SERVICES.CFG`, `SHELL.CFG`, `SWAP.CFG`, `IPCONFIG.DAT`) are only
+  imported once, when there is no store yet.
 - Services: the kernel starts the program `mc0:/MXOS/SERVICES.CFG` names (a path and its
   arguments) at the boot and after a restart; it stays beside every program in front
   (`mx_proc_service`, kernel version 18). The host link is one (kernel version 20):
@@ -40,7 +47,7 @@ memory: [vm.md](vm.md). Where it goes (a game OS): [mx-os-plan.md](mx-os-plan.md
 - Devices (kernel version 26, `<mx/dev.h>`): the kernel loads the storage drivers at its boot
   (bdm, its FAT/exFAT file system, USB drives, the HDD) and keeps them; a program never loads a
   storage IRX. MX4SIO is off: it shares slot 2 with a memory card and keeps the card from being
-  seen (a setting turns it on later). Devices come and go at any time: `mx_dev_list` (name,
+  seen (the setting `storage.mx4sio` = `on` loads it at the next boot). Devices come and go at any time: `mx_dev_list` (name,
   kind, present, file system, size, free, flags `MX_DEV_SWAP`, `MX_DEV_BUSY`), `mx_dev_gen`,
   `mx_dev_eject` (refused while the swap file or open files are on it), and the hint
   `MX_EVENT_DEVICE` to every process with `mx_proc_events`. Free space of FAT and exFAT is not
@@ -59,7 +66,7 @@ memory: [vm.md](vm.md). Where it goes (a game OS): [mx-os-plan.md](mx-os-plan.md
   from 1 MiB is its frames; each program's core is a run of them (pinned) and its VM an address
   space of its own. A program that would take all memory (without VM and without a core heap
   of its own) is not started.
-- The shell: the program `mc0:/MXOS/SHELL.CFG` names (its path; kernel version 26), else
+- The shell: the program the setting `shell.path` names (kernel version 27; before, `SHELL.CFG`), else
   `mc0:/MXOS/MXSHELL.ELF`. It is a role, not a file name: the kernel starts it when nothing else
   is in front and brings it in front at the home button, and `mx_proc_list` marks it
   (`MX_PROC_SHELL`; a service `MX_PROC_SERVICE`).
@@ -126,11 +133,11 @@ Retail PS2s have 32 MiB; never count on more.
    up) the start-up asks the BIOS nothing (`kernel.md`).
 5. **Leave the TLB and the exception handlers alone.** Interrupt handlers only through `mx_irq_*`
    (`<mx/irq.h>`): the kernel removes those when the program ends, not ones added to the BIOS directly.
-6. **Swap.** There is one swap file, MXOS's: `mc0:/MXOS/SWAP.CFG` names it (a path, then the
-   size in MiB, 64 by default), shared by all address spaces, and the VM uses at most that size:
+6. **Swap.** There is one swap file, MXOS's: the settings `swap.path` and `swap.size` (MiB, 64 by
+   default; before kernel version 27 `mc0:/MXOS/SWAP.CFG`) name it, shared by all address spaces, and the VM uses at most that size:
    a program that needs more ends with "the swap file is full" (plan phase 3c). Since kernel
    version 26 a program's own `mx_vm_config.swap` (and a launch's) is not used; without
-   `SWAP.CFG` VM programs have only the frames. Never truncate or assume its size.
+   it VM programs have only the frames. Never truncate or assume its size.
 7. **DMA.** Tags, chains, DMA buffers, thread stacks and interrupt handler data must be core or
    pinned (`mx_vm_lock`, `mx_vm_pin`, `MX_CORE_FN`, `MX_CORE_DATA`, `MX_CORE_BSS`), never plain
    VM: `mx_paddr_of`, `MX_UNCACHED` and `MX_UCAB` of VM that is not pinned end the program with a
