@@ -391,6 +391,10 @@ struct mx_movie *mx_movie_open(const char *path, u32 flags) {
     m->chunk[i] = m->chunk[0] + i * READ;
   if (m->is_ps)
     m->info.duration_ms = tail_pts(m);
+  /* mxsnd before the reader: its start loads IOP modules through the file
+     server, which a standalone program (libmx without VM) does not share
+     between threads */
+  int snd = m->want_sound ? mx_snd_init() : -1;
   if (reader_start(m) < 0)
     goto fail;
 
@@ -431,7 +435,7 @@ struct mx_movie *mx_movie_open(const char *path, u32 flags) {
     m->info.predicted = 1;
   }
   /* sound, if the file's start had samples */
-  if (m->want_sound && m->rate && mx_snd_init() == 0 && mx_snd_stream_format(m->rate, 16, 2) == 0)
+  if (m->want_sound && m->rate && snd == 0 && mx_snd_stream_format(m->rate, 16, 2) == 0)
     m->info.sound = 1;
   else
     m->want_sound = 0;
@@ -463,8 +467,11 @@ static int reader_start(struct mx_movie *m) {
     return -1;
   m->next = 0;
   /* above the caller's priority: a read is asked for as soon as the one
-     before is done; the thread sleeps while the IOP works */
-  m->thread = mx_thread_start(reader, m, m->stack, 16384, mx_thread_prio(mx_thread_self()) - 1);
+     before is done; the thread sleeps while the IOP works. A thread's
+     priority is 1 at the highest: a standalone program's main thread has 0,
+     and its reader then 1 */
+  int prio = mx_thread_prio(mx_thread_self()) - 1;
+  m->thread = mx_thread_start(reader, m, m->stack, 16384, prio < 1 ? 1 : prio);
   return m->thread < 0 ? -1 : 0;
 }
 
