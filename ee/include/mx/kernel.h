@@ -21,7 +21,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 27
+#define MX_KERNEL_VERSION 28
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -121,6 +121,9 @@ struct mx_dev_info;
 struct mx_swap_info;
 struct mx_notify;
 struct mx_setting;
+struct mx_pad_info;
+struct mx_pad_pairing;
+struct mx_pad_paired;
 struct mxk_services {
   u32 magic;   /* MX_KERNEL_MAGIC */
   u32 version; /* MX_KERNEL_VERSION of the kernel */
@@ -274,6 +277,15 @@ struct mxk_services {
   int (*setting_set)(const char *key, const char *value);
   int (*setting_list)(u32 after_seq, struct mx_setting *s, int max);
   u32 (*setting_seq)(void);
+  /* version 28: the controllers for the shell (<mx/pad.h>); disconnect, pair
+     and forget the shell's only */
+  int (*pad_info)(int port, struct mx_pad_info *i);
+  int (*pad_disconnect)(int port);
+  int (*pad_pair)(u32 seconds);
+  int (*pad_pair_state)(struct mx_pad_pairing *p);
+  int (*pad_paired)(struct mx_pad_paired *p, int max);
+  int (*pad_forget)(u32 id);
+  u32 (*pad_gen)(void);
 };
 int mx__iop_write_phys(u32 iop, u32 src, u32 size);
 /* the kernel's own writer of the CRTC timing, used by mx_video_set in it

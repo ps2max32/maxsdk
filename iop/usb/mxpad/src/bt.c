@@ -316,6 +316,33 @@ void bt_new_key(const u8 addr[6], u8 key[16]) {
   key_put(addr, key, MXPAD_DS4);
 }
 
+int bt_drop(const u8 addr[6]);
+static int connected_addr(const u8 *addr);
+
+int bt_paired(struct mxpad_paired *out, int max) {
+  int n = 0;
+  for (int i = 0; i < KEYS && n < max; i++)
+    if (keys[i].used) {
+      memcpy(out[n].addr, keys[i].addr, 6);
+      out[n].kind = keys[i].kind;
+      out[n].connected = (u8)connected_addr(keys[i].addr);
+      n++;
+    }
+  return n;
+}
+
+int bt_forget(const u8 addr[6]) {
+  int i = key_find(addr);
+  if (i < 0)
+    return -1;
+  keys[i].used = 0;
+  bt_drop(addr);
+  keys_dirty = 1;
+  if (bt.used && !bt.gone)
+    SignalSema(bt.sema); /* the thread writes the card */
+  return 0;
+}
+
 int bt_host(u8 addr[6]) {
   if (!bt.used || bt.gone || !bt.ready)
     return 0;
@@ -363,8 +390,28 @@ static volatile int pair_kick;
 static int inquiring, pair_connecting;
 static u8 pair_addr[6];
 
+/* MXPAD_PAIR_STATE */
+static struct mxpad_pairing pstate;
+static void pair_set(u32 state, const u8 *addr, int kind) {
+  pstate.state = state, pstate.seq++;
+  if (addr)
+    memcpy(pstate.addr, addr, 6), pstate.kind = (u8)kind;
+}
+void bt_pair_state(struct mxpad_pairing *out) {
+  *out = pstate;
+  if (pstate.state == MXPAD_PAIR_IDLE && (!bt.used || bt.gone))
+    out->state = MXPAD_PAIR_NO_DONGLE;
+}
+void bt_pair_note(const u8 addr[6], int kind, int state) { pair_set((u32)state, addr, kind); }
+
 void bt_pair(u32 seconds) {
   pair_rounds = (seconds + 4) / 5;
+  if (!seconds) {
+    if (pstate.state == MXPAD_PAIR_SEARCHING)
+      pair_set(MXPAD_PAIR_IDLE, 0, 0);
+    return; /* stopped: an inquiry under way ends by itself */
+  }
+  pair_set(bt.used && !bt.gone ? MXPAD_PAIR_SEARCHING : MXPAD_PAIR_NO_DONGLE, 0, 0);
   pair_kick = 1;
   if (bt.used && !bt.gone)
     SignalSema(bt.sema);
@@ -392,6 +439,7 @@ static void found(const u8 *addr, u8 psrm, u32 cls, u16 clock) {
   LOG("pad in pairing mode: %s: connecting\n", a);
   pair_connecting = 1;
   memcpy(pair_addr, addr, 6);
+  pair_set(MXPAD_PAIR_CONNECTING, addr, 0);
   if (inquiring)
     cmd(OP_INQUIRY_CANCEL, 0, 0);
   u8 par[13];
@@ -430,6 +478,13 @@ static void conn_open(u16 handle, const u8 *addr) {
   }
   if (c->kind == MXPAD_DS4 || c->kind == MXPAD_DS5)
     open_channel(c, PSM_CTRL, CID_CTRL); /* they wait for the host to open them */
+}
+
+static int connected_addr(const u8 *addr) {
+  for (int i = 0; i < CONNS; i++)
+    if (conns[i].used && !memcmp(conns[i].addr, addr, 6))
+      return 1;
+  return 0;
 }
 
 static struct conn *conn_of_addr(const u8 *addr) {
@@ -471,7 +526,7 @@ static void drop(void) {
   for (int i = 0; i < CONNS; i++)
     if (conns[i].used && !memcmp(conns[i].addr, drop_addr, 6)) {
       u8 par[3] = {(u8)conns[i].handle, (u8)(conns[i].handle >> 8), 0x13}; /* remote user terminated */
-      LOG("slot %d: the pad is on USB now: its link goes\n", conns[i].slot);
+      LOG("slot %d: its link goes\n", conns[i].slot);
       cmd(0x0406, par, 3); /* Disconnect */
       conn_close(conns[i].handle);
     }
@@ -868,8 +923,10 @@ static void event(const u8 *e, u32 n) {
       LOG("command %04x: status %02x\n", p[2] | p[3] << 8, p[0]);
     if (p[0] && (p[2] | p[3] << 8) == OP_INQUIRY)
       inquiring = 0;
-    if (p[0] && (p[2] | p[3] << 8) == OP_CREATE_CONN)
+    if (p[0] && (p[2] | p[3] << 8) == OP_CREATE_CONN) {
       pair_connecting = 0;
+      pair_set(MXPAD_PAIR_FAILED, 0, 0);
+    }
     break;
   case 0x04: { /* Connection Request: accept, we become master */
     addr_str(p, a);
@@ -885,6 +942,7 @@ static void event(const u8 *e, u32 n) {
     LOG("connected %s: status %02x, handle %03x, encryption %u\n", a, p[0], (p[1] | p[2] << 8) & 0xfff, p[10]);
     if (p[0] && pair_connecting && !memcmp(p + 3, pair_addr, 6)) {
       pair_connecting = 0; /* failed: look again */
+      pair_set(pair_rounds ? MXPAD_PAIR_SEARCHING : MXPAD_PAIR_FAILED, 0, 0);
       inquiry_next();
     }
     if (!p[0])
@@ -917,6 +975,8 @@ static void event(const u8 *e, u32 n) {
   }
   case 0x01: /* Inquiry Complete */
     inquiring = 0;
+    if (!pair_rounds && !pair_connecting && pstate.state == MXPAD_PAIR_SEARCHING)
+      pair_set(MXPAD_PAIR_NOT_FOUND, 0, 0);
     inquiry_next();
     break;
   case 0x02: /* Inquiry Result: address, psrm, 2 reserved, class, clock offset */
@@ -970,6 +1030,8 @@ static void event(const u8 *e, u32 n) {
     u16 h = (u16)((p[1] | p[2] << 8) & 0xfff);
     struct conn *c = conn_of(h);
     LOG("authentication: handle %03x, status %02x\n", h, p[0]);
+    if (c && c->pairing && p[0])
+      pair_set(MXPAD_PAIR_FAILED, c->addr, c->kind);
     if (c && c->pairing && !p[0]) {
       u8 par[3] = {(u8)h, (u8)(h >> 8), 0x01};
       cmd(OP_SET_ENCRYPTION, par, 3);
@@ -982,6 +1044,7 @@ static void event(const u8 *e, u32 n) {
     LOG("encryption: handle %03x, status %02x, on %u\n", h, p[0], p[3]);
     if (c && c->pairing && !p[0] && p[3]) {
       c->pairing = 0, pair_connecting = 0, pair_rounds = 0;
+      pair_set(MXPAD_PAIR_DONE, c->addr, c->kind);
       LOG("paired: opening its channels\n");
       open_channel(c, PSM_CTRL, CID_CTRL);
     }

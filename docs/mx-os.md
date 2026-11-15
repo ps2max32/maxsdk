@@ -52,6 +52,11 @@ memory: [vm.md](vm.md). Where it goes (a game OS): [mx-os-plan.md](mx-os-plan.md
   `mx_dev_eject` (refused while the swap file or open files are on it), and the hint
   `MX_EVENT_DEVICE` to every process with `mx_proc_events`. Free space of FAT and exFAT is not
   known yet (0).
+- Controllers (kernel version 28, `<mx/pad.h>`): `mx_pad_info` (kind, link, battery, charging,
+  light colour, id) for each of `MX_PAD_PORTS`, `mx_pad_gen` and `MX_EVENT_PAD` on a change,
+  the Bluetooth pairings (`mx_pad_paired`, `mx_pad_pair_state`); the shell pairs, forgets and
+  turns pads off (`mx_pad_pair`, `mx_pad_forget`, `mx_pad_disconnect`). Settings: `pad.idle_off`
+  (minutes), `pad.brightness` (0..100), `pad.<id>.colour` (`rrggbb`).
 - Notifications (`<mx/notify.h>`): the kernel keeps the last 32 and adds its own (a device came
   or went, a controller came or went or its battery is low, the swap file); any program adds one
   with `mx_notify`. The shell shows them (`mx_notify_read`, `MX_EVENT_NOTIFY`); over a running

@@ -30,8 +30,8 @@ u8 mxpad_ds5_lights(int slot);
 void bt_known(const u8 addr[6], int kind);
 /* bt.c: the kind of a pad with a key (bt_new_key keeps a DS4's) */
 void bt_kind(const u8 addr[6], int kind);
-/* bt.c: the pad at addr came on USB: its Bluetooth link goes (its slot is
-   freed at once); 1 if it had one */
+/* bt.c: the Bluetooth link of the pad at addr goes (it came on USB, or
+   MXPAD_DISCONNECT; its slot is freed at once); 1 if it had one */
 int bt_drop(const u8 addr[6]);
 /* bt.c: rumble and light of the Bluetooth pad in a slot (MXPAD_OUTPUT; rgb
    all 0: the slot's colour) */
@@ -41,5 +41,14 @@ void bt_relight(int slot);
 /* bt.c: for the given seconds, a pad in pairing mode that is not paired yet
    is looked for, paired and connected (MXPAD_PAIR) */
 void bt_pair(u32 seconds);
+/* bt.c: the pairings (MXPAD_PAIRED): how many into out; one taken out and
+   its link ended (MXPAD_FORGET): 0, or -1 not paired; the pairing's
+   progress (MXPAD_PAIR_STATE); a pairing over USB's result (mxpad.c) */
+struct mxpad_paired;
+struct mxpad_pairing;
+int bt_paired(struct mxpad_paired *out, int max);
+int bt_forget(const u8 addr[6]);
+void bt_pair_state(struct mxpad_pairing *out);
+void bt_pair_note(const u8 addr[6], int kind, int state);
 
 #endif

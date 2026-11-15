@@ -153,6 +153,27 @@ version 14) set it for itself and stopped it at its end, so the other's sleepers
 woken. Since version 19 it is one of the kernel's software timers (below). A program's arguments are copied into its own memory at its
 start: the kernel's are the next program's once it starts another.
 
+Version 28 (2026-11-15): the controllers for the shell (`apps/mxos/ee/pad.c`, `<mx/pad.h>`,
+`common/include/mxpad.h`). `mx_pad_info` gives every port's pad (`MX_PAD_PORTS`: the two
+controller ports and four USB or Bluetooth pads; -1 past them): kind, link (port, USB,
+Bluetooth), battery, cable, charging, mxpad's slot, the light bar's colour and an id, mxpad's
+`mxpad_id` of its Bluetooth address (FNV-1a), which mxpad.irx now writes in the record (the
+field was `reserved2`) with the new flags `MXPAD_CHARGING` (DS4: on the cable below level 11,
+DualSense: state 1, DS3: 0xEE) and `MXPAD_BT`. `mx_pad_gen` counts every change of these, of a
+SIO2 port and of the pairing (`MX_EVENT_PAD`'s status). The shell only: `mx_pad_disconnect`
+(`MXPAD_DISCONNECT`: the Bluetooth link ends, the pad turns itself off), `mx_pad_pair`
+(`MXPAD_PAIR`, 0 seconds stops) and `mx_pad_forget` (`MXPAD_FORGET`: out of `BTPADS.DAT`, its link
+ended); for every program `mx_pad_pair_state` (`MXPAD_PAIR_STATE`: idle, searching,
+connecting, done, not found, failed, no dongle; a pairing by USB cable is told as done too) and
+`mx_pad_paired` (`MXPAD_PAIRED`). The command thread (`pad_watch`) watches the pairing while it
+runs and for 10 s after a USB pad came (notifications "Controller paired", "Pairing failed"),
+sends each slot's light bar (`MXPAD_COLOURS`: `pad.<id>.colour`, else the player's colour, by
+`pad.brightness`, 25 by default: mxpad's colours before) and turns off a Bluetooth pad on battery
+whose record did not change for `pad.idle_off` minutes. Its calls and the shell's go through two
+SIF clients of their own (`cmd_rpc`, `shell_rpc`), so they never meet a program's rumble on
+the first. mxpad.irx keeps version 1: a kernel before 28 takes it. `tests/ps2/k53_pads.c` prints
+it all and each `MX_EVENT_PAD` while pads are plugged in and out (by hand).
+
 Version 27 (2026-11-15): the settings store (`apps/mxos/ee/settings.c`, `<mx/setting.h>`).
 One store of the system's settings, keys with dots and text values (key up to 31 bytes, value up
 to 63; 64 of them), in place of the card's separate files: `mc0:/MXOS/SETTINGS.DAT` and

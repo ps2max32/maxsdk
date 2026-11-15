@@ -205,16 +205,18 @@ static void shoulders(u8 v, struct mxpad_record *s) {
 static int decode(struct pad *p, const u8 *r, u32 n) {
   struct mxpad_record *s = &p->now;
   struct mxpad_record o = *s;
-  s->buttons = 0, s->flags = 0, s->battery = 255;
+  s->buttons = 0, s->flags = p->bt ? MXPAD_BT : 0, s->battery = 255;
   if (p->kind == MXPAD_DS4 && n >= 39 && r[0] == 0x01) {
     s->lx = r[1], s->ly = r[2], s->rx = r[3], s->ry = r[4];
     face_dpad(r[5], s);
     shoulders(r[6], s);
     s->buttons |= (r[7] & 1 ? MXPAD_PS : 0) | (r[7] & 2 ? MXPAD_TOUCHPAD : 0);
     s->l2 = r[8], s->r2 = r[9];
+    /* on the cable 0..11, 11 full (Linux's hid-playstation) */
     u8 level = r[30] & 15;
     s->battery = level > 10 ? 10 : level;
     s->flags |= r[30] & 0x10 ? MXPAD_CABLE : 0;
+    s->flags |= r[30] & 0x10 && level < 11 ? MXPAD_CHARGING : 0;
     if (!(r[35] & 0x80)) {
       s->flags |= MXPAD_TOUCH;
       s->tx = (u16)(r[36] | (r[37] & 15) << 8), s->ty = (u16)(r[37] >> 4 | r[38] << 4);
@@ -233,6 +235,7 @@ static int decode(struct pad *p, const u8 *r, u32 n) {
     u8 state = r[53] >> 4, level = r[53] & 15;
     s->battery = state == 2 ? 10 : level > 10 ? 10 : level;
     s->flags |= state == 1 || state == 2 ? MXPAD_CABLE : 0;
+    s->flags |= state == 1 ? MXPAD_CHARGING : 0;
   } else if (p->kind == MXPAD_DS3 && n >= 31 && r[0] == 0x01) {
     /* byte 2: Select L3 R3 Start Up Right Down Left; byte 3: L2 R2 L1 R1 Triangle
        Circle Cross Square: <mx/pad.h>'s order, as the SIO2 pad's */
@@ -243,8 +246,9 @@ static int decode(struct pad *p, const u8 *r, u32 n) {
       *s = o; /* sent now and then after an output report */
       return -1;
     }
+    /* 0xEE charging, 0xEF full (Linux's hid-sony) */
     if (r[30] >= 0xee)
-      s->battery = 10, s->flags |= MXPAD_CABLE;
+      s->battery = 10, s->flags |= MXPAD_CABLE | (r[30] == 0xee ? MXPAD_CHARGING : 0);
     else
       s->battery = (u8)(r[30] <= 5 ? r[30] * 2 : 10);
   } else {
@@ -319,6 +323,8 @@ static int interrupt_out(struct pad *p, u32 len) {
 static const u8 player_rgb[4][3] = {{0, 0, 64}, {64, 0, 0}, {0, 64, 0}, {64, 0, 32}};
 static const u8 player_ds5[4] = {0x04, 0x0a, 0x15, 0x1b};
 static u8 slot_player[MXPAD_PADS] = {0, 1, 2, 3};
+/* a slot's own colour (MXPAD_COLOURS; all 0: its player's) */
+static u8 slot_colour[MXPAD_PADS][3];
 
 /* a DS3's LEDs 1-4 (bits 1-4 of its byte), as a PS3 counts: 5 = 4 + 1, ... */
 u8 mxpad_ds3_leds(int slot) {
@@ -410,6 +416,7 @@ static void pair(struct pad *p) {
     return;
   }
   printf("mxpad: slot %d: ", p->slot);
+  bt_pair_note(me, p->kind, r ? MXPAD_PAIR_FAILED : MXPAD_PAIR_DONE);
   if (r) {
     printf("pairing failed (%d)\n", r);
     return;
@@ -512,6 +519,8 @@ static void read_addr(struct pad *p) {
       p->addr[i] = b[9 - i];
     p->has_addr = 1;
   }
+  if (p->has_addr)
+    p->now.id = mxpad_id(p->addr);
 }
 
 static void pad_thread(void *arg) {
@@ -625,7 +634,7 @@ static sceUsbdLddOps driver = {0, 0, "mxpad", probe, connect, disconnect, 0, 0, 
 
 /* ---- the EE's calls ---- */
 
-static u32 rpc_in[16] __attribute__((aligned(16)));
+static u32 rpc_in[32] __attribute__((aligned(16))); /* MXPAD_PAIRED's answer: 4 + 8 x 8 bytes */
 
 static void *rpc(int fn, void *data, int size) {
   u32 *a = data;
@@ -684,6 +693,40 @@ static void *rpc(int fn, void *data, int size) {
     a[0] = 0;
     break;
   }
+  case MXPAD_COLOURS: {
+    const u8 *c = (const u8 *)a;
+    for (int i = 0; i < MXPAD_PADS; i++) {
+      if (!memcmp(slot_colour[i], c + 3 * i, 3))
+        continue;
+      memcpy(slot_colour[i], c + 3 * i, 3);
+      struct pad *p = slot_owner[i] ? &pads[slot_owner[i] - 1] : 0;
+      if (!p || !p->used || p->gone)
+        continue;
+      if (p->bt) {
+        bt_relight(i);
+      } else {
+        p->want = 1;
+        SignalSema(p->work_sema);
+      }
+    }
+    a[0] = 0;
+    break;
+  }
+  case MXPAD_DISCONNECT: {
+    u32 slot = a[0];
+    struct pad *p = slot < MXPAD_PADS && slot_owner[slot] ? &pads[slot_owner[slot] - 1] : 0;
+    a[0] = (u32)(p && p->used && !p->gone && p->bt && bt_drop(p->addr) ? 0 : -1);
+    break;
+  }
+  case MXPAD_PAIRED:
+    a[0] = (u32)bt_paired((struct mxpad_paired *)(a + 1), MXPAD_PAIRED_MAX);
+    break;
+  case MXPAD_FORGET:
+    a[0] = (u32)bt_forget((const u8 *)a);
+    break;
+  case MXPAD_PAIR_STATE:
+    bt_pair_state((struct mxpad_pairing *)a);
+    break;
   default:
     a[0] = (u32)-1;
   }
@@ -730,6 +773,7 @@ int mxpad_open(int kind, const u8 addr[6]) {
     p->used = 1, p->bt = 1, p->kind = kind, p->gen = ++generation & 0x0fffffff;
     p->slot = -1;
     memcpy(p->addr, addr, 6), p->has_addr = 1;
+    p->now.id = mxpad_id(addr);
     p->now.kind = (u8)kind;
     p->now.battery = 255;
     p->now.lx = p->now.ly = p->now.rx = p->now.ry = 128;
@@ -762,5 +806,10 @@ void mxpad_close(int slot) {
 }
 
 void mxpad_slot_rgb(int slot, u8 rgb[3]) {
+  const u8 *c = slot_colour[slot & (MXPAD_PADS - 1)];
+  if (c[0] || c[1] || c[2]) {
+    memcpy(rgb, c, 3);
+    return;
+  }
   memcpy(rgb, player_rgb[slot_player[slot & (MXPAD_PADS - 1)] & 3], 3);
 }

@@ -216,6 +216,28 @@ int mx_pad_rumble(int port, u32 small, u32 big) {
   return mx__kernel->pad_rumble(port, small, big);
 }
 
+/* kernel version 28: the controllers, for the shell */
+#define PAD28(f, args)                                                                       \
+  (mx__kernel && mx__kernel->version >= 28 &&                                                \
+           mx__kernel->size >= __builtin_offsetof(struct mxk_services, f) + sizeof(void *) \
+       ? mx__kernel->f args                                                                  \
+       : -1)
+int mx_pad_info(int port, struct mx_pad_info *i) { return PAD28(pad_info, (port, i)); }
+int mx_pad_disconnect(int port) { return PAD28(pad_disconnect, (port)); }
+int mx_pad_pair(u32 seconds) { return PAD28(pad_pair, (seconds)); }
+int mx_pad_pair_state(struct mx_pad_pairing *p) { return PAD28(pad_pair_state, (p)); }
+int mx_pad_paired(struct mx_pad_paired *p, int max) {
+  int n = PAD28(pad_paired, (p, max));
+  return n < 0 ? 0 : n;
+}
+int mx_pad_forget(u32 id) { return PAD28(pad_forget, (id)); }
+u32 mx_pad_gen(void) {
+  if (!mx__kernel || mx__kernel->version < 28 ||
+      mx__kernel->size < __builtin_offsetof(struct mxk_services, pad_gen) + sizeof(void *))
+    return 0;
+  return mx__kernel->pad_gen();
+}
+
 int mx_pad_connected(int port) {
   struct mx_pad_state s;
   return pad_get(port, &s, 0);
