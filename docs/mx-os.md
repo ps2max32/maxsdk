@@ -142,7 +142,9 @@ Retail PS2s have 32 MiB; never count on more.
    default; before kernel version 27 `mc0:/MXOS/SWAP.CFG`) name it, shared by all address spaces, and the VM uses at most that size:
    a program that needs more ends with "the swap file is full" (plan phase 3c). Since kernel
    version 26 a program's own `mx_vm_config.swap` (and a launch's) is not used; without
-   it VM programs have only the frames. Never truncate or assume its size.
+   it VM programs have only the frames. Never truncate or assume its size. A program the host
+   link starts may bring its own file on `host:` for that run (`host:mxswap.txt`, read by
+   mxlink's app at execee; kernel version 28): MXOS's is used again after it.
 7. **DMA.** Tags, chains, DMA buffers, thread stacks and interrupt handler data must be core or
    pinned (`mx_vm_lock`, `mx_vm_pin`, `MX_CORE_FN`, `MX_CORE_DATA`, `MX_CORE_BSS`), never plain
    VM: `mx_paddr_of`, `MX_UNCACHED` and `MX_UCAB` of VM that is not pinned end the program with a

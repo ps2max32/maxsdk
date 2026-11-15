@@ -153,6 +153,17 @@ version 14) set it for itself and stopped it at its end, so the other's sleepers
 woken. Since version 19 it is one of the kernel's software timers (below). A program's arguments are copied into its own memory at its
 start: the kernel's are the next program's once it starts another.
 
+Also version 28: a host's run on a swap file of its own on `host:` (`apps/mxos/ee/swap.c`'s
+`kswap_host`, `kswap_host_end`). mxlink's app reads `host:mxswap.txt` ("host:<path> [MiB]", 128 by
+default) at each execee and gives it to `mx_proc_spawn` as the program's swap file; for a
+program the service starts in front, and only for a file on `host:`, the kernel detaches MXOS's
+swap file (when it holds no page: the shell is ended for a host's run) and attaches that one
+before the program's space is made, so the space has the 128 MiB of a VM with a swap file. When
+the program ends, MXOS's file comes back where its device is. Without the file the run has
+MXOS's swap file, if its device is there. A running program's ELF stays open (the VM's pages
+come from it), so a new `MXLINK.ELF` cannot be written on the card while the service runs
+(mcman refuses, -6): only while it does not.
+
 Version 28 (2026-11-15): the controllers for the shell (`apps/mxos/ee/pad.c`, `<mx/pad.h>`,
 `common/include/mxpad.h`). `mx_pad_info` gives every port's pad (`MX_PAD_PORTS`: the two
 controller ports and four USB or Bluetooth pads; -1 past them): kind, link (port, USB,
