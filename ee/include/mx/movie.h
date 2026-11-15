@@ -57,6 +57,8 @@ struct mx_movie_info {
   u8 sound;               /* it plays sound */
   u8 rgb16;
   u8 predicted;           /* the stream has P or B pictures */
+  u32 aspect_w, aspect_h;  /* the picture's shape on the screen, e.g. 16 : 9 (width : height for
+                             square pixels): show width x height scaled to it */
   u32 duration_ms;        /* the length from the time stamps of a program stream (0: unknown) */
   /* so far */
   u32 pictures;           /* given out */

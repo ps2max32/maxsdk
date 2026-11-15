@@ -340,6 +340,28 @@ void mx_movie_close(struct mx_movie *m) {
       mx_heap_free(mx_heap_paged, paged[i]);
 }
 
+/* The shape on the screen from aspect_ratio_information. MPEG-2: the
+   display's; MPEG-1: a pixel's height / width (ISO 11172-2 2.4.3.2, times
+   10000), so the shape is width : height times its inverse. */
+static void shape(struct mx_movie *m) {
+  static const u16 pel[16] = {0,    10000, 6735,  7031,  7615,  8055,  8437,  8935,
+                              9157, 9815,  10255, 10695, 10950, 11575, 12015, 0};
+  u32 a = m->mpeg.aspect, w = m->mpeg.width, h = m->mpeg.height;
+  if (m->mpeg.mpeg2 && a >= 2 && a <= 4) {
+    static const u16 d[3][2] = {{4, 3}, {16, 9}, {221, 100}};
+    w = d[a - 2][0], h = d[a - 2][1];
+  } else if (!m->mpeg.mpeg2 && pel[a] && a != 1) {
+    w *= 10000, h *= pel[a];
+  }
+  for (u32 x = w, y = h; y;) { /* reduced by their greatest common divisor */
+    u32 t = x % y;
+    x = y, y = t;
+    if (!y)
+      w /= x, h /= x;
+  }
+  m->info.aspect_w = w, m->info.aspect_h = h;
+}
+
 /* The last video time stamp of the file: its last 256 KiB looked through
    (in the pump's chunk memory, before the reader is started). 0: none. */
 static u32 tail_pts(struct mx_movie *m) {
@@ -414,6 +436,7 @@ struct mx_movie *mx_movie_open(const char *path, u32 flags) {
     m->info.duration_ms = 0;
   }
   m->info.width = m->mpeg.width, m->info.height = m->mpeg.height;
+  shape(m);
   m->info.mbw = m->mpeg.mbw, m->info.mbh = m->mpeg.mbh;
   m->info.rate_num = m->mpeg.rate_num, m->info.rate_den = m->mpeg.rate_den;
   u32 mbs = (u32)m->mpeg.mbw * m->mpeg.mbh;

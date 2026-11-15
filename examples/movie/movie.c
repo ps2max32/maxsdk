@@ -67,6 +67,7 @@ int main(int argc, char **argv) {
     seek_ms = (seek_ms < 0 ? 0 : seek_ms * 10) + (*a - '0');
   /* after 100 frames: jump to this time (ms) */
   int seek_rc = 0;
+  mx_printf("movie: shape %u : %u\n", in->aspect_w, in->aspect_h);
   if (in->duration_ms)
     mx_printf("movie: %u ms long\n", in->duration_ms);
   for (;;) {
