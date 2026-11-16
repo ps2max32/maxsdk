@@ -11,6 +11,7 @@
 #include <timrman.h>
 #include <mxfast.h>
 #include <mxio.h>
+#include <mxmc.h>
 #include <io_common.h>
 #include <sifrpc.h>
 #include <stdio.h>
@@ -248,15 +249,46 @@ static int kind_of(const char *path) {
   return 2;   /* MX_DEV_USB */
 }
 
+/* MXOS's card driver (mxmc.irx, common/include/mxmc.h), when it is the one
+   loaded: whether a card is there without taking one of its files, its size
+   and free space */
+static void **mxmc(void) {
+  static iop_library_t lib;
+  static void **table;
+  if (!table) {
+    memset(&lib, 0, sizeof lib);
+    lib.version = 0x101;
+    memcpy(lib.name, "mxmc\0\0\0\0", 8);
+    table = QueryLibraryEntryTable(&lib);
+  }
+  return table;
+}
+
+/* the memory cards: through mxmc, else (the ROM's or ps2sdk's mcman) by
+   opening their root */
+static void cards(struct mxio_devs *t) {
+  void **m = mxmc();
+  for (int slot = 0; slot < 2; slot++) {
+    const char *name = slot ? "mc1:" : "mc0:";
+    if (!m) {
+      if (card_present(slot))
+        add(t, name, 1, 1, 8u << 20);
+      continue;
+    }
+    struct mxmc_card c;
+    if (((mxmc_card_fn *)m[MXMC_CARD])(slot, &c) != MXMC_READY)
+      continue;
+    add(t, name, 1, 1, c.size);
+    t->d[t->n - 1].free_lo = c.free;
+  }
+}
+
 /* what is there now, in t; the block devices only when bdm said so */
 static struct mxio_devs scan_t, bdm_t;
 static void scan(struct mxio_devs *t, int bdm_too) {
   memset(t, 0, sizeof *t);
   t->version = MXIO_DEVS_VERSION;
-  if (card_present(0))
-    add(t, "mc0:", 1, 1, 8u << 20);
-  if (card_present(1))
-    add(t, "mc1:", 1, 1, 8u << 20);
+  cards(t);
   void **b = bdm();
   if (b && bdm_too) {
     memset(&bdm_t, 0, sizeof bdm_t);
@@ -339,7 +371,7 @@ static void publish(struct mxio_devs *t) {
   count_files(t);
   int flags = 0;
   for (u32 i = 0; i < t->n && !flags && !changed; i++)
-    flags = t->d[i].flags != devs.d[i].flags;
+    flags = t->d[i].flags != devs.d[i].flags || t->d[i].free_lo != devs.d[i].free_lo;
   if (!changed && !flags)
     return;
   if (changed) {

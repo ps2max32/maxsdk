@@ -12,6 +12,15 @@ Status (2026-11-16):
   - Like mcman, it has no `O_TRUNC` of its own: `O_CREAT` makes an existing file new, and
     without it a file keeps its length. Adding a real `O_TRUNC` is a possible change.
   - Formatting is not tested yet.
+- Step 2 is done in a simpler form than planned: mxmc exports a library `mxmc`
+  (`common/include/mxmc.h`) with `mxmc_card`. That is the card's own check, made under mxmc's
+  lock without taking a file, plus its size and free space. mxio calls it every second in
+  place of `dopen`; it is a poll, not a callback, because a memory card gives no interrupt when
+  it comes or goes, so mxmc would poll too. Size and free space go into the device list
+  (`mx_dev_list`), which the kernel already passed on, so no `devctl` and no kernel change were
+  needed. mxmc counts the free space again only after a page was written or erased.
+  Tested on a SCPH-70004 and a SCPH-90006: k61 sees the free space go down by what it wrote
+  and come back.
 
 ## Why
 
@@ -105,9 +114,9 @@ The card driver is also the one part of the card's path we cannot change:
      - a card pulled and put back by hand;
      - the installer's format, on a spare card.
    - Measure read and write speed against the ROM's MCMAN and ps2sdk's.
-2. **mxmc's presence callback and devctl:**
-   - mxio takes the card events from mxmc, and its `dopen` poll goes.
-   - Free space and card type for the shell.
+2. **mxmc's card check and free space** (done: see the status at the top):
+   - mxio checks the cards through mxmc, without a file.
+   - Size and free space for the shell, in the device list.
    - Document both in mx-os.md and kernel.md.
 3. **mxsio2 and the mx4sio_bd fork:**
    - The SIO2 lock, so the kernel can load MX4SIO again (a setting already

@@ -2,10 +2,13 @@
    of its own on mc0 (MXMCTEST, removed at the end), files of 0 bytes to
    300 KB written and read back, six open at once written in turns, one
    written over shorter, the directory listed; then all removed. Prints
-   the speed of the large file.
+   the speed of the large file. The card's free space (mx_dev_list, from
+   mxmc through mxio) goes down by what was written and back at the end.
      k61_mcwrite.elf        (status 0) */
+#include <mx/dev.h>
 #include <mx/sif.h>
 #include <mx/string.h>
+#include <mx/thread.h>
 #include <mx/timer.h>
 #include "t.h"
 
@@ -48,6 +51,20 @@ static void check(u32 f, u32 n) {
   CHECK_EQ(bad, 0);
 }
 
+/* mc0:'s free bytes in the device list, after mxio's next look (each second) */
+static u64 dev_free(void) {
+  mx_sleep_us(1500000);
+  struct mx_dev_info d[8];
+  int n = mx_dev_list(d, 8);
+  for (int i = 0; i < n && i < 8; i++)
+    if (!strcmp(d[i].name, "mc0:") && d[i].present) {
+      mx_printf("k61: mc0: %llu of %llu bytes free\n", d[i].free, d[i].size);
+      return d[i].free;
+    }
+  mx_printf("k61: mc0: not in the device list\n");
+  return 0;
+}
+
 static void clean(void) {
   char p[40];
   for (u32 i = 0; i < NF; i++) {
@@ -60,6 +77,8 @@ static void clean(void) {
 int main(void) {
   char p[40];
   clean(); /* a run that ended early */
+  u64 free0 = dev_free();
+  CHECK(free0 > 0);
   CHECK_EQ(mx_fio_mkdir(DIR, 0777), 0);
 
   /* one after the other */
@@ -76,6 +95,8 @@ int main(void) {
     if (sizes[f] >= 100000)
       mx_printf("k61: %u bytes written in %u ms\n", sizes[f], ms_since(t0));
   }
+  u64 free1 = dev_free();
+  CHECK(free1 + 300000 <= free0);
   for (u32 f = 0; f < NF; f++) {
     u32 t0 = mx_count();
     check(f, sizes[f]);
@@ -140,6 +161,7 @@ int main(void) {
 
   /* removed */
   clean();
+  CHECK_EQ(dev_free(), free0);
   d = mx_fio_dopen(DIR);
   CHECK(d < 0);
   if (d >= 0)

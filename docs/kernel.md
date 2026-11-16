@@ -306,10 +306,13 @@ Also version 26: devices, notifications and the swap file (`ee/dev.c`, `ee/swap.
 `usbmass_bd`, `mxata`; `mx4sio_bd` not: it keeps probing slot 2 and mcman then finds no memory
 card there). mxio watches the devices (`MXIO_WATCH`, `common/include/mxio.h`): bdm's callback
 (`bdm_RegisterCallback`, found by its export table: bdm loads after mxio) for the drives, and
-`dopen` of `mc0:`/`mc1:` every second for the cards (a card counts as gone only on the card
-driver's "no card" or "not formatted", -ENXIO/-EFORMAT: its open files are shared by both slots
-and each running program's ELF takes one, so -EMFILE keeps the slot as it was; the driver checks
-the card before it takes a file, so a card pulled out is still seen); it writes its list with a counter by SIF DMA
+each card every second: through mxmc's library `mxmc` (`common/include/mxmc.h`, found at run
+time: `mxmc_card`, the card's check under mxmc's lock without taking one of its files, with its
+size and free space, which mxmc counts again only after a page was written or erased), else
+(the ROM's or ps2sdk's mcman, as in an installer's IOP) by `dopen` of `mc0:/` and `mc1:/`, where a
+card counts as gone only on "no card" or "not formatted" (-ENXIO/-EFORMAT; -EMFILE keeps the
+slot as it was). A card's free space changes the list without a new counter, as the files open
+on a device do; it writes its list with a counter by SIF DMA
 into `.padarea` (above the kernel's code, as mxpad's), and a device that went stays listed, not
 present, for one change. The kernel's vblank hook (`dev_vblank`) sees the counter change and
 wakes the command thread (`dev_now`), which compares the list with the names it knew (the first

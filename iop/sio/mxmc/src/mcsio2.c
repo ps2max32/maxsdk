@@ -458,6 +458,7 @@ int mcman_eraseblock(int port, int slot, int block, void **pagebuf, void *eccbuf
 {
 	register int retries, size, ecc_offset;
 	int page;
+	mxmc__written(port); /* mxmc: the free space is counted again */
     HAKAMA_WAITSEMA();
 #if !defined(BUILDING_XFROMMAN) && !defined(BUILDING_VMCMAN)
 	u8 *p = mcman_sio2packet.out_dma.addr;
@@ -553,6 +554,7 @@ int mcman_eraseblock(int port, int slot, int block, void **pagebuf, void *eccbuf
 int McWritePage(int port, int slot, int page, void *pagebuf, void *eccbuf) // Export #19
 {
 	register int retries;
+	mxmc__written(port); /* mxmc: the free space is counted again */
 #if !defined(BUILDING_XFROMMAN) && !defined(BUILDING_VMCMAN)
 	register int index, count;
 	u8 *p_pagebuf = (u8 *)pagebuf;
@@ -1187,6 +1189,7 @@ int mcman_probePDACard(int port, int slot)
 //--------------------------------------------------------------
 int McWritePS1PDACard(int port, int slot, int page, void *buf) // Export #30
 {
+	mxmc__written(port); /* mxmc: the free space is counted again */
 #if !defined(BUILDING_XFROMMAN) && !defined(BUILDING_VMCMAN)
 	register int i, retries;
 	register MCDevInfo *mcdi = &mcman_devinfos[port][slot];

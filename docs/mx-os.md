@@ -33,7 +33,8 @@ memory: [vm.md](vm.md). Where it goes (a game OS): [mx-os-plan.md](mx-os-plan.md
   MODULE_DIR=...` for another). New IOP
   modules are tried the same way: a kernel with them in a directory of its own, as the one-shot.
 - Memory cards: `mxmc.irx` (`iop/sio/mxmc`), MXOS's fork of ps2sdk's mcman with 16 open files for
-  both slots in place of 3 (`docs/mxmc-plan.md`); the device and MCSERV's interface as mcman's.
+  both slots in place of 3 (`docs/mxmc-plan.md`); the device and MCSERV's interface as mcman's. A
+  card's size and free space are in the device list (`mx_dev_list`).
 - Consoles: the kernel knows two (ROM 2.00, a SCPH-70004; ROM 2.20, a SCPH-90006: `kernel.md`,
   "Other consoles"). On those it sets the video modes itself, 576p (`mx_video_576p`) among them;
   on another a mode is the BIOS's or fails (`mx_video_set` returns -1: set another one). Run `examples/display` on each console the kernel is brought to.

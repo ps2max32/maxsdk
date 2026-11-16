@@ -360,6 +360,13 @@ extern int PS1CardFlag;
 extern McFsEntry mcman_dircache[MAX_CACHEDIRENTRY];
 
 extern MC_FHANDLE mcman_fdhandles[MAX_FDHANDLES];
+
+/* mxmc (mcdev.c): a page of the card in port was written or erased, so its
+   free space is counted again at the next mxmc_card; the library mxmc
+   (common/include/mxmc.h) */
+void mxmc__written(int port);
+int mxmc_register(void);
+void mxmc_release(void);
 extern MCDevInfo mcman_devinfos[4][MCMAN_MAXSLOT];
 
 extern u8 mcman_eccdata[512]; // size for 32 ecc

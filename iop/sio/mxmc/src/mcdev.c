@@ -748,3 +748,78 @@ int mc_ioctl2(MC_IO_FIL_T *f, int cmd, void *arg, unsigned int arglen, void *buf
 	return 0;
 }
 #endif
+
+//--------------------------------------------------------------
+// mxmc: the library "mxmc" (common/include/mxmc.h), for MXOS's file service
+// (mxio): whether a card is there, without a file, and its free space.
+
+#include <mxmc.h>
+
+static u8 mxmc_dirty[2] = {1, 1}; /* the free space to count again */
+static u32 mxmc_free[2];
+
+void mxmc__written(int port)
+{
+	if ((u32)port < 2)
+		mxmc_dirty[port] = 1;
+}
+
+static int mxmc_card(int port, struct mxmc_card *c)
+{
+	memset(c, 0, sizeof *c);
+	if ((u32)port > 1)
+		return MXMC_NONE;
+	WaitSema(mcman_io_sema);
+	/* as mc_open and mc_dopen check the card */
+	int r = McDetectCard2(port, 0);
+	if (r >= sceMcResChangedCard) {
+		MCDevInfo *d = &mcman_devinfos[port][0];
+		if (r == sceMcResChangedCard)
+			mxmc_dirty[port] = 1;
+		c->state = MXMC_READY;
+		c->type = d->cardtype;
+		/* a PS2 card in clusters of 1 KiB; a PS1 card in 15 blocks of 8 KiB */
+		u32 unit = d->cardtype == sceMcTypePS2 ? d->cluster_size : 8192;
+		c->size = d->cardtype == sceMcTypePS2 ? d->clusters_per_card * d->cluster_size : 15 * 8192;
+		if (mxmc_dirty[port]) {
+			int n = McGetFreeClusters(port, 0);
+			mxmc_free[port] = n > 0 ? (u32)n * unit : 0;
+			mxmc_dirty[port] = 0;
+		}
+		c->free = mxmc_free[port];
+	} else {
+		c->state = r == sceMcResNoFormat ? MXMC_UNFORMATTED : MXMC_NONE;
+		mxmc_dirty[port] = 1;
+	}
+	SignalSema(mcman_io_sema);
+	return c->state;
+}
+
+static int mxmc_ret0(void)
+{
+	return 0;
+}
+
+/* the export table, as loadcore takes it (irx.h's struct irx_export_table)
+   with its entries: 0-3 the module's own (start, stop, ...), then
+   MXMC_CARD */
+static struct {
+	u32 magic;
+	void *next;
+	u16 version, mode;
+	char name[8];
+	void *f[6];
+} mxmc_exports = {
+	0x41c00000, 0, 0x0101, 0, "mxmc",
+	{(void *)mxmc_ret0, (void *)mxmc_ret0, (void *)mxmc_ret0, (void *)mxmc_ret0, (void *)mxmc_card, 0},
+};
+
+int mxmc_register(void)
+{
+	return RegisterLibraryEntries((struct irx_export_table *)&mxmc_exports);
+}
+
+void mxmc_release(void)
+{
+	ReleaseLibraryEntries((struct irx_export_table *)&mxmc_exports);
+}

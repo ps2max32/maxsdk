@@ -182,6 +182,7 @@ int MCMAN_ENTRYPOINT(int argc, char *argv[])
 		{
 			CpuSuspendIntr(&state);
 			release_res = ReleaseLibraryEntries(export_tbl);
+			mxmc_release();
 			CpuResumeIntr(state);
 		}
 		if (release_res == 0 || release_res == -213)
@@ -203,6 +204,9 @@ int MCMAN_ENTRYPOINT(int argc, char *argv[])
 		if (RegisterLibraryEntries(export_tbl) != 0)
 			return MODULE_NO_RESIDENT_END;
 	}
+	/* mxmc: the library mxmc too (common/include/mxmc.h) */
+	if (mxmc_register() != 0)
+		return MODULE_NO_RESIDENT_END;
 
 #ifdef _IOP
 	CpuEnableIntr();
