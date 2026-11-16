@@ -768,8 +768,8 @@ So it moves as it is, to the last MiB, and what is below it is one run of frames
 
 | Range | Use |
 |---|---|
-| `0x00000-0x00FFF` | the vectors |
-| `0x01000-0x1EFFFFF` | the VM's frames: programs' cores (virtual from 0x100000) and pages |
+| `0x00000-0x07FFF` | the vectors (the first frame is not used) |
+| `0x08000-0x1EFFFFF` | the VM's frames: programs' cores (virtual from 0x100000) and pages; one frame at 0xF8000 holds the host's commands |
 | `0x1F00000-0x1F7FFFF` | kernel code and constants, read-only for programs (one TLB entry) |
 | `0x1F80000-0x1FFFFFF` | kernel data, `.bss`, stacks, the VM's tables, the host's commands (one TLB entry) |
 
@@ -823,10 +823,13 @@ Parts, each tested alone:
      does not know. A PCSX2 test build without it (PAL at 60 vblanks) runs the same path.
    - To find out first: whether the IOP writes below 1 MiB after an IOP reset (the BIOS's
      SIF buffer), and what is at 0x80000-0x87FFF.
-3. **The first MiB to the frames**: from 0x01000 where the BIOS is gone, from 0x100000
-   where it stays. The host's commands (0xFF800) move into the kernel's data: the kernel
-   gives mxlink's IOP module the address when it loads it. Test: a program that fills all memory and checks every frame, with IOP
-   resets between; k46 and Quake as soak tests.
+3. **The first MiB to the frames.** Done 2026-11-16: from 0x8000 where the BIOS is gone
+   (991 frames; 990 were there before the kernel moved), from 0x100000 where it stays. The
+   host's commands stay at 0xFF800 and their frame is kept out of the pool: moving them into
+   the kernel's data would change mxlink's IOP module with the kernel, for 32 KiB. Tested on
+   both consoles: `k63_frames` writes and reads every free frame (20 to 27 of them below 1
+   MiB), before and after the other kernel tests and IOP resets. Not yet run: a game with a
+   swap file, as a soak test.
 4. **The kernel's code paged** (design first, with numbers). Of the kernel's 472 KiB today
    218 are code, 195 `.bss`, 18 the IOP's DMA area, 17 constants. A part stays resident:
    all that runs while a page fault cannot be served (the vectors and refill, interrupt

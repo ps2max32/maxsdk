@@ -192,8 +192,8 @@ the programs, with 128 bytes of room left for code.
   place of the end of the BIOS's entry for 0x1800000-0x1FFFFFF. At the first start the kernel
   runs under that entry, so the two are written with nothing read or written between them.
   A program's core takes entries 13-20.
-- The VM's frames are 0x100000-0x1EFFFFF (960 of them). 0x88000-0xFFFFF is unused for now,
-  but for the host's commands at 0xFF800.
+- The VM's frames are 0x100000-0x1EFFFFF (960 of them) while the BIOS is used; without it,
+  see below.
 - A program's core ends below the kernel (`MX_CORE_HI` is `MX_KERNEL_LO`), and `libmxk`
   takes the kernel's table only from the kernel's memory: **every program is built again**.
   One built before does not find this kernel and ends in the BIOS's Exit; this kernel's
@@ -223,6 +223,15 @@ on PCSX2, the BIOS stays for its SetGsCrt.
   `tests/ps2/k62_bios.c` reads it back: on a SCPH-70004 and a SCPH-90006 nothing was written
   there over a boot, the tests, IOP resets, the kernel's restart and kernels replacing each
   other.
+
+Also version 31: the BIOS's memory is frames (2026-11-16, mx OS plan step 4a part 3;
+`apps/mxos/ee/exec.c`'s `kvm_boot`, `src/vm/vm.c`'s `mx__vm_frame_reserve`). Where the kernel
+has left the BIOS, the VM's frames are 0x8000-0x1EFFFFF: 991 of them, 31 more than from 1 MiB.
+Two pieces stay out: the first 32 KiB (the vectors' page, and what is left of a frame) and
+the frame at 0xF8000, where mxlink's IOP module writes the host's commands (0xFF800). Where
+the BIOS stays (PCSX2, a console the kernel does not know) the frames start at 1 MiB as
+before. `tests/ps2/k63_frames.c` writes and reads every free frame and counts those below 1
+MiB it had.
 
 Also version 31: the kernel's directory and the card driver (`apps/mxos/ee/main.c`). The IOP
 modules, the settings and the default shell come from the directory of the path the kernel was

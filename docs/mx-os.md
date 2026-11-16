@@ -123,9 +123,9 @@ memory: [vm.md](vm.md). Where it goes (a game OS): [mx-os-plan.md](mx-os-plan.md
 
 | Range | Use |
 |---|---|
-| `0x00000-0x87FFF` | the vectors (4 KiB) and the BIOS; not used after the kernel's first start on a console it knows (kernel.md). Do not touch |
-| `0x88000-0xFFFFF` | unused (the kernel was here until 2026-11-16); host commands at `0xFF800` |
-| `0x100000-0x1EFFFFF` | program (core memory, virtual from `0x100000`) and VM frames |
+| `0x00000-0x07FFF` | the vectors; not a program's |
+| `0x08000-0xFFFFF` | VM frames, but the one at `0xF8000` (host commands at `0xFF800`). The BIOS, where the kernel still uses it (PCSX2, a console it does not know: kernel.md) |
+| `0x100000-0x1EFFFFF` | VM frames: a program's core (virtual from `0x100000`) and its pages |
 | `0x1F00000-0x1F7FFFF` | kernel code, read-only for programs |
 | `0x1F80000-0x1FFFFFF` | kernel data, stack and the VM's tables |
 | `0x08000000-` | VM window, `MX_MEMORY=vm` |

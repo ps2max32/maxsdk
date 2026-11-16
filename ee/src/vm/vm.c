@@ -2075,6 +2075,26 @@ void *mx__vm_frames_take_aligned(u32 bytes, u32 align) {
 }
 void *mx__vm_frames_take(u32 bytes) { return mx__vm_frames_take_aligned(bytes, 1); }
 
+/* The frame at a physical address out of the pool for good: memory in the
+   frames' range that is not the VM's (a kernel's: what the IOP writes at a
+   fixed address). Right after the VM is made, while the frame is free. 0, or
+   -1. */
+int mx__vm_frame_reserve(u32 phys) {
+  u32 f = (u32)((u8 *)(uintptr_t)(MX_PHYS_WIN + phys) - vm.frames) / PAGE;
+  if (!vm.active || MX_PHYS_WIN + phys < (u32)(uintptr_t)vm.frames || f >= vm.nframes)
+    return -1;
+  int was = mx_di(), r = -1;
+  if (vm.page_of[f] == 0) {
+    vm.page_of[f] = FRAME_PINNED;
+    vm.frame_space[f] = (u8)vs->id;
+    vm.nfree--;
+    vm.pinned_frames++;
+    r = 0;
+  }
+  mx_irq_restore(was);
+  return r;
+}
+
 void mx__vm_frames_give(void *p, u32 bytes) {
   u32 n = (bytes + PAGE - 1) / PAGE, f0 = (u32)((u8 *)p - vm.frames) / PAGE;
   int was = mx_di();
