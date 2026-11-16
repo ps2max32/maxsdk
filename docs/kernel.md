@@ -164,6 +164,20 @@ MXOS's swap file, if its device is there. A running program's ELF stays open (th
 come from it), so a new `MXLINK.ELF` cannot be written on the card while the service runs
 (mcman refuses, -6): only while it does not.
 
+Version 29 (2026-11-15): the time (`apps/mxos/ee/time.c`, `<mx/time.h>`). At each start the
+kernel reads the PS2's clock (battery backed, in the CD/DVD controller) through mxio
+(`MXIO_CLOCK`: cdvdman's `sceCdReadClock`, found by its export table as bdm's): eight bytes, a
+status and BCD seconds .. year in Japan's time, which every PS2 keeps (the SDK's "Overview -
+Other": JST = UTC + 9 h). A status other than 0 (the clock stopped, its battery, a command
+error: the clock reads 2000-01-02 then) leaves the time unknown: `mx_time` 0. Else the kernel
+keeps UTC at its second 0 and counts on with its seconds (dev.c's `kseconds`). `mx_time_set`
+(the shell only, 2000..2099) writes the clock too (`MXIO_CLOCK_SET`, `sceCdWriteClock`).
+`mx_gmtime` and `mx_localtime` are libmxk's (no kernel call): the local time is UTC moved by
+the settings `time.zone` (minutes east of UTC) and `time.dst` (`on`: an hour more); the OSD's
+own zone is not read (a BIOS call). On PCSX2 the kernel has no mxio: the time is unknown.
+`tests/ps2/k56_time.c`: the date arithmetic on known days, and on the PS2 the time read and
+counting on.
+
 Version 28 (2026-11-15): the controllers for the shell (`apps/mxos/ee/pad.c`, `<mx/pad.h>`,
 `common/include/mxpad.h`). `mx_pad_info` gives every port's pad (`MX_PAD_PORTS`: the two
 controller ports and four USB or Bluetooth pads; -1 past them): kind, link (port, USB,

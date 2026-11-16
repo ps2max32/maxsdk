@@ -165,6 +165,22 @@ static void **bdm(void) {
   }
   return table;
 }
+/* cdvdman (the ROM's, in the IOP from its reset): the clock */
+static void **cdvdman(void) {
+  static iop_library_t lib;
+  static void **table;
+  if (!table) {
+    memset(&lib, 0, sizeof lib);
+    lib.version = 0x101;
+    memcpy(lib.name, "cdvdman\0", 8);
+    table = QueryLibraryEntryTable(&lib);
+  }
+  return table;
+}
+typedef int cd_clock_fn(void *clock);
+#define CD_READ_CLOCK 24
+#define CD_WRITE_CLOCK 25
+
 typedef void bdm_cb_fn(int event);
 typedef void bdm_register_fn(bdm_cb_fn *cb);
 typedef void bdm_get_bd_fn(struct block_device **pbd, unsigned int count);
@@ -415,6 +431,20 @@ static void *rpc(int fno, void *data, int size) {
       WakeupThread(watch_tid);
     rpc_out[0] = MXIO_DEVS_VERSION;
     break;
+  case MXIO_CLOCK:
+  case MXIO_CLOCK_SET: {
+    void **t = cdvdman();
+    static u8 clock[8] __attribute__((aligned(4)));
+    if (!t) {
+      rpc_out[0] = -19;
+      break;
+    }
+    if (fno == MXIO_CLOCK_SET)
+      memcpy(clock, a, 8);
+    rpc_out[0] = ((cd_clock_fn *)t[fno == MXIO_CLOCK ? CD_READ_CLOCK : CD_WRITE_CLOCK])(clock);
+    memcpy(&rpc_out[1], clock, 8);
+    break;
+  }
   default:
     rpc_out[0] = -22;
   }

@@ -57,6 +57,9 @@ memory: [vm.md](vm.md). Where it goes (a game OS): [mx-os-plan.md](mx-os-plan.md
   the Bluetooth pairings (`mx_pad_paired`, `mx_pad_pair_state`); the shell pairs, forgets and
   turns pads off (`mx_pad_pair`, `mx_pad_forget`, `mx_pad_disconnect`). Settings: `pad.idle_off`
   (minutes), `pad.brightness` (0..100), `pad.<id>.colour` (`rrggbb`).
+- Time (kernel version 29, `<mx/time.h>`): `mx_time` (UTC seconds; 0 when the PS2's clock could
+  not be read), `mx_gmtime`, `mx_localtime` (settings `time.zone` in minutes, `time.dst`); the
+  shell sets it with `mx_time_set`, which writes the PS2's clock too.
 - Notifications (`<mx/notify.h>`): the kernel keeps the last 32 and adds its own (a device came
   or went, a controller came or went or its battery is low, the swap file); any program adds one
   with `mx_notify`. The shell shows them (`mx_notify_read`, `MX_EVENT_NOTIFY`); over a running

@@ -32,9 +32,13 @@ enum {
   MXIO_LOG,   /* text, to the host's console; < 0 without a host */
   MXIO_STATS, /* answer: frames, doubles, drops, asked again (the fast path) */
   MXIO_CLOSE_ALL, /* what a program left open */
-  MXIO_WATCH      /* EE address of a struct mxio_devs (64-byte aligned); answer:
+  MXIO_WATCH,     /* EE address of a struct mxio_devs (64-byte aligned); answer:
                      MXIO_DEVS_VERSION. mxio then writes the devices there by DMA
                      at every change (kernel version 26) */
+  MXIO_CLOCK,     /* answer: cdvdman's sceCdReadClock's result (1 read), then its
+                     8 bytes (stat, second, minute, hour, pad, day, month, year:
+                     BCD, Japan's time) (kernel version 29) */
+  MXIO_CLOCK_SET  /* the same 8 bytes; answer: sceCdWriteClock's result (1 written) */
 };
 
 /* The storage devices (MXIO_WATCH): mxio sees USB drives, MX4SIO and the HDD
