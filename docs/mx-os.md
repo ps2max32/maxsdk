@@ -60,6 +60,26 @@ memory: [vm.md](vm.md). Where it goes (a game OS): [mx-os-plan.md](mx-os-plan.md
 - Time (kernel version 29, `<mx/time.h>`): `mx_time` (UTC seconds; 0 when the PS2's clock could
   not be read), `mx_gmtime`, `mx_localtime` (settings `time.zone` in minutes, `time.dst`); the
   shell sets it with `mx_time_set`, which writes the PS2's clock too.
+- Network (kernel version 30, `<mx/net.h>`): `mx_net_status` (link, speed, address, DHCP,
+  lease, MAC) for any program, `MX_EVENT_NET` on a change. The shell sets it up with the
+  settings `net.mode` (`dhcp` or `manual`), `net.ip`, `net.mask`, `net.gw`, `net.dns`; the
+  kernel applies them a second after the last change.
+- Video (kernel version 31, `<mx/screen.h>`): the shell's settings say what the TV shows:
+  `video.mode` (240p, 288p, 480i, 576i, 480p, 576p, 720p, 720p50, 1080i, 1080i50, 1080p24,
+  1080p25, 1080p30; default the region's 480i or 576i; the 50 Hz and 1080p modes are the
+  kernel's own timing, not the BIOS's), `video.out` (`component`, or `rgb`: 240p, 288p, 480i
+  and 576i only), `video.scale` (`stretch`: every
+  program in `video.mode`; `native`: a program may take any mode of `video.allowed`),
+  `video.aspect` (4:3 or 16:9, for 240-576 line modes), `video.overscan` (`on`: 640 wide, 224,
+  256, 448 or 512 lines; `off`: all of 704 x 240, 288, 480 or 576). The kernel's own screen is
+  in `video.mode` (170 columns on 720 and 1080 line modes). A change of `video.mode` or `video.out` is on trial: unless the
+  shell writes `video.confirm` = "<mode> <out>" within 15 s, the kernel puts back the confirmed
+  ones. L1 + L2 + R1 + R2 held in the first 30 s after the start sets the region's 480i or
+  576i. A program shows its picture at whole factors (MAGH, MAGV) in a mode it may take:
+  `mx_screen_pick` for the size it draws, `mx_screen_video` for the mode to set; `mx_gs_init`
+  does it for its w x h (480i the same as before). The GS scales by whole numbers only, so
+  other sizes get black borders. A program that sets a mode of its own (`mx_gs_init_video`)
+  still can: that is not checked.
 - Notifications (`<mx/notify.h>`): the kernel keeps the last 32 and adds its own (a device came
   or went, a controller came or went or its battery is low, the swap file); any program adds one
   with `mx_notify`. The shell shows them (`mx_notify_read`, `MX_EVENT_NOTIFY`); over a running

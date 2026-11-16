@@ -67,7 +67,11 @@ MX_INLINE u32 mx_gs_py(u32 y) { return ((2048 - mx_gs.h / 2) + y) << 4; }
 /* NTSC, interlaced, w x h, 32-bit color, 24-bit Z, two framebuffers. Up to
    256 lines FRAME mode (each field shows every line, e.g. 640 x 224), more
    FIELD mode (each field every other line, 640 x 448). Installs the GS and
-   vblank interrupt handlers. */
+   vblank interrupt handlers. Under MXOS (libmxk) the mode is the system's
+   (<mx/screen.h>): w x h shown at the whole factors that keep the shape it
+   has on the region's TV mode, in video.mode (480i the same as here; 1080i
+   640 x 448 at 2 x 2, bordered); the flags only where w x h does not fit
+   it. */
 void mx_gs_init(u32 w, u32 h);
 /* The same, with flags: MX_GS_PAL, 50 Hz and up to 512 lines (NTSC: 60 Hz,
    up to 448; 640 x 512 leaves 256 KiB of GS memory). */

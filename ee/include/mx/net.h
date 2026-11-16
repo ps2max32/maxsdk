@@ -47,4 +47,26 @@ int mx_net_poll(int s, int want);
    four threads sleep at the IOP at once, more ask in turn. */
 int mx_net_wait(u32 rd, u32 wr, u32 timeout_us, u32 *ready_rd, u32 *ready_wr);
 
+/* The network's state (kernel version 30): any program may read it. The
+   shell sets the network up with the settings net.mode ("dhcp", or "manual":
+   net.ip, net.mask, net.gw, net.dns), which the kernel applies a second
+   after the last change. A change (the link, the address) is MX_EVENT_NET
+   to the processes with events (<mx/proc.h>). */
+#define MX_NET_DHCP_OFF 0
+#define MX_NET_DHCP_SEARCHING 1 /* asking for an address */
+#define MX_NET_DHCP_BOUND 2     /* has one */
+struct mx_net_status {
+  u8 up;     /* the IOP's stack is there */
+  u8 link;   /* a cable and a link */
+  u8 duplex; /* full duplex */
+  u8 dhcp;   /* MX_NET_DHCP_* */
+  u16 speed; /* Mbit/s: 10 or 100; 0 without link */
+  u8 mac[6];
+  u32 ip, mask, gw, dns; /* network order (mx_net_ip); 0: none */
+  u32 lease;             /* DHCP: seconds of the lease left; 0 none */
+  u32 gen;               /* one more at each change */
+};
+/* 0, or -1 without the kernel's (libmx, an older kernel) */
+int mx_net_status(struct mx_net_status *s);
+
 #endif

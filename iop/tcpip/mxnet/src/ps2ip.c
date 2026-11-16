@@ -35,6 +35,8 @@
 #include "netif/etharp.h"
 
 #include "ps2ip_internal.h"
+#include "lwip/dns.h"
+#include <mxnet.h>
 
 /* lwIP 2.2.1's sockets.c writes errno via set_errno(); the IOP IRX has no
    libc-provided errno storage, so we define it here. The ".data" section
@@ -156,6 +158,61 @@ ps2ip_setconfig(const t_ip_info* pInfo)
 #endif
 
 	return	1;
+}
+
+/* kernel version 30 (common/include/mxnet.h): the state and the set-up,
+   for mxsock, under the stack's lock */
+static struct netif NIF;
+void mxnet_status(struct mxnet_status *s)
+{
+	memset(s, 0, sizeof *s);
+	s->version = MXNET_STATUS_VERSION;
+	s->link = (u32)mxeth_link();
+	LOCK_TCPIP_CORE();
+	s->ip = NIF.ip_addr.addr;
+	s->mask = NIF.netmask.addr;
+	s->gw = NIF.gw.addr;
+	s->dns = ip4_addr_get_u32(ip_2_ip4(dns_getserver(0)));
+	memcpy(s->mac, NIF.hwaddr, 6);
+	struct dhcp *dhcp = netif_dhcp_data(&NIF);
+	if (dhcp != NULL && dhcp->state != DHCP_STATE_OFF) {
+		if (dhcp->state == DHCP_STATE_BOUND || dhcp->state == DHCP_STATE_RENEWING ||
+		    dhcp->state == DHCP_STATE_REBINDING) {
+			s->dhcp = MXNET_DHCP_BOUND;
+			if (dhcp->t0_timeout > dhcp->lease_used)
+				s->lease = (u32)(dhcp->t0_timeout - dhcp->lease_used) * DHCP_COARSE_TIMER_SECS;
+		} else
+			s->dhcp = MXNET_DHCP_SEARCHING;
+	}
+	UNLOCK_TCPIP_CORE();
+}
+
+int mxnet_config(const struct mxnet_config *c)
+{
+	IPAddr ip, mask, gw;
+	ip.addr = c->ip, mask.addr = c->mask, gw.addr = c->gw;
+	LOCK_TCPIP_CORE();
+	struct dhcp *dhcp = netif_dhcp_data(&NIF);
+	int on = dhcp != NULL && dhcp->state != DHCP_STATE_OFF;
+	if (c->dhcp) {
+		if (!on) {
+			netif_set_addr(&NIF, &ip, &mask, &gw);
+			dhcp_start(&NIF);
+		}
+	} else {
+		if (on) {
+			dhcp_release_and_stop(&NIF);
+		}
+		netif_set_addr(&NIF, &ip, &mask, &gw);
+	}
+	/* a fixed one; with DHCP its own unless one is given */
+	if (c->dns || !c->dhcp) {
+		ip_addr_t d;
+		ip_addr_set_ip4_u32_val(d, c->dns);
+		dns_setserver(0, &d);
+	}
+	UNLOCK_TCPIP_CORE();
+	return 0;
 }
 
 static void InitDone(void* pvArg)

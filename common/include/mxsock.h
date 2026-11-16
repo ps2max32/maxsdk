@@ -50,7 +50,12 @@ enum {
   MXSOCK_RECVFROM, /* socket, size; answer: bytes, ip, port, data */
   MXSOCK_CLOSE,   /* socket */
   MXSOCK_POLL,    /* socket, MXSOCK_READ | MXSOCK_WRITE; answer: those ready */
-  MXSOCK_CLOSE_ALL /* what a program left open */
+  MXSOCK_CLOSE_ALL, /* what a program left open */
+  /* kernel version 30 (common/include/mxnet.h): the EE address of a struct
+     mxnet_status (64-byte aligned), written now and at each change from
+     then on; answer: MXNET_STATUS_VERSION */
+  MXSOCK_NET_WATCH,
+  MXSOCK_NET_CONFIG /* a struct mxnet_config */
 };
 
 #endif

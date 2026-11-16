@@ -22,12 +22,14 @@ enum {
   MX_NOTIFY_CRASH = 3,  /* a program crashed */
   MX_NOTIFY_PROGRAM = 4, /* from a program (mx_notify) */
   MX_NOTIFY_PAD = 5,     /* a controller came or went, its battery is low */
+  MX_NOTIFY_NET = 6,     /* kernel version 30: the network's link or address */
 };
 enum {
   MX_NOTIFY_ACTION_NONE = 0,
   MX_NOTIFY_ACTION_STORAGE = 1, /* the shell's Storage page */
   MX_NOTIFY_ACTION_SWAP = 2,    /* the shell's swap setting */
   MX_NOTIFY_ACTION_PADS = 3,    /* the shell's Controllers page */
+  MX_NOTIFY_ACTION_NET = 4,     /* kernel version 30: the shell's Network page */
 };
 #define MX_NOTIFY_TITLE 40  /* bytes with the 0: ASCII and Latin-1 */
 #define MX_NOTIFY_TEXT 120

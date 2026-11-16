@@ -164,6 +164,42 @@ MXOS's swap file, if its device is there. A running program's ELF stays open (th
 come from it), so a new `MXLINK.ELF` cannot be written on the card while the service runs
 (mcman refuses, -6): only while it does not.
 
+Version 31 (2026-11-16): the video settings (`apps/mxos/ee/kvideo.c`, `con.c`,
+`<mx/screen.h>`, `ee/src/gs/screen.c`). No new entries in the table: programs read the
+`video.*` settings themselves (`mx_screen_conf`) and set their mode as before (`crtc_set`). The
+kernel's screen is set up in `video.mode` (with `video.overscan`): 640 or 704 x the area's lines
+(32-bit) for 240p, 288p (the font at its own height), 480i, 576i, 480p and 576p; 1280 x 720 and
+1920 x 540 (FRAME, or 1080p's lines twice; both 16-bit) for 720p, 720p50 and the 1080 modes, 170
+columns; again when the mode changes while it is shown. 720p50, 1080i50 and 1080p24/25/30 have
+no BIOS code: where the kernel cannot set the CRTC itself (no known board, as on PCSX2) they fail
+and the screen stays in the region's mode until the trial ends. `video.out` `rgb` clears
+SMODE1.GCONT for 240p, 288p, 480i and 576i (RGB on the AV connector, as the BIOS's SetGsVParam 0; before,
+always YCbCr). A change of `video.mode` or `video.out` that differs from `video.confirm` is on
+trial for 15 s, at the start too, then the confirmed values (or the region's mode) come back
+with a notification. L1 + L2 + R1 + R2 on a pad a program reads within 30 s of the start set
+the region's 480i or 576i and confirm it. `mx_gs_init` in libmxk shows its w x h through
+`mx_screen_pick` (exact size, the shape it has on the region's TV mode). On PCSX2 the screen is
+set up again after the settings are read. `tests/ps2/k59_video.c`.
+
+Version 30 (2026-11-16): the network (`apps/mxos/ee/net.c`, `<mx/net.h>`'s `mx_net_status`,
+`common/include/mxnet.h`). mxsock watches mxnet (its new exports `mxnet_status`,
+`mxnet_config`) twice a second and writes a `struct mxnet_status` to the kernel by DMA when the
+link, the address, the DNS server or the DHCP state changed (`MXSOCK_NET_WATCH`, a counter one
+more). The vblank hook sees the counter change; the command thread then sends `MX_EVENT_NET`
+to the processes with events, adds a notification (`MX_NOTIFY_NET`: "Network connected" with
+the address, "Network disconnected") and writes the screen's network line. What was last told
+is kept across the kernel's restarts, so a program's end brings no news. `mx_net_status` gives
+link, speed, duplex, MAC, address, mask, gateway, DNS, the DHCP state and the lease left. The
+set-up comes from the settings: `net.mode` `dhcp`, or a fixed address (`net.ip`, `net.mask`,
+`net.gw`, which mxnet starts with, and `net.dns`). The kernel applies them at its start when
+the stack differs, and a second after the last change of a `net.*` key
+(`MXSOCK_NET_CONFIG`). The host link's sockets are bound to any address, so it follows a new
+one. Without the new mxsock (an older card) the network is not watched: `mx_net_status` says
+`up` 0. `tests/ps2/k57_net.c`.
+The kernel's VM keeps a fault log of one program (`docs/vm.md`, "The fault log"):
+`mx_vm_trace_restart`, `mx_vm_trace_mark` and `mx_vm_trace_save` record its page faults (the
+page, the EPC, the time, what it took) instead of returning -1. `tests/ps2/k58_faults.c`.
+
 Version 29 (2026-11-15): the time (`apps/mxos/ee/time.c`, `<mx/time.h>`). At each start the
 kernel reads the PS2's clock (battery backed, in the CD/DVD controller) through mxio
 (`MXIO_CLOCK`: cdvdman's `sceCdReadClock`, found by its export table as bdm's): eight bytes, a

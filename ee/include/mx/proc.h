@@ -85,6 +85,9 @@ enum {
   /* kernel version 27: a setting changed (<mx/setting.h>; status:
      mx_setting_seq; mx_setting_list(seq seen before) says which) */
   MX_EVENT_SETTING = 6,
+  /* kernel version 30: the network changed: the link, the address
+     (<mx/net.h>'s mx_net_status; status: its gen) */
+  MX_EVENT_NET = 7,
 };
 struct mx_event {
   u32 type; /* MX_EVENT_* */

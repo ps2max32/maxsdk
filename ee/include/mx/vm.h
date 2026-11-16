@@ -183,14 +183,35 @@ struct mx_vm_trace_head {
 #define MX_VM_TR_WRITE 1 /* block written in this interval (read too, maybe) */
 #define MX_VM_TR_MARK 2  /* mx_vm_trace_mark's tag (30 bits) */
 #define MX_VM_TR_TICK 3  /* an interval begins: ms since the trace began */
+/* Without a trace (mx_vm_config.trace 0; always under the kernel):
+   mx_vm_trace_restart starts a fault log of the calling program, or starts
+   it again: each page fault that made a page resident, 4096 at most, in
+   64 KiB of frames the program gives up until it ends. One program at a
+   time (another's restart does nothing). The file: the head (version 2,
+   block 0, interval_ms 0), then events of 16 bytes. Thread code. */
+struct mx_vm_fault {
+  u32 va_flags; /* the page's address | MX_VM_FAULT_* */
+  u32 epc;      /* the faulting instruction (0: a pin or the pager); a mark: its tag */
+  u32 t_us;     /* since the restart */
+  u32 us;       /* what the fault took (the room made, the read), not the lock's wait */
+};
+#define MX_VM_FAULT_KIND 3u    /* va_flags & 3: */
+#define MX_VM_FAULT_ZERO 0u    /*   a new page, zero filled */
+#define MX_VM_FAULT_SWAP 1u    /*   read from the swap file */
+#define MX_VM_FAULT_FILE 2u    /*   read from a file (code and data of a program linked into VM, a mapped file) */
+#define MX_VM_FAULT_MARK 3u    /*   mx_vm_trace_mark (va_flags is 3, epc the tag) */
+#define MX_VM_FAULT_WRITE 4u   /* a store */
+#define MX_VM_FAULT_OUT 8u     /* a dirty page was written to the swap file first, for room */
+#define MX_VM_FAULT_PIN 16u    /* by mx_vm_pin, not an instruction */
+#define MX_VM_FAULT_PAGER 32u  /* the pager's read ahead (mx__vm_prefetch) */
 /* A mark in the trace (a frame, a level, a profile's start and stop). */
 void mx_vm_trace_mark(u32 tag);
 /* Drop what was recorded and record from here (a game's loading left
    out: a few seconds before the frames to study, so memory is warm when
    they start). */
 void mx_vm_trace_restart(void);
-/* Write the trace to path (the head, then the events), and go on
-   recording. Thread code. Returns the events written, or -1. */
+/* Write the trace (or the fault log) to path (the head, then the events),
+   and go on recording. Thread code. Returns the events written, or -1. */
 int mx_vm_trace_save(const char *path);
 
 /* The program break (libmxc's sbrk): VM when VM is on, otherwise the core

@@ -138,6 +138,18 @@ which replays it with other page sizes, memory sizes and eviction policies:
 * Replaying `vm18_trace` (PCSX2) with the clock at 32 KiB gives the run's swap ins exactly
   (72); the writes differ, since PCSX2 writes every page out (no dirty tracking).
 
+### The fault log
+
+Without a trace (always under the kernel, whose VM has none) `mx_vm_trace_restart` starts a
+log of the calling program's page faults instead, or starts it again: each fault that made one
+of its pages resident, 16 bytes (`struct mx_vm_fault`): the page's address with
+`MX_VM_FAULT_*` (zero fill, swap in, file in; a store; a dirty page written out first for
+room; by `mx_vm_pin` or the pager instead of an instruction), the faulting instruction (EPC),
+the time since the restart and what the fault took, in µs. `mx_vm_trace_mark` adds a mark,
+`mx_vm_trace_save(path)` writes the head (version 2, `block` 0) and the events. 4096 events at
+most (then `lost`), in two frames the program gives up until it ends; one program at a time.
+Bin the addresses and EPCs against the program's map to see what pages in. `tests/ps2/k58_faults.c`.
+
 ## Facts (PS2)
 
 | Fact | Value | Conditions | Source | Date |

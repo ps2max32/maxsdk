@@ -4,6 +4,7 @@
 #include <mx/gs.h>
 #include <mx/irq.h>
 #include <mx/kernel.h>
+#include <mx/screen.h>
 #include <mx/sif.h>
 #include <mx/tex.h>
 #include <mx/timer.h>
@@ -349,6 +350,20 @@ void mx_gs_init_mode(u32 w, u32 h, u32 flags) {
      mode, each field shows every other line of the buffer */
   struct mx_video_mode m = flags & MX_GS_PAL ? mx_video_pal : mx_video_ntsc;
   m.ffmd = h <= 256;
+#ifdef MX_KERNEL
+  /* under MXOS the system's mode (<mx/screen.h>): w x h at the whole factors
+     that show it largest with the shape it has on the region's TV mode */
+  {
+    struct mx_screen_conf c, sd;
+    struct mx_screen s;
+    mx_screen_conf(&c);
+    sd = c;
+    sd.full = 0, sd.wide = 0;
+    if (!mx_screen_fit(&sd, c.pal ? MX_SCREEN_576I : MX_SCREEN_480I, w, h, 0, &s) &&
+        !mx_screen_pick(&c, w, h, s.aspect, MX_SCREEN_EXACT, &s))
+      mx_screen_video(&c, &s, &m);
+  }
+#endif
   reset_state();
   crt(&m);
 

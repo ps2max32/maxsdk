@@ -60,3 +60,5 @@ E 054 netif_set_link_up
 E 055 netif_set_link_down
 E 056 tcpip_callback
 E 057 pbuf_coalesce
+E 058 mxnet_status
+E 059 mxnet_config

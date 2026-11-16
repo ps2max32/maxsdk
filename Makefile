@@ -127,7 +127,7 @@ $(VM_TESTS:%=$(OUT)/tests/%.elf): $(LIBK) $(HERE)/ee/ld/maxsdk-vm.ld
 # (frame.c, fpresent.c under the kernel) as well: the frame pipeline without VM is the
 # standalone frame and fpresent's
 K_TESTS = k37_iopchan k43_phys k44_read k45_alldir k40_frame k41_present
-K_STAY_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k38_service k42_timers k46_spawnloop k47_sideend k48_turns k49_three k50_home k51_notify k52_settings k53_pads k54_isshell k55_homeshell k56_time
+K_STAY_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k38_service k42_timers k46_spawnloop k47_sideend k48_turns k49_three k50_home k51_notify k52_settings k53_pads k54_isshell k55_homeshell k56_time k57_net k58_faults k59_video
 $(K_TESTS:%=$(OUT)/tests/%.elf): MX_TARGET = mxos
 $(K_TESTS:%=$(OUT)/tests/%.elf): MX_VM_TEXT = core
 $(K_TESTS:%=$(OUT)/tests/%.elf): $(LIBK) $(HERE)/ee/ld/maxsdk-vm-coretext.ld
@@ -159,7 +159,7 @@ $(IOP_OUT)/chantest.irx: $(wildcard $(HERE)/tests/iop/chantest/src/*)
 $(OUT)/tests/k31_beside.elf $(OUT)/tests/vm32_side.elf: CFLAGS += -mvu0 $(foreach r,$(shell seq 1 31),-ffixed-vf$(r))
 
 # tests of the VM's inside: the VM in the program, on a bare PS2 or PCSX2
-VM_INSIDE = $(filter-out $(VM_TESTS:%=$(OUT)/tests/%.elf),$(patsubst $(HERE)/tests/ps2/%.c,$(OUT)/tests/%.elf,\
+VM_INSIDE = $(filter-out $(VM_TESTS:%=$(OUT)/tests/%.elf) $(K_STAY_TESTS:%=$(OUT)/tests/%.elf),$(patsubst $(HERE)/tests/ps2/%.c,$(OUT)/tests/%.elf,\
               $(shell grep -lE 'mx_vm_|mx__vm_|mx_mem_|mx_heap_' $(HERE)/tests/ps2/*.c))) \
             $(patsubst $(HERE)/probe/%.c,$(OUT)/probe/%.elf,$(shell grep -lE 'mx_vm_|mx__vm_' $(HERE)/probe/*.c))
 $(VM_INSIDE): LIB = $(LIBKERN)

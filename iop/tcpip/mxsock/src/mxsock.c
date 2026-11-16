@@ -7,6 +7,9 @@
 #include <sysclib.h>
 #include <thbase.h>
 #include <mxsock.h>
+#include <mxnet.h>
+#include <sifman.h>
+#include <intrman.h>
 #include <sifrpc.h>
 
 IRX_ID("mxsock", 1, 0);
@@ -70,6 +73,50 @@ static int do_connect(int s, int fd, u32 ip, u32 port) {
   return err ? MXSOCK_CLOSED : 0;
 }
 
+/* ---- the network's state for the kernel (MXSOCK_NET_WATCH) ---- */
+
+static u32 watch_ee; /* where it goes, 0: nobody asked */
+static int watch_now; /* write it at the next look, changed or not */
+static struct mxnet_status seen __attribute__((aligned(64)));
+static struct mxnet_status sent __attribute__((aligned(64)));
+
+/* changed: but the lease, which counts down by itself */
+static int differs(const struct mxnet_status *a, const struct mxnet_status *b) {
+  return a->link != b->link || a->ip != b->ip || a->mask != b->mask || a->gw != b->gw ||
+         a->dns != b->dns || a->dhcp != b->dhcp || memcmp(a->mac, b->mac, 6);
+}
+
+static void watch_send(void) {
+  SifDmaTransfer_t d;
+  int st, id;
+  u32 gen = sent.gen + 1;
+  sent = seen;
+  sent.gen = gen;
+  d.src = &sent, d.dest = (void *)watch_ee, d.size = sizeof sent, d.attr = 0;
+  do {
+    CpuSuspendIntr(&st);
+    id = (int)sceSifSetDma(&d, 1);
+    CpuResumeIntr(st);
+    if (!id)
+      DelayThread(100);
+  } while (!id);
+  while (sceSifDmaStat(id) >= 0)
+    DelayThread(50);
+}
+
+/* twice a second: what the stack says now, to the EE when it changed */
+static void watch_thread(void *arg) {
+  (void)arg;
+  for (;;) {
+    mxnet_status(&seen);
+    if (watch_ee && (watch_now || differs(&seen, &sent))) {
+      watch_now = 0;
+      watch_send();
+    }
+    DelayThread(500000);
+  }
+}
+
 static void *rpc(int fno, void *data, int size) {
   u32 *a = data;
   u8 *in = (u8 *)(a + MXSOCK_ARGS), *out = (u8 *)(rpc_out + MXSOCK_ANSWER);
@@ -87,6 +134,26 @@ static void *rpc(int fno, void *data, int size) {
         sockets[s].fd = 0;
       }
     r[0] = 0;
+    return r;
+  }
+  if (fno == MXSOCK_NET_WATCH) {
+    static int started;
+    watch_ee = a[0] & 0x1FFFFFC0u;
+    watch_now = 1;
+    if (!started) {
+      iop_thread_t t = {TH_C, 0, watch_thread, 0x800, 0x60};
+      int id = CreateThread(&t);
+      if (id > 0 && StartThread(id, 0) >= 0)
+        started = 1;
+    }
+    r[0] = started ? MXNET_STATUS_VERSION : -12;
+    return r;
+  }
+  if (fno == MXSOCK_NET_CONFIG) {
+    struct mxnet_config c;
+    memcpy(&c, a, sizeof c);
+    r[0] = mxnet_config(&c);
+    watch_now = 1;
     return r;
   }
   int s = (int)a[0];

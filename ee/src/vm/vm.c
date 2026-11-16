@@ -326,6 +326,53 @@ static void tlb_sync_s(struct vm_space *s, u32 pg) {
 
 static void tlb_sync(u32 pg) { tlb_sync_s(vs, pg); }
 
+/* ---- the fault log (mx_vm_trace_restart without a trace) --------------------------- */
+
+/* One space's page faults that made a page resident (zero fill, swap in,
+   file in): where, by what instruction, when, how long. In frames taken
+   while that space was in use, so they go back to the pool with it. */
+#define FLOG_BYTES (2 * PAGE)
+static struct {
+  struct mx_vm_fault *buf; /* 0: no log */
+  struct vm_space *space;
+  u32 cap, n, lost;
+  u32 us, cyc, t_last; /* the clock: µs since the start */
+  u32 epc, src;        /* the fault being handled: its EPC and MX_VM_FAULT_PIN/PAGER */
+} flog;
+
+/* Interrupts off. */
+static u32 flog_clock(void) {
+  u32 c = mx_count();
+  flog.cyc += c - flog.t_last;
+  flog.t_last = c;
+  if (flog.cyc >= MX_EE_HZ / 1000000u) {
+    flog.us += flog.cyc / (MX_EE_HZ / 1000000u);
+    flog.cyc %= MX_EE_HZ / 1000000u;
+  }
+  return flog.us;
+}
+
+static void flog_push(u32 va_flags, u32 epc, u32 cycles) {
+  int was = mx_di();
+  if (flog.n < flog.cap) {
+    struct mx_vm_fault *e = &flog.buf[flog.n++];
+    e->va_flags = va_flags, e->epc = epc;
+    e->t_us = flog_clock();
+    e->us = cycles / (MX_EE_HZ / 1000000u);
+  } else
+    flog.lost++;
+  mx_irq_restore(was);
+}
+
+/* the space's frames are freed: the log with them */
+static void flog_drop(struct vm_space *n) {
+  if (flog.buf && flog.space == n) {
+    int was = mx_di();
+    flog.buf = 0, flog.space = 0, flog.cap = 0;
+    mx_irq_restore(was);
+  }
+}
+
 /* ---- the trace ------------------------------------------------------------------- */
 
 static void tr_push(u32 e) {
@@ -397,6 +444,8 @@ void mx__irq_vbon_unhook(void (*fn)(void));
    refills, some 4000 cycles. With a trace, its tick does that each
    interval instead. Interrupts off. */
 static void vblank(void) {
+  if (flog.buf)
+    flog_clock(); /* mx_count wraps every 14.6 s */
   if (vm.tr.cap) {
     tr_tick();
     return;
@@ -419,6 +468,10 @@ static void vblank(void) {
 }
 
 void mx_vm_trace_mark(u32 tag) {
+  if (flog.buf && flog.space == vs) {
+    flog_push(MX_VM_FAULT_MARK, tag, 0);
+    return;
+  }
   if (!vm.tr.cap)
     return;
   int was = mx_di();
@@ -427,16 +480,48 @@ void mx_vm_trace_mark(u32 tag) {
 }
 
 void mx_vm_trace_restart(void) {
-  if (!vm.tr.cap)
+  if (!vm.tr.cap) {
+    /* the fault log of the calling program's space (one space at a time) */
+    if (!vm.active || (flog.buf && flog.space != vs))
+      return;
+    if (!flog.buf) {
+      struct mx_vm_fault *b = mx__vm_frames_take(FLOG_BYTES);
+      if (!b)
+        return;
+      int was = mx_di();
+      flog.buf = b, flog.space = vs, flog.cap = FLOG_BYTES / sizeof *b;
+      mx_irq_restore(was);
+    }
+    int was = mx_di();
+    flog.n = flog.lost = 0;
+    flog.us = flog.cyc = 0;
+    flog.t_last = mx_count();
+    mx_irq_restore(was);
     return;
+  }
   int was = mx_di();
   vm.tr.n = vm.tr.lost = 0;
   mx_irq_restore(was);
 }
 
 int mx_vm_trace_save(const char *path) {
-  if (!vm.tr.cap)
-    return -1;
+  if (!vm.tr.cap) {
+    if (!flog.buf || flog.space != vs)
+      return -1;
+    int was = mx_di();
+    u32 n = flog.n, lost = flog.lost;
+    mx_irq_restore(was);
+    struct mx_vm_trace_head h = {MX_VM_TRACE_MAGIC, 2, PAGE, 0, vs->npages, vs->nmap,
+                                 vm.nframes, 0, n, lost};
+    int fd = mx_fio_open(path, MX_FIO_WRONLY | MX_FIO_CREAT | MX_FIO_TRUNC);
+    if (fd < 0)
+      return -1;
+    int r = mx_fio_write(fd, &h, sizeof h);
+    if (!r && n)
+      r = mx_fio_write(fd, flog.buf, n * sizeof *flog.buf);
+    mx_fio_close(fd);
+    return r ? -1 : (int)n;
+  }
   int was = mx_di();
   u32 n = vm.tr.n, lost = vm.tr.lost;
   mx_irq_restore(was);
@@ -828,6 +913,7 @@ void mx__vm_space_free(struct vm_space *n) {
     else
       i++;
   spaces[n->id] = 0;
+  flog_drop(n);
   /* the swap file its program brought: closed with it when no other space
      has a page in it (a host: file is gone with the host's run on the PS2,
      and the next one's descriptors take its number) */
@@ -1540,7 +1626,16 @@ static void fault_in(u32 pg, int write) {
     return;
   }
   mx_irq_restore(was);
+  if (!flog.buf || flog.space != vs) {
+    place(pg, frame_for_vs(), write);
+    return;
+  }
+  u32 c0 = mx_count(), outs = vm.st.swap_outs, fl = vs->flags[pg];
   place(pg, frame_for_vs(), write);
+  u32 kind = fl & PG_SWAP ? MX_VM_FAULT_SWAP : fl & PG_FILE ? MX_VM_FAULT_FILE : MX_VM_FAULT_ZERO;
+  flog_push(page_va(pg) | kind | flog.src | (write ? MX_VM_FAULT_WRITE : 0) |
+                (outs != vm.st.swap_outs ? MX_VM_FAULT_OUT : 0),
+            flog.src ? 0 : flog.epc, mx_count() - c0);
 }
 
 static int lock_owner; /* the thread that has it (vm_fatal gives it up) */
@@ -1575,6 +1670,7 @@ void mx__vm_slow(struct mx__vm_x *f) {
   lock();
   mx__vm_where = 2;
   vm.st.faults++;
+  flog.epc = f->epc, flog.src = 0;
   fault_in(pg, (f->cause >> 2 & 31) == 3);
   unlock();
   mx__vm_where = 3;
@@ -1736,8 +1832,10 @@ int mx_vm_pin(const void *p, u32 bytes, u32 flags) {
       map(pg, 1);
       mx_irq_restore(was);
       vm.st.overwrites++;
-    } else
+    } else {
+      flog.src = MX_VM_FAULT_PIN;
       fault_in(pg, (flags & MX_VM_PIN_WRITE) != 0);
+    }
     if (vs->pins[pg] == 255)
       vm_fatal("mx_vm_pin: pinned 255 times", pg);
     int was = mx_di();
@@ -2054,8 +2152,10 @@ static void pager(void *arg) {
         continue;
       lock();
       for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b; pg++)
-        if (!vs->frame_of[pg])
+        if (!vs->frame_of[pg]) {
+          flog.src = MX_VM_FAULT_PAGER;
           fault_in(pg, 0);
+        }
       unlock();
 
     }

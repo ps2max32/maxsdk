@@ -21,7 +21,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 29
+#define MX_KERNEL_VERSION 31
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -124,6 +124,7 @@ struct mx_setting;
 struct mx_pad_info;
 struct mx_pad_pairing;
 struct mx_pad_paired;
+struct mx_net_status;
 struct mxk_services {
   u32 magic;   /* MX_KERNEL_MAGIC */
   u32 version; /* MX_KERNEL_VERSION of the kernel */
@@ -289,6 +290,8 @@ struct mxk_services {
   /* version 29: the time (<mx/time.h>); time_set the shell's only */
   s64 (*time_now)(void);
   int (*time_set)(s64 utc);
+  /* version 30: the network's state (<mx/net.h>) */
+  int (*net_status)(struct mx_net_status *s);
 };
 int mx__iop_write_phys(u32 iop, u32 src, u32 size);
 /* the kernel's own writer of the CRTC timing, used by mx_video_set in it
