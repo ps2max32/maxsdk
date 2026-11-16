@@ -929,6 +929,11 @@ CPU on read circuit 1 over the program's picture.
 - Sub-steps, each on the PS2 with a television:
   - 5a: the owner, the reset only at the owner's end, frame calls of the others wait; the
     system's video mode and "auto" for games.
+    State 2026-11-16: a process beside ends without the reset (since 4c); frame calls of a
+    process that is not in front wait (kernel version 33, `k65_frontwait`); the system's video
+    mode and what a game may take are the video settings (kernel version 31,
+    `<mx/screen.h>`). Open: a program that sets a mode it may not take is not refused, and
+    one that writes the GS without the frame pipeline is not held.
   - 5b: the hand-over and "graphics lost" in maxsdk and libgl. Test: a program in front hands
     over to a second one that overwrites all GS memory but the kept picture, and VU1; back,
     its next frames are the same as without the hand-over.

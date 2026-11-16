@@ -21,7 +21,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 32
+#define MX_KERNEL_VERSION 33
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -300,6 +300,11 @@ struct mxk_services {
   void (*home_picture_set)(const struct mx_picture *p, u32 phys);
   int (*home_picture)(struct mx_picture *p);
   int (*home_picture_read)(void *buf, u32 bytes);
+  /* version 33: the graphics are the process in front's (mx OS plan step
+     5a). front_wait: returns once the caller's process is in front; the
+     frame code calls it at each frame boundary (src/gs/home.c), so a process
+     beside the one in front draws nothing. */
+  void (*front_wait)(void);
 };
 int mx__iop_write_phys(u32 iop, u32 src, u32 size);
 /* the kernel's own writer of the CRTC timing, used by mx_video_set in it

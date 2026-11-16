@@ -182,6 +182,17 @@ the region's 480i or 576i and confirm it. `mx_gs_init` in libmxk shows its w x h
 `mx_screen_pick` (exact size, the shape it has on the region's TV mode). On PCSX2 the screen is
 set up again after the settings are read. `tests/ps2/k59_video.c`.
 
+Version 33 (2026-11-16, mx OS plan step 5a): the graphics are the process in front's. The
+frame code asks at each frame boundary (`mx__home_poll`, `front_wait`), and a process that is
+not in front waits there, asleep, until it is: the one in front ended, or `mx_proc_front` or the
+home button brought it there (`apps/mxos/ee/main.c`'s `kproc_front_wait`). So a shell that runs
+beside the game it started draws nothing over it. A process that draws through the frame
+pipeline only; one that writes the GS itself is not held. `tests/ps2/k65_frontwait.c` (a
+frame's begin beside a child that sleeps two seconds returns after the child's end; on a
+SCPH-70004 and a SCPH-90006). What it found for step 5b: when the one in front ends, the kernel
+resets the GIF, the VIFs and the DMA channels (the owner ended), so the frame stream of the
+process that is in front next no longer runs: it has to set its graphics up again.
+
 Version 32 (2026-11-16, mx OS plan step 5): the picture of the program paused at the home
 button, for the shell (`<mx/screen.h>`: `mx_home_picture`, `mx_home_picture_read`;
 `apps/mxos/ee/kpic.c`, `src/gs/home.c`).

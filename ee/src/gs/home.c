@@ -77,6 +77,11 @@ void *mx__home_capture(struct mx_picture *out) {
 void mx__home_poll(void) {
   if (!mx__kernel || mx__kernel->version < 7)
     return;
+  /* kernel version 33: the GS is the process in front's; another's frames
+     wait here until it is in front */
+  if (mx__kernel->version >= 33 &&
+      mx__kernel->size >= __builtin_offsetof(struct mxk_services, front_wait) + sizeof(void *))
+    mx__kernel->front_wait();
   u32 pages = mx__kernel->home_wanted();
   if (!pages)
     return;
