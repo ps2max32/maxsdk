@@ -13,7 +13,11 @@
 
    Pad: start exits. Without it the program runs a few seconds, saves both
    fields as host:hires.tga (1920 x 1080) and exits. Arguments: s<n> n
-   seconds, f<n> frames every n fields (default 4). */
+   seconds, f<n> frames every n fields (default 4), l<n> strips of n lines
+   (mx_hires_strip_lines: l64 is nine strips), r the strips' own records
+   (mx_hires_strip_records): each strip's pass alone draws a block of the
+   strip's colour at the strip's left end, and one in the strip below it,
+   which its scissor leaves out. */
 
 #include <mx/hires.h>
 #include <mx/hud.h>
@@ -23,7 +27,9 @@
 #define W 1920
 #define H 540
 
-static u8 rec[3 * 128 * 1024] MX_ALIGNED(64);
+/* core memory: the DMAC reads the records (an MXOS build is linked into VM) */
+static u8 rec[3 * 128 * 1024] MX_CORE_BSS MX_ALIGNED(64);
+static u8 srec[MX_HIRES_SLOTS * MX_HIRES_PASSES * 1024] MX_CORE_BSS MX_ALIGNED(64);
 
 static u32 px(float x) { return mx_gs_px(0) + (u32)(x * 16.0f); }
 static u32 py(float y) { return mx_gs_py(0) + (u32)(y * 16.0f); }
@@ -74,22 +80,30 @@ static void scene(u32 k, float c, float s) {
 }
 
 int main(int argc, char **argv) {
-  int secs = 4;
+  int secs = 4, strips = 0;
   u32 every = 4;
   for (int a = 1; a < argc; a++) {
-    if (argv[a][0] == 's' || argv[a][0] == 'f') {
+    if (argv[a][0] == 's' || argv[a][0] == 'f' || argv[a][0] == 'l') {
       u32 v = 0;
       for (const char *p = argv[a] + 1; *p >= '0' && *p <= '9'; p++)
         v = v * 10 + (u32)(*p - '0');
       if (argv[a][0] == 's')
         secs = (int)v;
+      else if (argv[a][0] == 'l')
+        mx_hires_strip_lines(v);
       else
         every = v ? v : 1;
     }
+    if (argv[a][0] == 'r')
+      strips = 1;
   }
   if (mx_hires_init(&mx_video_1080i, W, H, MX_GS_PSM_CT16S, rec, sizeof rec, (void *)0x70002000,
                     0x2000) < 0) {
     mx_printf("hires: no 1080i, or the framebuffer does not fit\n");
+    MX_TEST_END(1);
+  }
+  if (strips && !mx_hires_strip_records(srec, sizeof srec)) {
+    mx_printf("hires: no strip records\n");
     MX_TEST_END(1);
   }
   mx_hud_init(mx_gs.tbp, H);
@@ -107,6 +121,17 @@ int main(int argc, char **argv) {
     mx_frame_begin_n();
     mx_hires_clear(0x10, 0x18, 0x30);
     scene(k, c, s);
+    if (strips) {
+      /* into each strip's own record: its block, and one a strip lower */
+      u32 sh = mx_hires_strip_height();
+      for (u32 j = 0; j < mx_hires_passes(); j++) {
+        static const u32 col[4] = {0x40FF40, 0xFF40FF, 0x40FFFF, 0xFFFF40};
+        mx_hires_strip((int)j);
+        rect(8, (float)(j * sh + 4), 72, (float)(j * sh + 28), col[j % 4]);
+        rect(80, (float)((j + 1) * sh + 4), 144, (float)((j + 1) * sh + 28), col[j % 4]);
+      }
+      mx_hires_strip(-1);
+    }
     char str[96];
     char *p = mx_hud_cat(str, "1080I HIRES  FIELDS ");
     p = mx_hud_u(p, mx_hires_stats.fields);
@@ -124,9 +149,10 @@ int main(int argc, char **argv) {
     while (mx_gs.vsync - at < every)
       ;
   }
-  mx_printf("hires: %u frames, fields %u, passes %u, late %u, shown %u, record max %u bytes\n", k,
-            mx_hires_stats.fields, mx_hires_stats.passes, mx_hires_stats.late,
-            mx_hires_stats.shown, mx_hires_stats.rec_max);
+  mx_printf("hires: %u frames, %u strips, fields %u, passes %u, late %u, over %u, shown %u, record max %u bytes, "
+            "a strip's %u\n", k, mx_hires_passes(), mx_hires_stats.fields, mx_hires_stats.passes,
+            mx_hires_stats.late, mx_hires_stats.over, mx_hires_stats.shown, mx_hires_stats.rec_max,
+            mx_hires_stats.strip_max);
   int r = mx_hires_save_tga("host:hires.tga");
   mx_printf("hires: screenshot %d\n", r);
   int ok = r == 0 && mx_hires_stats.shown > 0 && mx_hires_stats.fields > 0;

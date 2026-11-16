@@ -10,6 +10,7 @@
 #include <mx/trace.h>
 #include <mx/vm.h>
 #include <mx/vu.h>
+#include <mx/hires.h>
 #include "frame_int.h"
 
 /* gs.c: what IMR was written last (write only) */
@@ -48,10 +49,14 @@ static struct {
      into the frame's record, which hires.c plays */
   int record;
   int rec_open;  /* the frame's records are open */
-  u8 *rec_at[2]; /* the next quadword of the main record and of the once one */
-  u32 rec_left[2]; /* quadwords left in each, the final RET not counted */
+  /* the next quadword of the main record, of the once one, and of each
+     strip's own (mx_hires_strip) */
+  u8 *rec_at[2 + MX_HIRES_PASSES];
+  u32 rec_left[2 + MX_HIRES_PASSES]; /* quadwords left in each, the final RET not counted */
+  u32 rec_strips; /* strips with a record of their own */
   int rec_full;  /* halves were left out */
-  int rec_dest;  /* where the stream goes: 0 main, 1 once (mx_hires_once) */
+  int rec_dest;  /* where the stream goes: 0 main, 1 once (mx_hires_once), 2 + k strip k's */
+  int rec_strip; /* mx_hires_strip's: -1 the main record */
 } f;
 
 void mx_frame_vsync(int on) {
@@ -171,6 +176,8 @@ void mx__frame_init_record(void *spr, u32 spr_bytes) {
   f.record = 1;
   f.rec_open = 0;
   f.rec_dest = 0;
+  f.rec_strip = -1;
+  f.rec_strips = 0;
 }
 
 /* Queue the slot being copied into, once its copy is done. */
@@ -207,6 +214,10 @@ static void rec_open(void) {
   f.rec_at[0] = mx__hires_begin(&qw, &f.rec_at[1], &oqw);
   f.rec_left[0] = qw - 1;
   f.rec_left[1] = oqw - 1;
+  u32 sqw = 0;
+  f.rec_strips = mx__hires_strips(&f.rec_at[2], &sqw);
+  for (u32 k = 0; k < f.rec_strips; k++)
+    f.rec_left[2 + k] = sqw - 1;
   f.rec_full = 0;
   f.rec_open = 1;
 }
@@ -216,7 +227,7 @@ static void rec_flush(u32 n) {
   mx_dma_wait(MX_CH_FROMSPR);
   int d = f.rec_dest;
   /* the once record full: in the main one (played every pass, as right) */
-  if (d && n > f.rec_left[1])
+  if (d == 1 && n > f.rec_left[1])
     d = 0;
   if (f.rec_full || n > f.rec_left[d]) {
     f.rec_full = 1;
@@ -229,12 +240,31 @@ static void rec_flush(u32 n) {
 
 static void flush(void);
 
+/* where the stream goes when no once record is being written */
+static int rec_strip_dest(void) {
+  return f.rec_strip >= 0 && (u32)f.rec_strip < f.rec_strips ? 2 + f.rec_strip : 0;
+}
+
 void mx_hires_once(int on) {
-  if (!f.record || f.rec_dest == !!on)
+  if (!f.record)
+    return;
+  int d = on ? 1 : rec_strip_dest();
+  if (f.rec_dest == d)
     return;
   /* what is built so far goes where it was meant to */
   flush();
-  f.rec_dest = !!on;
+  f.rec_dest = d;
+}
+
+void mx_hires_strip(int k) {
+  if (!f.record)
+    return;
+  rec_open();
+  f.rec_strip = k;
+  if (f.rec_dest == 1 || f.rec_dest == rec_strip_dest())
+    return;
+  flush();
+  f.rec_dest = rec_strip_dest();
 }
 
 /* Push the current half into the ring and switch to the other one. The
@@ -465,14 +495,17 @@ static void finish(void) {
     flush();
     rec_open();
     mx_dma_wait(MX_CH_FROMSPR);
-    for (int d = 0; d < 2; d++) {
+    for (u32 d = 0; d < 2 + f.rec_strips; d++) {
       u64 *t = (u64 *)MX_UNCACHED(f.rec_at[d]);
       t[0] = mx_dmatag(MX_TAG_RET, 0, MX_PADDR_NONE, 0);
       t[1] = 0;
     }
+    if (f.rec_strips)
+      mx__hires_strips_end(&f.rec_at[2]);
     mx__hires_end(f.rec_at[0] + 16, f.rec_at[1] + 16, f.rec_full);
     f.rec_open = 0;
     f.rec_dest = 0;
+    f.rec_strip = -1;
     mx_gs.frames++;
     return;
   }

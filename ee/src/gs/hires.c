@@ -21,7 +21,7 @@ enum { FREE, BUILDING, WAITING, PLAYED, RETIRING };
    record could wait fields for it; larger ones (a level's textures) would
    make that pass late */
 #define ONCE_INLINE_QW 1024
-#define NPASS_CHAINS 16
+#define NPASS_CHAINS 32
 
 static struct {
   struct mx_dmaq q;
@@ -34,6 +34,7 @@ static struct {
   struct {
     u8 *mem;
     u8 *once;          /* the once record: sent over PATH3 when the record is complete */
+    u8 *strip[MX_HIRES_PASSES]; /* the strips' own records (mx_hires_strip_records) */
     volatile int once_pending; /* its PATH3 DMA may still run */
     int once_inline;   /* to be CALLed by the record's first pass */
     volatile int state;
@@ -43,6 +44,11 @@ static struct {
     int kicked;
   } slot[MX_HIRES_SLOTS];
   u32 qw_per_slot, once_qw; /* main and once records' quadwords */
+  u32 strip_qw;             /* a strip's own record's, 0: none */
+  /* the passes that may run and are not sent yet, in the order they came */
+  volatile u8 queue[MX_HIRES_PASSES];
+  volatile u32 nqueue;
+  volatile int busy;        /* a pass is being sent */
   volatile int played;   /* the slot played, -1: none yet */
   volatile u32 wait[MX_HIRES_SLOTS]; /* the waiting slots, oldest first */
   volatile u32 nwait;
@@ -51,14 +57,13 @@ static struct {
   volatile u32 next_line; /* index into line[] of the next timer compare */
   volatile u32 parity;    /* the field the passes of this field are drawn for */
   int shift_field;
-  mx_event prev;
-  int prev_on;
   u32 prev_at, prev_k;
   u64 *chains;
   u32 nchain;
 } h;
 
 static u64 pass_mem[NPASS_CHAINS][PASS_QW * 2] MX_ALIGNED(64);
+static u32 cfg_strip_lines; /* mx_hires_strip_lines */
 /* mx_hires_save_tga's line */
 static u32 shot_line[2048] MX_ALIGNED(64);
 static u8 shot_out[2048 * 3];
@@ -147,6 +152,9 @@ static u64 *pass_chain(int s, u32 k, int shifted, int finish, int once) {
   c = mx_e_ad(c, MX_GS_REG_XYZ2, mx_gs_xyz(h.rt.ox, oy + (y0 << 4), 0));
   c = mx_e_ad(c, MX_GS_REG_XYZ2,
               mx_gs_xyz(h.rt.ox + (h.rt.w << 4), oy + ((y0 + h.strip_h) << 4), 0));
+  /* the strip's own record of the frame, after the main one */
+  if (h.strip_qw)
+    c = mx_e_call(c, h.slot[s].strip[k], 0, 0, 0);
   if (finish) {
     c = mx_e_end(c, 2, mx_vif_flush(), mx_vif_direct(2));
     c = mx_e_ad_tag(c, 1, 1);
@@ -163,8 +171,54 @@ static u64 *pass_chain(int s, u32 k, int shifted, int finish, int once) {
   return c0;
 }
 
-/* Pass k of the slot played into the VIF1 queue (in the timer interrupt). */
-static void kick(u32 k) {
+/* Pass k of the slot played into the VIF1 queue (in an interrupt handler,
+   or with interrupts off). Returns 0, or -1: not sent. */
+static int send(u32 k) {
+  int shifted = mx_video.interlace && mx_video.ffmd && h.shift_field == (int)h.parity;
+  int s = h.played;
+  int once = h.slot[s].once_inline;
+  u64 *c0 = pass_chain(s, k, shifted, 0, once);
+  mx_event e;
+  if (mx_dmaq_try_chain(&h.q, c0, 1, &e) < 0)
+    return -1;
+  h.prev_at = mx_count(), h.prev_k = k;
+  h.busy = 1;
+  h.slot[s].last = e, h.slot[s].kicked = 1;
+  h.slot[s].once_inline = 0;
+  mx_hires_stats.passes++;
+  return 0;
+}
+
+/* The next pass that may run, if none is being sent. */
+static void start_next(void) {
+  while (!h.busy && h.nqueue) {
+    u32 k = h.queue[0];
+    for (u32 i = 1; i < h.nqueue; i++)
+      h.queue[i - 1] = h.queue[i];
+    h.nqueue--;
+    if (send(k) < 0)
+      mx_hires_stats.late++;
+  }
+}
+
+/* A pass's DMA has ended (the queue's end interrupt): its time, from its
+   start; then the next one. */
+static MX_CORE_FN void pass_done(void *arg) {
+  (void)arg;
+  if (!h.busy)
+    return;
+  u32 t = (h.q.t_last_end - h.prev_at) / (MX_EE_HZ / 1000000);
+  if (t > mx_hires_stats.pass_us[h.prev_k])
+    mx_hires_stats.pass_us[h.prev_k] = t;
+  mx_hires_stats.pass_n[h.prev_k]++;
+  mx_hires_stats.pass_sum_us[h.prev_k] += t;
+  h.busy = 0;
+  start_next();
+}
+
+/* Pass k may run from now: the beam has left strip k + 1, which the pass
+   takes for its Z (in an interrupt handler). */
+static void may_run(u32 k) {
   retire();
   if (k == 0) {
     mx_hires_stats.fields++;
@@ -188,44 +242,35 @@ static void kick(u32 k) {
         h.slot[old].state = RETIRING;
       retire();
     }
-    /* drawn during this field (the beam on its last strip) for the next */
+    /* drawn during this field for the next */
     h.parity = (u32)MX_GET(GS_CSR_FIELD, MX_R64(MX_GS_CSR)) ^ 1;
   }
   if (h.played < 0)
     return;
-  /* the pass before is still being sent: this one is left out (the queue
-     stays one deep, and the pass chains it reads are not overwritten); its
-     strip shows what was there */
-  /* the pass before's time, from its kick to the end of its DMA */
-  if (h.prev_on && mx_event_done(h.prev)) {
-    u32 t = (h.q.t_last_end - h.prev_at) / (MX_EE_HZ / 1000000);
-    if (t > mx_hires_stats.pass_us[h.prev_k])
-      mx_hires_stats.pass_us[h.prev_k] = t;
-    h.prev_on = 0;
-  }
-  if (h.prev_on && !mx_event_done(h.prev)) {
-    mx_hires_stats.late++;
-    return;
-  }
-
-  int shifted = mx_video.interlace && mx_video.ffmd && h.shift_field == (int)h.parity;
-  int s = h.played;
-  int once = h.slot[s].once_inline;
-  u64 *c0 = pass_chain(s, k, shifted, 0, once);
-  mx_event e;
-  if (mx_dmaq_try_chain(&h.q, c0, 1, &e) < 0) {
-    mx_hires_stats.late++;
-    return;
-  }
-  h.prev_at = mx_count(), h.prev_k = k;
-  h.prev = e, h.prev_on = 1;
-  h.slot[s].last = e, h.slot[s].kicked = 1;
-  h.slot[s].once_inline = 0;
-  mx_hires_stats.passes++;
+  if (h.nqueue < MX_HIRES_PASSES)
+    h.queue[h.nqueue++] = (u8)k;
+  start_next();
 }
 
-/* The beam starts strip j: pass j + 1 (j the last: pass 0, for the next
-   field). */
+/* The beam comes to strip k: a pass for it that has not started is left
+   out (its strip shows what was there; the passes after it keep their
+   time). */
+static void too_late(u32 k) {
+  if (h.busy && h.prev_k == k)
+    mx_hires_stats.over++;
+  for (u32 i = 0; i < h.nqueue; i++)
+    if (h.queue[i] == k) {
+      for (u32 j = i + 1; j < h.nqueue; j++)
+        h.queue[j - 1] = h.queue[j];
+      h.nqueue--;
+      mx_hires_stats.late++;
+      return;
+    }
+}
+
+/* The beam starts strip j: it has left strip j - 1, the Z of pass j - 2,
+   which may run now. The pass of the last strip but one waits for the end
+   of the last strip, the vblank (vsync_hook). */
 /* an interrupt handler: pinned (mx OS plan 4b) */
 static MX_CORE_FN void timer_irq(void *arg) {
   (void)arg;
@@ -236,15 +281,22 @@ static MX_CORE_FN void timer_irq(void *arg) {
   h.next_line = j + 1;
   if (j + 1 < h.npass)
     TMR_COMP = h.line[j + 1];
-  kick((j + 1) % h.npass);
+  too_late(j);
+  if (j)
+    may_run((j + h.npass - 2) % h.npass);
 }
 
-/* The vblank starts: H-blanks counted from here. */
+/* The vblank starts: H-blanks counted from here. The beam has left the
+   last strip: the pass of the one before it may run. */
 static void vsync_hook(void) {
   TMR_COUNT = 0;
   h.next_line = 0;
   TMR_COMP = h.line[0];
+  may_run(h.npass - 2);
 }
+
+void mx_hires_strip_lines(u32 lines) { cfg_strip_lines = lines; }
+u32 mx_hires_strip_height(void) { return h.strip_h; }
 
 static u32 align_up(u32 v, u32 a) { return (v + a - 1) / a * a; }
 
@@ -266,7 +318,7 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   h.page_h = b16 ? 64 : 32;
   /* a third of the picture in whole pages; less when that leaves fewer
      than three strips (the beam would never reach the third's line) */
-  h.strip_h = align_up((hgt + 2) / 3, h.page_h);
+  h.strip_h = align_up(cfg_strip_lines ? cfg_strip_lines : (hgt + 2) / 3, h.page_h);
   while (h.strip_h > h.page_h && (hgt + h.strip_h - 1) / h.strip_h < 3)
     h.strip_h -= h.page_h;
   h.npass = (hgt + h.strip_h - 1) / h.strip_h;
@@ -295,11 +347,11 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   u32 per = mm.interlace && !mm.ffmd ? 1 : 2; /* field lines per 2 buffer lines */
   for (u32 j = 0; j < h.npass; j++)
     h.line[j] = top + j * h.strip_h * magv * per / 2;
-  /* line[npass - 1] kicks pass 0 of the next field, whose Z buffer is
-     strip 1 (its clear writes all of it): with three strips the beam has
-     only just left strip 1 there, so a few lines later (pass 0 still has
-     the last strip and the vblank) */
-  h.line[h.npass - 1] += 8;
+  /* the beam must have left a pass's Z strip (its clear writes all of it)
+     when the pass may run: line j lets pass j - 2 run, a few lines into
+     strip j */
+  for (u32 j = 1; j < h.npass; j++)
+    h.line[j] += 8;
 
   /* a slot: its main record, then its once record (a quarter) */
   u32 slot_qw = bytes / MX_HIRES_SLOTS / 16;
@@ -322,11 +374,15 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   h.building = -1;
   h.rgb = 0;
   h.shift_field = 0;
-  h.prev_on = 0;
+  h.busy = 0;
+  h.nqueue = 0;
+  h.strip_qw = 0;
   h.nchain = 0;
   mx_hires_stats = (struct mx_hires_stats){0};
 
   mx_dmaq_init(&h.q, MX_CH_VIF1);
+  h.q.on_done = pass_done;
+  h.q.on_done_arg = 0;
   mx__frame_init_record(spr, spr_bytes);
 
   /* a timer counts H-blanks; its compare is the next strip's line */
@@ -382,6 +438,46 @@ u8 *mx__hires_begin(u32 *qw, u8 **once, u32 *once_qw) {
   *once = h.slot[h.building].once;
   *once_qw = h.once_qw;
   return h.slot[h.building].mem;
+}
+
+u32 mx_hires_strip_records(void *mem, u32 bytes) {
+  u32 qw = bytes / (MX_HIRES_SLOTS * h.npass) / 16;
+  if (!h.npass || qw < 8)
+    return 0;
+  mx_dcache_invalidate(mem, qw * 16 * MX_HIRES_SLOTS * h.npass);
+  int was = mx_di();
+  for (int i = 0; i < MX_HIRES_SLOTS; i++)
+    for (u32 k = 0; k < h.npass; k++) {
+      h.slot[i].strip[k] = (u8 *)mem + (i * h.npass + k) * qw * 16;
+      /* empty until a frame writes it: a slot may be played before */
+      u64 *t = (u64 *)MX_UNCACHED(h.slot[i].strip[k]);
+      t[0] = mx_dmatag(MX_TAG_RET, 0, MX_PADDR_NONE, 0);
+      t[1] = 0;
+    }
+  mx_sync();
+  h.strip_qw = qw;
+  mx_irq_restore(was);
+  return qw * 16;
+}
+
+u32 mx_hires_strip_record_bytes(void) { return h.strip_qw * 16; }
+
+u32 mx__hires_strips(u8 **at, u32 *qw) {
+  if (!h.strip_qw || h.building < 0)
+    return 0;
+  for (u32 k = 0; k < h.npass; k++)
+    at[k] = h.slot[h.building].strip[k];
+  *qw = h.strip_qw;
+  return h.npass;
+}
+
+void mx__hires_strips_end(u8 *const *end) {
+  int s = h.building;
+  for (u32 k = 0; k < h.npass; k++) {
+    u32 used = (u32)(end[k] - h.slot[s].strip[k]) + 16;
+    if (used > mx_hires_stats.strip_max)
+      mx_hires_stats.strip_max = used;
+  }
 }
 
 void mx__hires_end(u8 *end, u8 *once_end, int full) {

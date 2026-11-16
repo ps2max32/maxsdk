@@ -11,13 +11,19 @@
    picture (rounded up to whole pages), or less when that leaves fewer than
    three strips the beam reaches (640 x 224 at 16 bits: four 64-line strips). The frame stream
    (<mx/frame.h>) is not sent to VIF1: each frame's stream is recorded into
-   memory (a chain ending in RET). When the beam starts showing strip k - 1,
-   EE timer 0 counting H-blanks kicks pass k: strip k's drawing registers,
-   a clear of it, and a CALL of the record; the frame's Z buffer is strip
-   k + 1, which the beam shows after strip k, drawn over in its own pass
-   before that. Every field draws all three strips from the newest record
-   that is complete, so the picture is whole however slowly the frames
-   come; a new record is taken at pass 0, the first pass of a field.
+   memory (a chain ending in RET). A pass draws a strip: strip k's drawing
+   registers, a clear of it, and a CALL of the record; the frame's Z buffer
+   is strip k + 1, which the beam shows after strip k, drawn over in its own
+   pass before that. Pass k may run from the moment the beam has left strip
+   k + 1 (an EE timer counting H-blanks says so; for the last strip but one
+   that is the vblank) until it comes to strip k again: with three strips
+   that is the time of one strip, with n strips of n - 2. The passes are sent
+   one after the other in that order, each as soon as the one before is
+   done, so a strip that takes long borrows from those that do not; one that
+   has not started when the beam comes to its strip is left out
+   (mx_hires_stats.late). Every field draws all strips from the newest
+   record that is complete, so the picture is whole however slowly the
+   frames come; a new record is taken at pass 0, the first pass of a field.
 
    In interlaced FRAME mode (1080i: each field shows all 540 lines) the
    lower field's passes draw half a line lower (XYOFFSET.Y + 8), which gives
@@ -42,27 +48,32 @@
    into the once record (mx_hires_once).
 
    Not with the PATH3 stream (mx_frame3_*), mx_frame_present or
-   mx_frame_vu1_compute. The GS must draw a whole frame once per strip, every field:
-   a pass whose turn comes while the one before is still being sent is left
-   out (mx_hires_stats.late), and the beam shows that strip as it is (half
-   drawn, or the Z of the pass before). */
+   mx_frame_vu1_compute. The GS must draw a whole frame once per strip,
+   every field (but for what is in the strips' own records, mx_hires_strip):
+   a pass left out (mx_hires_stats.late) leaves its strip as it is (the Z of
+   the pass before), and one still running when the beam comes shows half
+   drawn. */
 
 #include <mx/rt.h>
 #include <mx/types.h>
 #include <mx/video.h>
 
-#define MX_HIRES_PASSES 8 /* strips at most */
+#define MX_HIRES_PASSES 16 /* strips at most */
 #define MX_HIRES_SLOTS 4 /* records: one played, three waiting or being built (a fast frame is kept for when a slow one comes) */
 
 struct mx_hires_stats {
   u32 fields;   /* fields drawn (pass 0 kicked) */
   u32 passes;   /* passes kicked */
-  u32 late;     /* passes left out: the one before was still being sent */
+  u32 late;     /* passes left out: not started when the beam came to their strip */
   u32 shown;    /* records that became the one played */
   u32 rec_max;  /* the largest record, bytes */
   u32 rec_full; /* frames that did not fit their record (halves left out) */
   u32 held;     /* fields that kept the record before, as the next one's PATH3 uploads were not done */
-  u32 pass_us[MX_HIRES_PASSES]; /* the longest pass of each strip, us (kick to end of DMA) */
+  u32 pass_us[MX_HIRES_PASSES]; /* the longest pass of each strip, us (its start to the end of its DMA) */
+  u32 pass_n[MX_HIRES_PASSES];  /* passes of each strip sent, and the sum of their times, us */
+  u32 pass_sum_us[MX_HIRES_PASSES];
+  u32 strip_max;  /* the largest record of a strip's own, bytes */
+  u32 over;       /* passes still being sent when the beam came to their strip (shown half drawn) */
 };
 extern struct mx_hires_stats mx_hires_stats;
 
@@ -83,6 +94,33 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 h, u32 psm, void *me
 /* The number of strips (passes a field) of the framebuffer, after
    mx_hires_init. */
 u32 mx_hires_passes(void);
+/* The strips' height in lines for the next mx_hires_init, rounded up to
+   whole pages (64 lines at 16 bits, 32 at 24 or 32); 0 (the default): a
+   third of the picture. With more, lower strips a pass has a longer time
+   to run in (above), and every pass still plays the whole main record: for
+   programs that give each strip its own record (mx_hires_strip_records). */
+void mx_hires_strip_lines(u32 lines);
+/* The lines of a strip after mx_hires_init: strip k shows lines k * this
+   up to the next strip's, of the picture's h. */
+u32 mx_hires_strip_height(void);
+/* Records of the strips' own: mem (64-byte aligned, uncached or not written
+   by the EE, as mx_hires_init's) is cut into MX_HIRES_SLOTS x
+   mx_hires_passes() records. After mx_hires_init, before the first frame.
+   Returns the bytes of one, or 0 (too small: none). */
+u32 mx_hires_strip_records(void *mem, u32 bytes);
+/* The bytes of a strip's own record, 0: there are none. */
+u32 mx_hires_strip_record_bytes(void);
+/* k 0 .. mx_hires_passes() - 1: the frame stream after this goes into strip
+   k's own record of the frame, which only that strip's pass plays, after
+   the frame's main record; -1: into the main record again, which every
+   pass plays first. So what is drawn in a strip only (found by its place on
+   the screen) costs VIF1, VU1 and the GS one pass, not all of them: a
+   strip's stream must set what it needs (a program's set-up, its GS
+   registers) itself, after the main record's. Without strip records
+   (mx_hires_strip_records) everything goes into the main record. When a
+   strip's record is full, the rest of the frame is left out, as when the
+   main record is (mx_hires_stats.rec_full). */
+void mx_hires_strip(int k);
 /* FRAME of the framebuffer with mask, for the stream (it must be set back). */
 u64 mx_hires_frame(u32 mask);
 /* The pages whose top byte no pass writes (CT24 strips: all of them), the
