@@ -806,7 +806,12 @@ Parts, each tested alone:
    - `kvm_boot`: the frames' range; the tables' 64 KiB in the kernel's own MiB;
    - `kreplace.h`'s addresses, the cache's index base (`cache.c`), `core-report.py`,
      `symbolize.py`, the docs' memory maps.
-2. **No BIOS after the first start.**
+2. **No BIOS after the first start.** Done 2026-11-16 (kernel.md): the kernel leaves the BIOS
+   before its first restart and replaces another without ExecPS2. With the BIOS's memory
+   filled with breaks, nothing was written there on either console (`k62_bios`), so the
+   IOP writes nothing below 1 MiB after its reset; 0x80000-0x87FFF is not used either. Open:
+   one start on the SCPH-70004 stayed at the IOP's reset (after a game had run and with a
+   Bluetooth pad connected), not seen again in four more starts. As planned:
    - The kernel replaced without ExecPS2: `kreplace.S`'s trampoline started by the kernel.
    - Nothing put back for the BIOS: `kirq_off`'s vectors, `mx__sif_dma_give`'s table.
    - What still jumps into the BIOS ends in a crash report: interrupt line 7

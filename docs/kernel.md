@@ -204,6 +204,26 @@ the programs, with 128 bytes of room left for code.
   service, the shell) in a directory of its own, booted as mxboot's one-shot.
 - `mxkernel-high` is gone.
 
+Also version 31: no BIOS after the kernel's first start (2026-11-16, mx OS plan step 4a part
+2; `apps/mxos/ee/kirq.c`'s `kirq_bios_leave`, `kvideo.c`, `exec.c`, `kreplace.h`). On a console
+whose video the kernel sets itself (ROM 2.00's and 2.20's boards, `kvideo.c`); on another, and
+on PCSX2, the BIOS stays for its SetGsCrt.
+- At its first start the kernel still asks the BIOS: SetupThread, the SetSyscall for its way
+  into kernel mode, the BIOS's tables and vectors, GetGsDxDyOffset for every mode, the board's
+  variables. Then, before its own restart, it leaves: a syscall it has no handler of and an
+  interrupt line that was the BIOS's go to the kernel's crash report, the BIOS's vectors are
+  never put back, and nothing of the BIOS's memory is read or written again. What was read
+  (the video's, the SIF's software registers) is kept over the kernel's restarts.
+- A kernel replaces another without ExecPS2: the old one starts the trampoline in kernel mode
+  (it writes the new kernel through kseg0), with a block of what it had from the BIOS
+  (`struct kreplace_handoff`: the video's, the SIF's registers, the path). The new one, entered
+  in kernel mode, finds the block, puts in its own vectors and tables, and goes on in user
+  mode as after its own restart. The block's layout is what two kernels must agree on.
+- `make KBIOS_GONE=1` (a test build) also fills 0x1000-0x87FFF with break instructions, and
+  `tests/ps2/k62_bios.c` reads it back: on a SCPH-70004 and a SCPH-90006 nothing was written
+  there over a boot, the tests, IOP resets, the kernel's restart and kernels replacing each
+  other.
+
 Also version 31: the kernel's directory and the card driver (`apps/mxos/ee/main.c`). The IOP
 modules, the settings and the default shell come from the directory of the path the kernel was
 started by (`argv[0]` up to its last `/` or `:`, at its first start: `module_dir`, kept through
@@ -537,7 +557,7 @@ segments and a trampoline go to 0x00F0_0000, and ExecPS2 starts the trampoline, 
 segments over the old kernel, clears their bss, writes the data cache back, drops the
 instruction cache and jumps to the new kernel's entry with ExecPS2's arguments. It boots as after
 a restart (the IOP reset, the services and the shell started again). Once the
-BIOS is gone (mx OS plan step 4a) the kernel starts the trampoline itself instead of ExecPS2.
+kernel has left the BIOS (below) it starts the trampoline itself instead of ExecPS2.
 While a program with VM is parked (a service: so at present always on the PS2) the kernel
 first restarts itself without the services and takes the new kernel then (since 2026-11-13):
 the replace starts with `tlb_restore`, which takes away the `MX_PHYS_WIN` entry the VM's

@@ -85,6 +85,9 @@ u32 mx__bios_delta __attribute__((weak));
 #define SYSREGS (0x800212C0u + mx__bios_delta)
 static u32 sysregs[32];
 static int sysregs_own;
+/* a kernel that no longer uses the BIOS's memory (mx OS plan step 4a): where
+   it keeps the registers over its restarts, in place of the BIOS's table */
+u32 *mx__sif_sysregs_kept;
 
 static void w32(u32 a, u32 v) {
   u32 st = mx_status();
@@ -125,7 +128,7 @@ void mx__sif_dma_take(void) {
   want = 1;
   if (!sysregs_own && mx__kpeek32 && mx__kpoke32) {
     for (u32 i = 0; i < 32; i++)
-      sysregs[i] = mx__kpeek32(SYSREGS + 4 * i);
+      sysregs[i] = mx__sif_sysregs_kept ? mx__sif_sysregs_kept[i] : mx__kpeek32(SYSREGS + 4 * i);
     sysregs_own = 1;
   }
 
@@ -142,7 +145,10 @@ void mx__sif_dma_give(void) {
   want = 0;
   if (sysregs_own) {
     for (u32 i = 0; i < 32; i++)
-      mx__kpoke32(SYSREGS + 4 * i, sysregs[i]);
+      if (mx__sif_sysregs_kept)
+        mx__sif_sysregs_kept[i] = sysregs[i];
+      else
+        mx__kpoke32(SYSREGS + 4 * i, sysregs[i]);
     sysregs_own = 0;
   }
   if (!own)

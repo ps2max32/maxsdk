@@ -26,8 +26,8 @@ int main(void) {
   memset(b, 0, sizeof b);
   CHECK_EQ(mx_phys_read(phys + 4097, b + 1, 5000), 0);
   CHECK_EQ(memcmp(a + 4097, b + 1, 5000), 0);
-  /* the kernel's memory reads too (its code at 0xC0000) */
-  CHECK_EQ(mx_phys_read(0xC0000, b, 64), 0);
+  /* the kernel's memory reads too (its code) */
+  CHECK_EQ(mx_phys_read(MX_KERNEL_LO, b, 64), 0);
   /* refused: writing (not a service), beyond the memory, into VM, none */
   CHECK_EQ(mx_phys_write(phys, b, 16), -1);
   CHECK_EQ(mx_phys_read(0x02000000 - 8, b, 16), -1);
