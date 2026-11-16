@@ -18,6 +18,16 @@
 | Batch completion: the DMA end can come before the VIF has seen the last quadwords (VIF looks idle, MSCAL not yet run); `mx_vuq` ends each batch with a VIF MARK and waits for it | | | `apps/llvm_bench/vudemo` (VU0 by VIF0) | 2026-10-23 |
 | XGKICK from xtop with VIF1 double buffering, 8 batches without FLUSH between them | works | | `tests/ps2/vu.c` | 2026-10-23 |
 
+## Two rules an emulator does not show (PS2, 2026-11-16)
+
+Found with a program that drew right in PCSX2 and stray triangles on the PS2 (hand-scheduled
+loops by `tools/vusched`, two XGKICKs a batch, VIF1 double buffering):
+
+| Fact | Consequence |
+|---|---|
+| **The upper and the lower instruction of one word must not write the same register.** VU1 keeps the upper one's result and drops the lower one's, whatever their fields: `ftoi4.xyz vf09, vf09` with `lq.w vf09, ...` beside it left vf09.w as it was (the ADC bit of every vertex). PCSX2 writes both. | `tools/vusched` no longer puts two such ops in one word (its own kernels had none). |
+| **With double buffering a buffer can be unpacked into while the GIF still reads it.** The VIF unpacks batch k + 2 into the buffer of batch k as soon as program k + 1 has started; batch k's packets are only sure to have left when program k + 1 has passed an XGKICK of its own. While the GS draws a large triangle PATH1 waits, and the vertices are overwritten before they are sent (PCSX2 sends a packet at once). | A VIF `FLUSH` before each batch's MSCAL/MSCNT (it waits for the program and its transfers; the unpack before it still runs beside the program before): the picture is right, and a pass of 5,600 vertices in 300 batches took no longer. Or three buffers, as `examples/vumax`. |
+
 ## VU states, VU0 and VU1 (PS2, 2026-10-24)
 
 The Ready / Run / Stop states of VU User's Manual 1.3, measured with `tests/ps2/vustate.c`,

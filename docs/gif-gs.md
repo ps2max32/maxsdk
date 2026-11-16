@@ -49,6 +49,22 @@ one kick). "side s" = right triangles of s×s/2 pixels in rows; ADC = vertices s
 | Lists over PATH3 | 14 / 28 / 42 cycles per triangle (flat / Gouraud / textured PACKED): transfer-bound | 3 vertices per triangle |
 | **The GIF tag's PRIM field is ignored in REGLIST mode** | the previous PRIM stays (a SPRITE after a clear drew sprites); write PRIM by A+D first | PS2 and PCSX2 |
 
+## The scissor, and triangles the size of the screen (PS2, 2026-11-16, `probe/p41_scissor.c`)
+
+640×448, 32-bit colour, Z24 test GEQUAL with Z writes; 32 pairs of triangles that cover the
+screen, each nearer than the one before. EE cycles from the DMA's start to FINISH.
+
+| Fact | Value | Conditions |
+|---|---|---|
+| **A pixel of a triangle the size of the screen** | flat 0.32, textured bilinear 0.33 cycles | 64×64 CT32 texture, magnified: the texture adds 5 % |
+| **Pixels the scissor leaves out cost nothing** | a third of the lines: 33-35 % of the whole screen's time; a ninth: 10-11 %; a third of the columns: 35-38 % | the cycles a pixel inside the scissor stay 0.32-0.38 |
+| The scissor on one line / one column | 23 k / 28 k cycles for the 64 triangles (flat) | about 400 cycles a triangle that is set up and cut down to a line |
+| Triangles that reach 512 / 1536 pixels past the screen on every side (the guard band) | 102 % / 102-105 % of the time of triangles that end at the screen | the scissor on the screen |
+
+Consequence: a pass that draws a strip of the screen (`<mx/hires.h>`) pays for the strip's
+pixels only, however large the triangles; a pass over a whole 1920×540 field at these rates is
+about 0.33 M cycles (1.1 ms). The 0.164 of the table above is for triangles of 512 pixels.
+
 ## Display (PLAN_PROCGEN P4, PS2, 2026-10-23)
 
 | Fact | Value | Conditions | Source | Date |

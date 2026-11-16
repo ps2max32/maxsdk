@@ -24,6 +24,9 @@ Rules the schedule keeps (VU User's Manual 7.4, docs/vu1.md):
     an earlier read gets the old Q); EFU (ERCPR): one per 11 cycles, P new
     from issue + 12; clip flags: new from CLIPW issue + 4;
   * ACC chains (MULA/MADDA .. MADD) of different vertices do not interleave;
+  * the upper and the lower instruction of a word do not write the same
+    register: VU1 keeps the upper one's result and drops the lower one's,
+    whatever their fields (an emulator may write both);
   * the branch is in word II - 2, its delay slot II - 1; the pointer
     increment is not in word II - 3 (a VI write is not seen by the next
     word's branch).
@@ -330,6 +333,12 @@ class Schedule:
                     return False
         if i.op.unit == "L" and slot in self.reserved_lower:
             return False
+        # the upper and the lower instruction of a word: not the same register
+        if i.op.dst and not is_special(i.op.dst[0]):
+            for j in self.insts:
+                if (j is not i and j.c is not None and j.op.dst and j.op.unit != i.op.unit
+                        and j.c % ii == slot and j.g(j.op.dst[0]) == i.g(i.op.dst[0])):
+                    return False
         # latency and lifetime of every placed edge into or out of i
         for g, l, r, d in self.edges:
             if (r is not i and d is not i) or r.c is None or d.c is None:
