@@ -74,6 +74,21 @@ void *mx__home_capture(struct mx_picture *out) {
   return buf;
 }
 
+/* Kernel version 34: another process had the graphics since this one's last
+   frame, or they were reset (the one in front ended): taken up again */
+void mx__frame_lost(void);
+static u32 gen_seen;
+static int gen_known;
+static void lost_check(void) {
+  if (mx__kernel->version < 34 ||
+      mx__kernel->size < __builtin_offsetof(struct mxk_services, gfx_gen) + sizeof(void *))
+    return;
+  u32 g = mx__kernel->gfx_gen();
+  if (gen_known && g != gen_seen)
+    mx__frame_lost();
+  gen_seen = g, gen_known = 1;
+}
+
 void mx__home_poll(void) {
   if (!mx__kernel || mx__kernel->version < 7)
     return;
@@ -82,6 +97,7 @@ void mx__home_poll(void) {
   if (mx__kernel->version >= 33 &&
       mx__kernel->size >= __builtin_offsetof(struct mxk_services, front_wait) + sizeof(void *))
     mx__kernel->front_wait();
+  lost_check();
   u32 pages = mx__kernel->home_wanted();
   if (!pages)
     return;
@@ -100,6 +116,8 @@ void mx__home_poll(void) {
     mx__kernel->home_picture_set(0, 0);
     mx_dma_free(pic);
   }
+  if (!end)
+    lost_check(); /* the shell was in front meanwhile */
   if (page != ~0u)
     mx_vram_give(page, pages);
   if (end)

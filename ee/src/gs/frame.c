@@ -366,6 +366,49 @@ int mx_frame_sync(void) {
   return 0;
 }
 
+/* Before this program lets another in front (proc.c: mx_proc_spawn,
+   mx_proc_front): what it has sent is drawn, so that the other finds VIF1
+   and the GIF idle. Not in hires mode. */
+void mx__frame_yield(void) {
+  if (!f.half[0] || f.record || mx_frame_sync() < 0)
+    return;
+  u32 t0 = mx_count();
+  while (mx_gs.frames_done != mx_gs.frames && mx_count() - t0 < MX_EE_HZ / 10)
+    mx_sleep_us(1000);
+}
+
+/* The graphics were another process's since this program's last frame, or
+   were reset (kernel version 34, src/gs/home.c at a frame boundary): VIF1,
+   the GIF and the stream's DMA as at its start, the frames sent counted as
+   shown, and what was in VU and GS memory forgotten: the microprograms are
+   sent again when next used (mx_frame_mpg), the texture cache is empty, the
+   texture buffers free. Then the program's own function, for what it keeps
+   there itself. Not in hires mode: such a program sets its graphics up
+   again itself. */
+static void (*lost_fn)(void);
+void mx_frame_on_lost(void (*fn)(void)) { lost_fn = fn; }
+extern void mx_vcache_reset(void) __attribute__((weak));
+void mx__gs_lost(void);
+void mx__frame_lost(void) {
+  if (!f.half[0] || f.record)
+    return;
+  mx_vif_reset(1);
+  MX_R32(MX_GIF_CTRL) = 1; /* RST */
+  mx__gs_lost();
+  if (!f.chain) {
+    mx_mfifo_restart();
+    f.paused = 0;
+  }
+  f.presenting = 0;
+  mx_vu_forget(0);
+  mx_vu_forget(1);
+  mx__frame_tex_forget();
+  if (mx_vcache_reset)
+    mx_vcache_reset();
+  if (lost_fn)
+    lost_fn();
+}
+
 u32 mx_frame_room(void) { return f.half_qw - (u32)f.chain; }
 
 u64 *mx_frame_reserve(u32 qwc) {

@@ -35,15 +35,24 @@ int mx_msg_receive(int port, void *buf, u32 max, struct mx_msg *m) {
 }
 int mx_msg_reply(int msg, const void *reply, u32 len) { return CALL(msg_reply, (msg, reply, len)); }
 
+/* the frame pipeline's, if the program has it: its stream drawn before
+   another process is in front (src/gs/frame.c) */
+extern void mx__frame_yield(void) __attribute__((weak));
 int mx_proc_spawn(int argc, const char *args, u32 args_len, const char *swap) {
   mx_debug_flush();
+  if (mx__frame_yield)
+    mx__frame_yield();
   return CALLV(14, proc_spawn, (argc, args, args_len, swap));
 }
 int mx_proc_wait(int id, int *status, int nohang) {
   return CALLV(14, proc_wait, (id, status, nohang));
 }
 int mx_proc_kill(int id, int status) { return CALLV(14, proc_kill, (id, status)); }
-int mx_proc_front(int id) { return CALLV(24, proc_front, (id)); }
+int mx_proc_front(int id) {
+  if (mx__frame_yield)
+    mx__frame_yield();
+  return CALLV(24, proc_front, (id));
+}
 int mx_proc_events(int port) { return CALLV(15, proc_events, (port)); }
 int mx_log_read(u32 *pos, void *buf, u32 max, int *proc, int wait) {
   return CALLV(16, log_read, (pos, buf, max, proc, wait));

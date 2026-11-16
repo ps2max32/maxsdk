@@ -182,6 +182,31 @@ the region's 480i or 576i and confirm it. `mx_gs_init` in libmxk shows its w x h
 `mx_screen_pick` (exact size, the shape it has on the region's TV mode). On PCSX2 the screen is
 set up again after the settings are read. `tests/ps2/k59_video.c`.
 
+Version 34 (2026-11-16, mx OS plan step 5b): a program takes its graphics up again after
+another process had them (`<mx/frame.h>`: `mx_frame_on_lost`; `src/gs/frame.c`'s
+`mx__frame_lost`, `src/gs/home.c`, `apps/mxos/ee/end.c`'s `end_gfx_gen`).
+- The kernel counts how often the graphics went to another process or were reset
+  (`gfx_gen`): a change of the process in front, and the reset of the GIF, the VIFs and the
+  DMA channels at the end of the one in front.
+- The frame code compares the count at each frame boundary (after `front_wait`, and after
+  `home_run` when the shell was in front). When it moved: VIF1 and the GIF reset, the ring's
+  DMA set up again, every frame sent counted as drawn and shown (their FINISH and vblank may
+  have gone to the other process), the GS's interrupt mask written again, VU0's and VU1's
+  microprograms forgotten (`mx_frame_mpg` sends them again when next used), the texture
+  buffers free and the texture cache empty (`mx_vcache_reset`, if the program has it), then
+  the program's own function (`mx_frame_on_lost`): for what it keeps in GS memory itself
+  over frames, and state it thinks the GS or VU1 still has.
+- A program that lets another in front itself (`mx_proc_spawn`, `mx_proc_front`) first has
+  its stream drawn (`mx__frame_yield`: `mx_frame_sync`, then up to 100 ms for the frames'
+  FINISH), so the other finds VIF1 and the GIF idle.
+- Not in hires mode (the passes run from interrupts): such a program still stops its
+  graphics before it starts another and sets them up again after, as MXSHELL does.
+- `tests/ps2/k66_lost.c`: a program's picture before and after a child with a stream of its
+  own was in front and ended is the same, pixel for pixel (a SCPH-70004 and a SCPH-90006).
+  Before, the parent's stream stood still there (`k65_frontwait`'s first form). Not yet run:
+  the same over the home button with a shell that draws, and a program with textures and
+  VU1 programs (libgl needs its own function for its state).
+
 Version 33 (2026-11-16, mx OS plan step 5a): the graphics are the process in front's. The
 frame code asks at each frame boundary (`mx__home_poll`, `front_wait`), and a process that is
 not in front waits there, asleep, until it is: the one in front ended, or `mx_proc_front` or the

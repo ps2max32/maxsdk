@@ -58,6 +58,18 @@ void mx_frame_stop(void);
    starts it again). Not in hires (record) mode. Returns 0, or -1 in record
    mode. */
 int mx_frame_sync(void);
+
+/* Under mx-kernel the graphics are the process in front's (kernel version
+   33). When another process had them since this program's last frame (the
+   shell at the home button, a program it started and waited for), the
+   frame code takes them up again at the next frame boundary: VIF1, the GIF
+   and its stream as at the start, the microprograms sent again when next
+   used (mx_frame_mpg), the texture cache (<mx/vcache.h>) and the texture
+   buffers empty. GS memory holds the other's pictures: fn is called then,
+   for what the program put there itself and keeps over frames (textures it
+   uploaded without the cache, a render target), and for state it thinks
+   the GS or VU1 still has. Not in hires mode. */
+void mx_frame_on_lost(void (*fn)(void));
 /* Work for the EE while it would wait for ring space or for the back
    buffer: fn is called until the wait is over or it returns 0 (nothing more
    to do now). Each call should be short, as the push waits for it. fn must

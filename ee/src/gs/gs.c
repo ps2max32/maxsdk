@@ -283,6 +283,21 @@ static void irq_on(void) {
   MX_R64(MX_GS_IMR) = mx__gs_imr = IMR_ON;
 }
 
+/* The graphics were another process's meanwhile (frame.c's mx__frame_lost):
+   every frame sent counts as drawn and shown (their FINISH and vblank may
+   have gone to the other), and the GS's interrupts are this program's
+   again. The display registers and the video mode are the kernel's to put
+   back. */
+void mx__gs_lost(void) {
+  int was = mx_di();
+  mx_gs.frames_done = mx_gs.shown = mx_gs.frames;
+  mx_gs.first = mx_gs.frames;
+  mx_gs.counting = 0;
+  CSR = MX_BIT(GS_CSR_SIGNAL) | MX_BIT(GS_CSR_FINISH);
+  MX_R64(MX_GS_IMR) = mx__gs_imr;
+  mx_irq_restore(was);
+}
+
 /* Two vblanks of the new mode within half a second, else -1: a mode the
    console does not have gives none (576p on BIOS 2.00, PS2 2026-10-27).
    Half a second, as a mode the kernel times itself (720p50, 1080i50,

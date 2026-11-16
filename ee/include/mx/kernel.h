@@ -21,7 +21,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 33
+#define MX_KERNEL_VERSION 34
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -305,6 +305,11 @@ struct mxk_services {
      frame code calls it at each frame boundary (src/gs/home.c), so a process
      beside the one in front draws nothing. */
   void (*front_wait)(void);
+  /* version 34: how often the graphics went to another process or were
+     reset (mx OS plan step 5b). The frame code compares it at each frame
+     boundary and takes the graphics up again when it moved (<mx/frame.h>:
+     mx_frame_on_lost). */
+  u32 (*gfx_gen)(void);
 };
 int mx__iop_write_phys(u32 iop, u32 src, u32 size);
 /* the kernel's own writer of the CRTC timing, used by mx_video_set in it

@@ -934,7 +934,12 @@ CPU on read circuit 1 over the program's picture.
     mode and what a game may take are the video settings (kernel version 31,
     `<mx/screen.h>`). Open: a program that sets a mode it may not take is not refused, and
     one that writes the GS without the frame pipeline is not held.
-  - 5b: the hand-over and "graphics lost" in maxsdk and libgl. Test: a program in front hands
+  - 5b: the hand-over and "graphics lost" in maxsdk and libgl. State 2026-11-16: maxsdk's part
+    is kernel version 34 (kernel.md): the stream, the GS's counts, the microprograms and the
+    texture cache are taken up again at the next frame boundary, tested with a child that
+    was in front (`k66_lost`). Open: libgl's own function (`mx_frame_on_lost`), hires mode,
+    the test over the home button with a shell that draws.
+    As planned: Test: a program in front hands
     over to a second one that overwrites all GS memory but the kept picture, and VU1; back,
     its next frames are the same as without the hand-over.
   - 5c: the shell's home screen with the kept picture; the kernel's menu removed.
