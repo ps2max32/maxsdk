@@ -20,7 +20,8 @@ both.
 A third library, `libmxkern.a`, is `libmx` with the VM: for the kernel, and for the tests
 of the VM's inside, which run with the VM in the program. Programs do not link it.
 
-The kernel is `apps/mxos`, resident at 0x88000-0xFF800. `libmxk` calls it through
+The kernel is `apps/mxos`, resident in the last MiB of main memory (0x1F00000-0x1FFFFFF,
+`<mx/cpu.h>`: `MX_KERNEL_LO`, `MX_KERNEL_HI`). `libmxk` calls it through
 `struct mxk_services` (`<mx/kernel.h>`), a table the loader passes. Only `libmxk` sees how
 a call reaches the kernel, so that can change without changing programs. Kernel code runs
 in the caller's thread; the VM's writer and pager are threads of the kernel (the writer, started in the call of a program that got a space, is given to the process that has the VM's lock: `kvm_init`, vm.md). Functions are
@@ -180,6 +181,28 @@ with a notification. L1 + L2 + R1 + R2 on a pad a program reads within 30 s of t
 the region's 480i or 576i and confirm it. `mx_gs_init` in libmxk shows its w x h through
 `mx_screen_pick` (exact size, the shape it has on the region's TV mode). On PCSX2 the screen is
 set up again after the settings are read. `tests/ps2/k59_video.c`.
+
+Also version 31: the kernel in the last MiB of main memory (2026-11-16, mx OS plan step 4a;
+`apps/mxos/ee/resident.ld`, `tlb.c`). Before, it was at 0x88000-0xFF800, between the BIOS and
+the programs, with 128 bytes of room left for code.
+- Its code and constants are at 0x1F00000-0x1F7FFFF, its data, `.bss`, heap and main stack
+  from 0x1F80000, the VM's tables in the last 64 KiB. Virtual = physical, in every address
+  space.
+- Two TLB entries of its own (21: the code, without the right to write; 40: the data), in
+  place of the end of the BIOS's entry for 0x1800000-0x1FFFFFF. At the first start the kernel
+  runs under that entry, so the two are written with nothing read or written between them.
+  A program's core takes entries 13-20.
+- The VM's frames are 0x100000-0x1EFFFFF (960 of them). 0x88000-0xFFFFF is unused for now,
+  but for the host's commands at 0xFF800.
+- A program's core ends below the kernel (`MX_CORE_HI` is `MX_KERNEL_LO`), and `libmxk`
+  takes the kernel's table only from the kernel's memory: **every program is built again**.
+  One built before does not find this kernel and ends in the BIOS's Exit; this kernel's
+  programs do not find a kernel from before.
+- mxboot loads it as before (it runs in the last 256 KiB; what it loads of the kernel ends
+  below that). A kernel from before does not start it from memory: to that one it is a
+  program. The first time it is installed with everything beside it (the modules, the
+  service, the shell) in a directory of its own, booted as mxboot's one-shot.
+- `mxkernel-high` is gone.
 
 Also version 31: the kernel's directory and the card driver (`apps/mxos/ee/main.c`). The IOP
 modules, the settings and the default shell come from the directory of the path the kernel was
@@ -508,14 +531,13 @@ all memory) the kernel serves only the reset, execee,
 dumpreg (ps2client's ping) and the IOP's exception; the other commands are the app's only.
 
 Another kernel replaces this one (2026-11-11, mx OS plan step 2h-2; `apps/mxos/ee/exec.c`,
-`kreplace.S`): an ELF whose segments lie below 1 MiB over the running kernel (a new
+`kreplace.S`): an ELF whose segments lie in the kernel's memory, over the running kernel (a new
 `MXKERNEL.ELF`, `ps2client execee host:MXKERNEL.ELF`) is read to 0x0100_0000, a table of its
 segments and a trampoline go to 0x00F0_0000, and ExecPS2 starts the trampoline, which copies the
 segments over the old kernel, clears their bss, writes the data cache back, drops the
 instruction cache and jumps to the new kernel's entry with ExecPS2's arguments. It boots as after
-a restart (the IOP reset, the services and the shell started again). Before, a new kernel was
-tried by starting mxkernel-high (a copy linked at 0x1E0_0000) and from it `MXKERNEL.ELF`. Once the
-BIOS is gone (2h-5) the kernel starts the trampoline itself instead of ExecPS2.
+a restart (the IOP reset, the services and the shell started again). Once the
+BIOS is gone (mx OS plan step 4a) the kernel starts the trampoline itself instead of ExecPS2.
 While a program with VM is parked (a service: so at present always on the PS2) the kernel
 first restarts itself without the services and takes the new kernel then (since 2026-11-13):
 the replace starts with `tlb_restore`, which takes away the `MX_PHYS_WIN` entry the VM's
@@ -552,14 +574,14 @@ an ELF without the MXK note of version 10 or later (a standalone ELF on `libmx`,
 older `libmxk`) and a loader (an ELF below 1 MiB that is not a kernel replacing this one, such as
 ps2link) are refused with a message; mxboot, a legacy loader or PCSX2's `-elf` starts those. Gone
 with them: the kernel's restart with the BIOS's threads for such a program (`bios_mode`), the
-loader's start by ExecPS2 (so mxkernel-high, itself a standalone ELF, no longer starts), and the
+loader's start by ExecPS2, and the
 replaced BIOS `Exit` (syscall 4) for programs that did not return through the kernel.
 
 The BIOS syscalls a program still makes are counted (2026-11-11, mx OS plan step 2h-3;
 `apps/mxos/ee/ksys.S`, `kirq.c`): the kernel points the BIOS's exception table entry for
 syscalls (0x8001_5360, `docs/bios.md`) at a stub that counts, by `v1 & 0xFF` (an i-call's negative
 number at 0x81-0xFF), the syscalls of the program the kernel started last (the current ASID its,
-EPC in its own code: not the kernel's below 1 MiB, not the BIOS's in kseg0/kseg1), then goes on
+EPC in its own code: not in the kernel's MiB, not the BIOS's in kseg0/kseg1), then goes on
 into the BIOS's dispatcher; the table is the BIOS's again whenever the interrupt table is
 (`kirq_off`). At the program's end the log has `BIOS syscalls: N, by number:` and the numbers
 with their counts (calls made through the kernel's services are the kernel's and not counted).
@@ -682,7 +704,7 @@ goes out through the SIF.
 Two things a process beside showed: a program's end waits only for the IOP calls of its own
 threads, those that are gone (`mx__sif_calls_finish` keeps the calls and packets of threads
 still alive: a service's tty write was waited for until it gave up, and its packet was
-freed). An interrupt handler whose code is the kernel's (below 1 MiB, its `irq.c`: the SIF
+freed). An interrupt handler whose code is the kernel's (in its memory, its `irq.c`: the SIF
 waits' vblank wake, added in a program's thread at the first call that needed it) belongs to
 process 0, not to that program, so its end cannot turn the line off under it.
 

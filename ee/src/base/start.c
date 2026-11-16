@@ -36,7 +36,7 @@ static void find_kernel(const struct mx_loader_args *l) {
     return;
   const struct mxk_services *k = l->kernel;
   u32 p = (u32)(uintptr_t)k;
-  if (p & 3 || p >= 0x00100000u || k->magic != MX_KERNEL_MAGIC ||
+  if (p & 3 || p < MX_KERNEL_LO || p >= MX_KERNEL_HI || k->magic != MX_KERNEL_MAGIC ||
       k->version < MX_KERNEL_MIN || k->size < MXK_MIN_SIZE)
     return;
   mx__kernel = k;

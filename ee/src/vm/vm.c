@@ -1146,9 +1146,9 @@ static int to_thread(struct mx__vm_x *x) {
     mx__exception_note = "VM: a page fault in the BIOS (a VM pointer passed to a syscall)";
     return VMX_FATAL;
   }
-  /* a stack from the resident kernel's memory up (0x80000: its threads,
-     mx OS plan 4e: its VM's test at its boot) */
-  if (mx_is_vm((void *)(uintptr_t)sp) || sp < 0x00080000u + VMX_SIZE) {
+  /* a stack in core or the kernel's memory (its threads, mx OS plan 4e: its
+     VM's test at its boot) */
+  if (mx_is_vm((void *)(uintptr_t)sp) || sp < MX_CORE_LO + VMX_SIZE) {
     mx__exception_note = "VM: a page fault on a thread whose stack is VM (stacks must be core)";
     return VMX_FATAL;
   }

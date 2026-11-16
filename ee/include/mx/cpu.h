@@ -15,11 +15,16 @@
 /* A program's core (0x10_0000 - 0x1FF_FFFF) may be at another physical
    address, under its own ASID (docs/mx-os-plan.md, step 2b): physical =
    virtual + mx__core_off there (src/base/core.c), virtual = physical
-   elsewhere (the kernel below 1 MiB, the uncached and UCAB views and
+   elsewhere (the kernel in the last MiB, the uncached and UCAB views and
    MX_PHYS_WIN). The uncached and UCAB views are of physical memory. */
 extern u32 mx__core_off;
+/* mx-kernel's memory (apps/mxos): the last MiB of main memory, virtual =
+   physical in every address space; its code in the first half, read-only
+   for programs. A core ends below it. */
+#define MX_KERNEL_LO 0x01F00000u
+#define MX_KERNEL_HI 0x02000000u
 #define MX_CORE_LO 0x00100000u
-#define MX_CORE_HI 0x02000000u
+#define MX_CORE_HI MX_KERNEL_LO
 /* A VM address (0x0800_0000 - 0x0FFF_FFFF, the file and heap windows
    0x4000_0000 - 0x5FFF_FFFF): its frame's physical address, when it is
    pinned in one piece; otherwise the program ends with a report (since mx
@@ -38,7 +43,8 @@ MX_INLINE u32 mx__phys(uintptr_t a) {
 /* the cached view of an uncached or UCAB pointer into the kernel's memory or
    the program's core */
 #define MX_CACHED(p)                                                                       \
-  ((__typeof__(&(p)[0]))(uintptr_t)(((uintptr_t)(p) & 0x0FFFFFFFu) - mx__core_off -        \
+  ((__typeof__(&(p)[0]))(uintptr_t)(((uintptr_t)(p) & 0x0FFFFFFFu) < MX_KERNEL_LO &&       \
+                                    ((uintptr_t)(p) & 0x0FFFFFFFu) - mx__core_off -        \
                                             MX_CORE_LO <                                   \
                                         MX_CORE_HI - MX_CORE_LO                            \
                                     ? ((uintptr_t)(p) & 0x0FFFFFFFu) - mx__core_off        \

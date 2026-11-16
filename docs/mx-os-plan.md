@@ -379,11 +379,11 @@ Steps, each on the PS2 on its own:
     before `mx_exception_init`, in place of SetupHeap): the kernel's bootstrap is two BIOS
     calls, SetupThread (its arguments, the boot path) and the poke's SetSyscall (its way into
     kernel mode). Left: those two, and the BIOS thread the kernel's threads run on.
-- *2h-5, the first MiB for the kernel.* The BIOS's memory (0x0 - 0x7_FFFF) is the kernel's
-  after its boot. Not on PCSX2 (2026-11-12): there the kernel keeps calling SetGsCrt, whose
-  code is in that memory (the BIOS's syscall table, SCPH-70004's image: syscall 2 at
-  0x8000_BD58), and PCSX2 needs that call for the PAL rate (without it, PAL modes run at 60
-  vblanks a second, `pcsx2.md`). On the PS2 the kernel's own CRTC timing makes it free.
+- *2h-5, the first MiB.* Replaced 2026-11-16 by step 4a: the kernel moves to the top of main
+  memory and the first MiB goes to the VM's frames. What was found for it: on PCSX2 the
+  kernel keeps calling SetGsCrt, whose code is in the BIOS's memory (SCPH-70004's image:
+  syscall 2 at 0x8000_BD58), and PCSX2 needs that call for the PAL rate (`pcsx2.md`). On the
+  PS2 the kernel's own CRTC timing makes it free.
 - Then the address space plan's phase 3: VM in the kernel, one frame pool, one swap file
   (`mc0:/MXOS/SWAP.CFG`, no swap without it). Proposed steps (2026-11-12, not started):
   - 3a, a VM per process: vm.c's and image.c's state (about 28 KiB in the kernel now, the front
@@ -754,6 +754,89 @@ host link's service are known to the kernel by their paths.
   - 4e: the VM's own parts made at the kernel's boot (lock, swap semaphore, writer, pager),
     not by the first program with VM; the shell and services as roles from the card's
     configuration.
+
+### Step 4a: the kernel at the top of memory, the first MiB for paging
+
+Decided 2026-11-16 (user). Two problems, kept apart:
+- The kernel has no room: its code fills 0xC0000-0xFF7FF but for 128 bytes, between the
+  BIOS below it and the programs above it.
+- The BIOS's memory (0x0-0x87FFF) is used only at the first start, and is no one's after.
+
+The kernel is the one thing at a fixed physical address (a program's core is virtual:
+`tlb_core_map`), with virtual = physical: its vectors and handlers reach it through kseg0.
+So it moves as it is, to the last MiB, and what is below it is one run of frames.
+
+| Range | Use |
+|---|---|
+| `0x00000-0x00FFF` | the vectors |
+| `0x01000-0x1EFFFFF` | the VM's frames: programs' cores (virtual from 0x100000) and pages |
+| `0x1F00000-0x1F7FFFF` | kernel code and constants, read-only for programs (one TLB entry) |
+| `0x1F80000-0x1FFFFFF` | kernel data, `.bss`, stacks, the VM's tables, the host's commands (one TLB entry) |
+
+- mxboot is not changed: it runs at 0x1FC0000 and loads an ELF that ends below that. The
+  kernel's loaded segments (code, `.data`) end below 0x1FC0000; `.bss`, the stacks and the
+  tables above it are in no segment (the kernel clears its own `.bss`).
+- Programs stay linked at 0x100000; a core ends below 0x1F00000 (`MX_CORE_HI`), where the
+  kernel's first TLB entry starts.
+
+Parts, each tested alone:
+
+1. **The kernel at 0x1F00000, the BIOS as it is.** Done 2026-11-16: the kernel tests pass on PCSX2 and on a
+   SCPH-70004 and a SCPH-90006 (k29, k31, k33, k35, k38, k42-k44, k46-k49, k58, k60, k61),
+   and a kernel replaces another from memory. Not yet run: a game with a swap file.
+   The kernel before this one does not start it from RAM (to it, it is a program in the
+   programs' memory), so the first try on a PS2 is mxboot's one-shot, with the service and
+   the shell built again beside it (a program built before does not find the kernel: its
+   `libmxk` looks for the table below 1 MiB). The frames are 0x100000-0x1EFFFFF, so
+   0x88000-0xFFFFF is unused for now. On PCSX2 first, then on the PS2 from RAM (the running
+   kernel replaced), then installed through the one-shot. What takes the old address for
+   granted:
+   - the link: `resident.ld` (code first, then data; `.bss` out of the segment), the
+     Makefile's `LOW_LDFLAGS`; `mxkernel-high` goes;
+   - the TLB (`tlb.c`): the BIOS's entry 13 (0x80000-0xFFFFF) held the kernel; now two
+     entries of its own, in place of the top of the BIOS's entries over main memory;
+   - "below 1 MiB is the kernel": `ksys.S` (whose syscall), `ksched.c` (whose handler),
+     `sif.c` (a kernel's packet, a program's server), `kirq.c`, `exec.c` (`LOW`,
+     `LOADER_LOW`, the kernel over itself), `main.c`'s note check, `vm.c`'s stack check,
+     `exception.c`, `start.c` (libmxk's check of the kernel's table: every program is built
+     again), `cpu.h`'s `MX_CORE_HI`, the link scripts' length, `frame.c`. One pair of
+     symbols for the kernel's range in place of the numbers;
+   - the host's commands stay at 0xFF800 for now (mxlink's IOP module writes them there by
+     DMA, `PKO_DMA_DEST`): moved in part 3, when that memory becomes frames;
+   - `kvm_boot`: the frames' range; the tables' 64 KiB in the kernel's own MiB;
+   - `kreplace.h`'s addresses, the cache's index base (`cache.c`), `core-report.py`,
+     `symbolize.py`, the docs' memory maps.
+2. **No BIOS after the first start.**
+   - The kernel replaced without ExecPS2: `kreplace.S`'s trampoline started by the kernel.
+   - Nothing put back for the BIOS: `kirq_off`'s vectors, `mx__sif_dma_give`'s table.
+   - What still jumps into the BIOS ends in a crash report: interrupt line 7
+     (`kvec_irq_bios`), an unknown syscall (`ksys_orig`), the level 2 vectors at 0x80 and
+     0x100.
+   - `kvideo.c` reads the board from the BIOS's data at every start: read once, kept
+     (`.kept`); its write of `BIOS_HD_CLOCK` goes.
+   - The BIOS stays where the kernel needs its SetGsCrt: PCSX2, and a console `kvideo.c`
+     does not know. A PCSX2 test build without it (PAL at 60 vblanks) runs the same path.
+   - To find out first: whether the IOP writes below 1 MiB after an IOP reset (the BIOS's
+     SIF buffer), and what is at 0x80000-0x87FFF.
+3. **The first MiB to the frames**: from 0x01000 where the BIOS is gone, from 0x100000
+   where it stays. The host's commands (0xFF800) move into the kernel's data: the kernel
+   gives mxlink's IOP module the address when it loads it. Test: a program that fills all memory and checks every frame, with IOP
+   resets between; k46 and Quake as soak tests.
+4. **The kernel's code paged** (design first, with numbers). Of the kernel's 472 KiB today
+   218 are code, 195 `.bss`, 18 the IOP's DMA area, 17 constants. A part stays resident:
+   all that runs while a page fault cannot be served (the vectors and refill, interrupt
+   handlers, the scheduler, code with EXL set, the VM, the swap file's path through SIF and
+   mxio, what holds the VM's or the file lock, the crash report and the console). The rest
+   gets a global region of its own in the free addresses (0x02000000-0x07FFFFFF). Open:
+   - the file its pages come from can go or change (the card pulled, the kernel's ELF
+     written over at an install, a kernel tried from host:), so they are copied at the boot
+     (swap or memory) or an install never writes over the running one's file;
+   - without a swap file only code and constants can leave, so the gain is address space
+     more than memory;
+   - a test mode that drops the kernel's pages all the time and reports a fault taken where
+     none may be;
+   - boot code cannot be paged (no files yet) but can be given up after the boot; the
+     restart runs it again.
 
 ### Step 5: graphics and sound have an owner, and home is the shell
 

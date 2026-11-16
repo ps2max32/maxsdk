@@ -568,7 +568,7 @@ static int sleep_wait(struct mx_sif_client *c, u32 limit, u32 t0, int *r) {
 /* Line i of the SIF's state for a kernel's report of a hang (0 when there is
    no such line): the counts and the channels, the last packets received,
    the sleepers. A sleeper's client is read only where it is the kernel's
-   (below 1 MiB): a program's may be in another address space. */
+   (in its own memory): a program's may be in another address space. */
 #ifndef MX_KERNEL /* the kernel's report: not in libmxk (no sifdma.c there) */
 int mx__sif_dbg_line(u32 i, char *buf, u32 size) {
   if (i == 0) {
@@ -600,7 +600,7 @@ int mx__sif_dbg_line(u32 i, char *buf, u32 size) {
   u32 n = (u32)mx_snprintf(buf, size, "SIF sleeper %u: client %08x tid %d fno %x pkt %u since rx #%u", i,
                            (u32)(uintptr_t)c, (int)sleeper_tid[i], sleeper_dbg[i].fno, sleeper_dbg[i].pkt,
                            sleeper_dbg[i].rx_at);
-  if ((u32)(uintptr_t)c < 0x00100000u && n < size)
+  if ((u32)(uintptr_t)c >= MX_KERNEL_LO && (u32)(uintptr_t)c < MX_KERNEL_HI && n < size)
     mx_snprintf(buf + n, size - n, " done %d sleeping %d sema %d server %x", (int)c->done, (int)c->sleeping,
                 c->sema - 1, c->server);
   return 1;
@@ -1956,12 +1956,12 @@ void mx__sif_client_check(struct mx_sif_client *c) {
 }
 
 /* What the program left here, once its threads and semaphores are gone:
-   sleepers and servers in its memory (from 1 MiB up: the kernel is below),
+   sleepers and servers in its memory (not the kernel's: MX_KERNEL_LO up),
    the positions of its descriptors, the fio lock (made for its VM), and the
    semaphores of the kernel's own clients that it made. docs/mx-os-plan.md
    step 2a. */
 static int program_memory(const volatile void *p) {
-  return ((u32)(uintptr_t)p & 0x1FFFFFFFu) >= 0x00100000u;
+  return ((u32)(uintptr_t)p & 0x1FFFFFFFu) - MX_KERNEL_LO >= MX_KERNEL_HI - MX_KERNEL_LO;
 }
 /* The calls that the program's threads (and the kernel's threads for it:
    the VM's pager and writer) were waiting for when they were ended: the IOP

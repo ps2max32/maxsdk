@@ -36,11 +36,11 @@ void mx_dcache_invalidate(const void *p, u32 size) {
     __asm__ volatile("sync.l\n\tcache 0x1a, 0(%0)\n\tsync.l" : : "r"(a) : "memory");
 }
 
-/* The index operations' addresses: 0x8_0000 (the kernel's, mapped in every
-   address space), not kseg0: programs run in user mode, where a kseg0
+/* The index operations' addresses: the kernel's (MX_KERNEL_LO, mapped in
+   every address space, and main memory under the BIOS), not kseg0: programs run in user mode, where a kseg0
    address does nothing (an index loop at 0x8000_0000 left the cache dirty:
    tests/ps2/vm7_swap.c's tables lost their headers). */
-#define MX_CACHE_INDEX_BASE 0x00080000u
+#define MX_CACHE_INDEX_BASE MX_KERNEL_LO
 
 /* All of the data cache, by index (64 sets of 2 ways); each CACHE directly
    between two SYNCs (EE Core User's Manual 1.3: not after a branch, nor
