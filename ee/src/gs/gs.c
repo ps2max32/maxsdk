@@ -534,6 +534,8 @@ int mx_gs_download(void *dst, u32 bp, u32 bw, u32 psm, u32 x, u32 y, u32 w, u32 
   if (!bits || bits % (128 * 8))
     return -1;
   u32 bytes = bits / 8;
+  if (bytes / 16 > 0xFFFFu)
+    return -1; /* more than the DMA's count: in pieces (src/gs/home.c) */
   struct mx_pkt p;
   mx_pkt_begin(&p, MX_UNCACHED(setup), sizeof setup, 0);
   mx_pkt_end(&p, 0, 0);

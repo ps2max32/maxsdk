@@ -920,6 +920,12 @@ CPU on read circuit 1 over the program's picture.
   shell; the kernel keeps applying them.
 - GS memory (512 pages): a kept picture of 640 x 448 is 140 pages as CT32, 70 as CT16; the
   shell has the other 372 or more.
+- Changed 2026-11-16 (user, with the video settings): at home the screen is black at once and
+  the game's whole picture is read back into memory, which the shell copies into a buffer of
+  its own; the small view on the home screen is made from that, and "Screenshot" saves it.
+  So the picture does not stay in GS memory as a texture, and the shell has all of GS
+  memory. The kernel's and the library's side of it is kernel version 32 (kernel.md,
+  2026-11-16); the shell's side is MXSHELL's.
 - Sub-steps, each on the PS2 with a television:
   - 5a: the owner, the reset only at the owner's end, frame calls of the others wait; the
     system's video mode and "auto" for games.

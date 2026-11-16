@@ -182,6 +182,31 @@ the region's 480i or 576i and confirm it. `mx_gs_init` in libmxk shows its w x h
 `mx_screen_pick` (exact size, the shape it has on the region's TV mode). On PCSX2 the screen is
 set up again after the settings are read. `tests/ps2/k59_video.c`.
 
+Version 32 (2026-11-16, mx OS plan step 5): the picture of the program paused at the home
+button, for the shell (`<mx/screen.h>`: `mx_home_picture`, `mx_home_picture_read`;
+`apps/mxos/ee/kpic.c`, `src/gs/home.c`).
+- When the kernel asks for the home button's turn at a frame boundary (`mx__home_poll`), the
+  program's frame code, with the GS idle (`mx_frame_sync`), reads the buffer it shows back
+  from GS memory (`mx__home_capture`: the `mx_gs.rt` that DISPFB2 names) into pinned memory
+  of its own, and names it to the kernel (`home_picture_set`: size, format, physical
+  address). When it goes on it takes the name back and frees the memory.
+- The read-back is in strips of whole lines of about 256 KiB: a DMA transfer is at most
+  65535 quadwords, and a 640 x 448 picture of 32 bits is more (`mx_gs_download` now refuses
+  such a size; before, it sent the count's low 16 bits and the rest of the buffer stayed as
+  it was).
+- The shell, in front after its `MX_EVENT_HOME`, asks for the description
+  (`mx_home_picture`: w, h, the GS's format, bytes, display lines a buffer line, the process)
+  and copies the pixels (`mx_home_picture_read`, into any memory of its own: VM is fine). The
+  kernel copies from the paused program's memory through `MX_PHYS_WIN`. There is a picture
+  only while that program is paused, and only for the shell.
+- None from a program in hires mode (`mx_frame_sync` refuses), one that does not use the
+  frame pipeline, one whose shown buffer is not one of `mx_gs.rt`, or without memory for it
+  (1.1 MiB for 640 x 448 in 32 bits).
+- Tests: `tests/ps2/k64_homepic.c` (the read-back: every pixel of a known frame, on a
+  SCPH-70004 and a SCPH-90006); `k50_home` run as the shell asks for the picture (on PCSX2,
+  without the frame pipeline, it checks that there is none). The shell's read of a real
+  picture has not run yet.
+
 Also version 31: the kernel in the last MiB of main memory (2026-11-16, mx OS plan step 4a;
 `apps/mxos/ee/resident.ld`, `tlb.c`). Before, it was at 0x88000-0xFF800, between the BIOS and
 the programs, with 128 bytes of room left for code.

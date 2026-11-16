@@ -117,6 +117,26 @@ int mx_screen_fit(const struct mx_screen_conf *c, u32 mode, u32 w, u32 h, u32 as
 void mx_screen_video(const struct mx_screen_conf *c, const struct mx_screen *s,
                      struct mx_video_mode *m);
 
+/* The picture of the program paused at the home button (kernel version 32,
+   mx OS plan step 5), for the shell: what that program showed last, read
+   back from GS memory at its frame boundary before the shell came in front.
+   It is there from the shell's MX_EVENT_HOME until that program is in front
+   again or ends. Not from a program in hires mode, one without the frame
+   pipeline, or when it had no memory for it. */
+struct mx_picture {
+  u32 w, h;  /* pixels */
+  u32 psm;   /* MX_GS_PSM_CT32, CT24, CT16 or CT16S: packed as the GS sends them
+                (4, 3 or 2 bytes a pixel, no padding) */
+  u32 bytes; /* of the pixels */
+  u32 lines; /* display lines a buffer line was shown on: 2 for a field's
+                buffer (FIELD mode), else 1 */
+  s32 proc;  /* the paused process */
+};
+/* Is there one: 0 and its description, or -1. The shell only. */
+int mx_home_picture(struct mx_picture *p);
+/* Its pixels into buf (bytes: at least p->bytes; VM is fine). 0, or -1. */
+int mx_home_picture_read(void *buf, u32 bytes);
+
 /* "480i" ...; MX_SCREEN_* of a name, 0 if none. */
 const char *mx_screen_name(u32 mode);
 u32 mx_screen_mode_of(const char *name);

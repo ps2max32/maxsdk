@@ -16,6 +16,7 @@
 #include <mx/msg.h>
 #include <mx/pad.h>
 #include <mx/proc.h>
+#include <mx/screen.h>
 #include <mx/string.h>
 #include <mx/video.h>
 #include "t.h"
@@ -134,6 +135,30 @@ int main(int argc, char **argv) {
   event(port, MX_EVENT_HOME, id, 0); /* the first press: in front, the game paused */
   int st = -1;
   CHECK_EQ(mx_proc_wait(id, &st, 1), 0);
+  /* kernel version 32: the game's picture, read back at its frame boundary
+     (the ground is (n & 0x7F, 0x20, 0x60)); none without the frame pipeline */
+  if (mx__kernel->version >= 32) {
+    struct mx_picture p;
+    int r = mx_home_picture(&p);
+    if (!stay) {
+      CHECK_EQ(r, -1);
+    } else {
+      CHECK_EQ(r, 0);
+      if (r == 0) {
+        mx_printf("k50: the game's picture: %u x %u, psm %u, %u bytes, process %d\n", p.w, p.h, p.psm,
+                  p.bytes, (int)p.proc);
+        CHECK_EQ(p.proc, id);
+        CHECK_EQ(p.w, 640);
+        u8 *m = mx_sbrk((s32)p.bytes);
+        CHECK(m != 0 && m != (u8 *)-1);
+        CHECK_EQ(mx_home_picture_read(m, p.bytes - 1), -1);
+        CHECK_EQ(mx_home_picture_read(m, p.bytes), 0);
+        CHECK_EQ(m[1], 0x20);
+        CHECK_EQ(m[2], 0x60);
+        CHECK_EQ(m[p.bytes - 3], 0x20);
+      }
+    }
+  }
   mx_printf("k50: in front at the home button; the game back\n");
   if (stay)
     mx_sleep_us(stay);

@@ -190,8 +190,9 @@ MX_INLINE u64 *mx_gs_e_regs_close(u64 *tag, u64 *c, int eop) {
    never end, probe/p24_t4down.c); read the buffer as T8 or 32 bits, or
    draw it. bp is in 64-word blocks (BITBLTBUF units; a framebuffer page is
    32 blocks: use MX_GS_PAGE(fbp)), bw in 64-pixel units. dst (uncached or
-   cached; it is invalidated). The bytes must be a multiple of 128 (-1 if
-   not, or for another psm). Blocking. */
+   cached; it is invalidated). The bytes must be a multiple of 128 and at most
+   1 MiB less 16 (65535 quadwords, the DMA's count: a larger picture in
+   pieces); -1 if not, or for another psm. Blocking. */
 int mx_gs_download(void *dst, u32 bp, u32 bw, u32 psm, u32 x, u32 y, u32 w, u32 h);
 
 /* Save framebuffer buf (0/1) as a TGA file through the IOP file server

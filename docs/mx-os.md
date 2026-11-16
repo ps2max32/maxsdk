@@ -244,7 +244,9 @@ shell started the program (and waits for it or runs beside it, `mx_proc_spawn`),
 brings the shell in front instead: the program is paused at its frame boundary and the shell gets
 `MX_EVENT_HOME`; it brings the program back with `mx_proc_front` or ends it with `mx_proc_kill`.
 With the shell in front the home button is the shell's: it does not end the shell. Each gets its
-own video mode back at these switches; what it drew in GS memory is not kept. It is the system's: any pad's
+own video mode back at these switches; what it drew in GS memory is not kept. The shell can
+read the paused program's last picture (`mx_home_picture`, `<mx/screen.h>`, kernel version 32:
+the frame pipeline reads it back before the switch; none from a program in hires mode). It is the system's: any pad's
 home button reaches whichever port a program reads. L3 + R3 toggles libgl's counters, off by
 default. Do not bind these.
 
