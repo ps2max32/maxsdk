@@ -830,21 +830,29 @@ Parts, each tested alone:
    both consoles: `k63_frames` writes and reads every free frame (20 to 27 of them below 1
    MiB), before and after the other kernel tests and IOP resets. Not yet run: a game with a
    swap file, as a soak test.
-4. **The kernel's code paged** (design first, with numbers). Of the kernel's 472 KiB today
-   218 are code, 195 `.bss`, 18 the IOP's DMA area, 17 constants. A part stays resident:
-   all that runs while a page fault cannot be served (the vectors and refill, interrupt
-   handlers, the scheduler, code with EXL set, the VM, the swap file's path through SIF and
-   mxio, what holds the VM's or the file lock, the crash report and the console). The rest
-   gets a global region of its own in the free addresses (0x02000000-0x07FFFFFF). Open:
-   - the file its pages come from can go or change (the card pulled, the kernel's ELF
-     written over at an install, a kernel tried from host:), so they are copied at the boot
-     (swap or memory) or an install never writes over the running one's file;
-   - without a swap file only code and constants can leave, so the gain is address space
-     more than memory;
-   - a test mode that drops the kernel's pages all the time and reports a fault taken where
-     none may be;
-   - boot code cannot be paged (no files yet) but can be given up after the boot; the
-     restart runs it again.
+4. **The kernel's code paged.** Measured 2026-11-16, not started: it is not worth its risk
+   for memory, and the room is there without it.
+   - The kernel is 225 KiB of code, 18 KiB of constants, 195 KiB of `.bss` and 30 KiB of
+     other data, in 1 MiB; about 250 KiB of the code's half and 220 KiB of the data's are free.
+   - What must stay resident (it runs while a page fault cannot be served: the vectors and
+     refill, interrupt handlers, the scheduler, code with EXL set, the VM, the swap file's path
+     through SIF and mxio, what holds the VM's or the file lock, the crash report and the
+     console) is about 130 KiB of the code: `vm.c` 36, `sif.c` and `sifdma.c` 30, the
+     scheduler, interrupts and processes 22, the console, printf and the crash report 13, the
+     pad 11, the rest in small pieces.
+   - What could be paged is about 80 KiB of code and 10 KiB of constants (the loader, the
+     command thread, the devices, settings, video, network and time, the home menu): 3 frames
+     of 991. Without a swap file `.bss` cannot leave, and that is the larger part: `sif.c` 49
+     KiB, `vm.c` 29, the scheduler 24, the loader and the command thread 18 each, the home
+     menu 11 (it goes with step 5).
+   - Against that: a region of the kernel's own in every address space, a second table in
+     the refill, the file its pages come from that can go or change (the card pulled, the
+     kernel's ELF written over at an install, a kernel tried from host:), a test mode that
+     drops its pages all the time to find a fault taken where none may be, and boot code that
+     cannot be paged (no files yet).
+   - If the kernel grows past its MiB: first what runs once (the boot's code, given up after
+     it and loaded again for a restart), then what is a program's business moved out of the
+     kernel (the home menu to the shell, step 5), then paging.
 
 ### Step 5: graphics and sound have an owner, and home is the shell
 
