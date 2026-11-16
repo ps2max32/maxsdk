@@ -1,0 +1,10 @@
+#IOP-ILB#
+# What mxmc imports of sio2man: its base entries and those of the newer
+# table (ps2sdk's xsio2man.h), which ps2sdk's sio2man.irx exports too.
+L sio2man
+V 0102
+F 0000
+E 024 sio2_mc_transfer_init
+E 025 sio2_transfer
+E 026 sio2_transfer_reset
+E 055 sio2_mtap_change_slot

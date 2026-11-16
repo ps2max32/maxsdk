@@ -1,4 +1,5 @@
 /* mxio: the file service (common/include/mxio.h). */
+#include <errno.h>
 #include <irx.h>
 #include <intrman.h>
 #include <ioman.h>
@@ -197,16 +198,35 @@ static void bdm_event(int event) {
     WakeupThread(watch_tid);
 }
 
-static int present(const char *dev) {
+/* 1: the device's root opens; 0: it does not; -1: an error that says nothing
+   about the device being there (mcman: -EMFILE when its 3 open files are
+   taken, -EIO from a transfer) */
+static int open_root(const char *dev) {
   char p[16];
   u32 n = strlen(dev);
   memcpy(p, dev, n);
   p[n] = '/', p[n + 1] = 0;
   int fd = dopen(p, 0);
-  if (fd < 0)
-    return 0;
-  dclose(fd);
-  return 1;
+  if (fd >= 0) {
+    dclose(fd);
+    return 1;
+  }
+  /* mcman checks the card before it takes a file: no card is -ENXIO even
+     with every file taken; an unformatted card is -EFORMAT */
+  return fd == -ENXIO || fd == -ENODEV || fd == -EFORMAT ? 0 : -1;
+}
+
+static int present(const char *dev) {
+  return open_root(dev) > 0;
+}
+
+/* a card slot: after an error that is not "no card", its last state */
+static int card_present(int slot) {
+  static int was[2];
+  int r = open_root(slot ? "mc1:" : "mc0:");
+  if (r >= 0)
+    was[slot] = r;
+  return was[slot];
 }
 
 static void add(struct mxio_devs *t, const char *name, int kind, int fs, u64 size) {
@@ -233,9 +253,9 @@ static struct mxio_devs scan_t, bdm_t;
 static void scan(struct mxio_devs *t, int bdm_too) {
   memset(t, 0, sizeof *t);
   t->version = MXIO_DEVS_VERSION;
-  if (present("mc0:"))
+  if (card_present(0))
     add(t, "mc0:", 1, 1, 8u << 20);
-  if (present("mc1:"))
+  if (card_present(1))
     add(t, "mc1:", 1, 1, 8u << 20);
   void **b = bdm();
   if (b && bdm_too) {

@@ -181,6 +181,17 @@ the region's 480i or 576i and confirm it. `mx_gs_init` in libmxk shows its w x h
 `mx_screen_pick` (exact size, the shape it has on the region's TV mode). On PCSX2 the screen is
 set up again after the settings are read. `tests/ps2/k59_video.c`.
 
+Also version 31: the kernel's directory and the card driver (`apps/mxos/ee/main.c`). The IOP
+modules, the settings and the default shell come from the directory of the path the kernel was
+started by (`argv[0]` up to its last `/` or `:`, at its first start: `module_dir`, kept through
+restarts), so a kernel on `mc1:` or in a one-shot's directory uses its own files; a kernel
+started from `host:` (tried from the PC: not whatever files are in the PC's directory), or one
+without `chime.irx` there, from `MODULE_DIR` (`mc0:/MXOS/`). The card
+driver is `mxmc.irx` (`iop/sio/mxmc`, a fork of ps2sdk's XMCMAN: the same device `mc` and
+export table `mcman` 2.3, so MCSERV binds to it) with 16 open files in place of mcman's 3: the
+VM keeps each running program's ELF open, so the service and the shell took 2 of the 3 and
+everything else on the card fought for the last one (`docs/mxmc-plan.md`).
+
 Version 30 (2026-11-16): the network (`apps/mxos/ee/net.c`, `<mx/net.h>`'s `mx_net_status`,
 `common/include/mxnet.h`). mxsock watches mxnet (its new exports `mxnet_status`,
 `mxnet_config`) twice a second and writes a `struct mxnet_status` to the kernel by DMA when the
@@ -245,7 +256,9 @@ The kernel reads it at its first start (with the loader's IOP, which reads the c
 it in `.padarea`, with a magic and its directory, through its restarts (its `.bss` is cleared
 then; `.padarea` is read-only through the TLB, so the store and its file buffer are used through
 the uncached alias); the command thread writes it 3 s after
-the last change (`settings_tick`, from `dev_now`). Without a store the old files are imported
+the last change (`settings_tick`, from `dev_now`); a failed open, write or close is logged with
+the open's and the write's results and tried again 2 s later when the card driver had no file
+free (-24), else 30 s later (the card may be out). Without a store the old files are imported
 once: `IPCONFIG.DAT` (`net.ip`, `net.mask`, `net.gw`), `SWAP.CFG` (`swap.path`, `swap.size`),
 `SHELL.CFG` (`shell.path`), `SERVICES.CFG` (`service`); they are not read again after that. The
 kernel's keys: those, `storage.mx4sio` (`on`: `mx4sio_bd` loaded at the boot) and `pad.swap_ports`,
@@ -293,7 +306,10 @@ Also version 26: devices, notifications and the swap file (`ee/dev.c`, `ee/swap.
 `usbmass_bd`, `mxata`; `mx4sio_bd` not: it keeps probing slot 2 and mcman then finds no memory
 card there). mxio watches the devices (`MXIO_WATCH`, `common/include/mxio.h`): bdm's callback
 (`bdm_RegisterCallback`, found by its export table: bdm loads after mxio) for the drives, and
-`dopen` of `mc0:`/`mc1:` every second for the cards; it writes its list with a counter by SIF DMA
+`dopen` of `mc0:`/`mc1:` every second for the cards (a card counts as gone only on the card
+driver's "no card" or "not formatted", -ENXIO/-EFORMAT: its open files are shared by both slots
+and each running program's ELF takes one, so -EMFILE keeps the slot as it was; the driver checks
+the card before it takes a file, so a card pulled out is still seen); it writes its list with a counter by SIF DMA
 into `.padarea` (above the kernel's code, as mxpad's), and a device that went stays listed, not
 present, for one change. The kernel's vblank hook (`dev_vblank`) sees the counter change and
 wakes the command thread (`dev_now`), which compares the list with the names it knew (the first

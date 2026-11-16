@@ -39,7 +39,8 @@ extern const struct mx_video_mode mx_video_vga_640;   /* VESA 640 x 480, 60 Hz: 
 extern const struct mx_video_mode mx_video_vga_800;   /* VESA 800 x 600, 60 Hz: 1600 x 600 */
 extern const struct mx_video_mode mx_video_vga_1024;  /* VESA 1024 x 768, 75 Hz: 1024 x 768 */
 extern const struct mx_video_mode mx_video_vga_1280;  /* VESA 1280 x 1024, 60 Hz: 1280 x 1024 */
-/* not in the BIOS: mx-kernel 22 or later (<mx/crtc.h>), not yet seen on a screen */
+/* not in the BIOS: mx-kernel 22 or later (<mx/crtc.h>); all five shown
+   on an HD TV through component */
 extern const struct mx_video_mode mx_video_720p50;    /* 1280 x 720 */
 extern const struct mx_video_mode mx_video_1080i50;   /* 1920 x 1080 */
 extern const struct mx_video_mode mx_video_1080p30;   /* 1920 x 1080 */

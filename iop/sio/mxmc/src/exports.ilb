@@ -1,0 +1,47 @@
+#IOP-ILB#
+# mxmc's exports: mcman's table (ps2sdk's XMCMAN, library mcman 2.3), the
+# same entries at the same places, so MCSERV binds to it. The entries left
+# out only return.
+L mcman
+V 0203
+F 0000
+E 000 _start
+E 005 McDetectCard
+E 006 McOpen
+E 007 McClose
+E 008 McRead
+E 009 McWrite
+E 010 McSeek
+E 011 McFormat
+E 012 McGetDir
+E 013 McDelete
+E 014 McFlush
+E 015 McChDir
+E 016 McSetFileInfo
+E 017 McEraseBlock2
+E 018 McReadPage
+E 019 McWritePage
+E 020 McDataChecksum
+E 021 McDetectCard2
+E 022 McGetFormat
+E 023 McGetEntSpace
+E 024 McReplaceBadBlock
+E 025 McCloseAll
+E 029 McReadPS1PDACard
+E 030 McWritePS1PDACard
+E 036 McUnformat
+E 037 McRetOnly
+E 038 McGetFreeClusters
+E 039 McGetMcType
+E 040 McSetPS1CardFlag
+E 042 McGetModuleInfo
+E 043 McGetCardSpec
+E 044 McGetFATentry
+E 045 McCheckBlock
+E 046 McSetFATentry
+E 047 McReadDirEntry
+E 048 Mc1stCacheEntSetWrFlagOff
+E 049 McCreateDirentry
+E 050 McReadCluster
+E 051 McFlushCache
+E 052 McSetDirEntryState

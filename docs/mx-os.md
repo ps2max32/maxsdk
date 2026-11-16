@@ -26,8 +26,14 @@ memory: [vm.md](vm.md). Where it goes (a game OS): [mx-os-plan.md](mx-os-plan.md
 - Boot: the memory card's system update is mxboot (`apps/mxboot`): its phase 1 starts
   `mc0:/MXBOOT/MXBOOT.ELF`, which starts the ELF that `MXBOOT/BOOTONCE.CFG` names (once: the file is
   removed first) or `MXBOOT/BOOT.CFG` (`mc?:/MXOS/MXKERNEL.ELF`). A new kernel or program is tried as
-  the one-shot: if it hangs, a reset boots the default again. New IOP modules the same way: a kernel built
-  with `MODULE_DIR=mc0:/MXOS/NEW/` reads them (and its shell) from that directory.
+  the one-shot: if it hangs, a reset boots the default again. The kernel's directory is the one it
+  was started from (`argv[0]` up to its last `/` or `:`: `mc0:/MXOS/`, `mc1:/MXOS/`, a one-shot's):
+  its IOP modules, its settings and its shell are there. For a kernel started from `host:` (tried
+  from the PC), or without `chime.irx` there, it is `MODULE_DIR`, `mc0:/MXOS/` (`make
+  MODULE_DIR=...` for another). New IOP
+  modules are tried the same way: a kernel with them in a directory of its own, as the one-shot.
+- Memory cards: `mxmc.irx` (`iop/sio/mxmc`), MXOS's fork of ps2sdk's mcman with 16 open files for
+  both slots in place of 3 (`docs/mxmc-plan.md`); the device and MCSERV's interface as mcman's.
 - Consoles: the kernel knows two (ROM 2.00, a SCPH-70004; ROM 2.20, a SCPH-90006: `kernel.md`,
   "Other consoles"). On those it sets the video modes itself, 576p (`mx_video_576p`) among them;
   on another a mode is the BIOS's or fails (`mx_video_set` returns -1: set another one). Run `examples/display` on each console the kernel is brought to.
@@ -211,7 +217,9 @@ Retail PS2s have 32 MiB; never count on more.
 9. **A pad is all there is.** Every prompt must work without a keyboard: Cross confirms where an
    engine asks for `Y`. Quit must be reachable from the menu.
 10. **Saves and configs** go next to the ELF, by relative path. Writes are slow (about 750 KB/s
-    on USB) and FAT keeps a file's size until it is closed: close files.
+    on USB) and FAT keeps a file's size until it is closed: close files. On a memory card keep
+    few files open at a time: the card driver (mxmc) has 16 for both slots, and each running
+    program's ELF from a card takes one (the service's and the shell's too); past that -24 (EMFILE).
   Files go through mxio when the card has it (`kernel.md`): nothing changes for a program, but keep
   read buffers 16-byte aligned and sizes whole quadwords: anything else takes a copy on the EE.
 
