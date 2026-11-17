@@ -59,7 +59,7 @@ struct mx_vm_config {
 /* A program that defines this gets VM before its static constructors run
    (so malloc is in VM from the start). */
 extern const struct mx_vm_config mx_vm_config
-    __attribute__((weak, section(".rodata.mx.core"))); /* core, also in a program linked into VM */
+    __attribute__((weak, section(".rodata.mx.irq"))); /* the core's interrupt part: read before VM is on */
 
 /* Turn VM on. Returns 0, or -1 (VM stays off: no swap file, too little
    memory, already on). */
