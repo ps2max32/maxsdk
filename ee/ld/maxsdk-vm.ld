@@ -63,6 +63,15 @@ SECTIONS {
     *libmxk.a:sample.c.o(.text .text.*)
     *libmxk.a:printf.c.o(.text .text.*)
     *libmxk.a:string.c.o(.text .text.*)
+    /* run every frame by any program that draws with textures or shaders,
+       and the compiler's helpers (float, 64-bit, atomics): paged, they were
+       the code refills left in a program that had chosen its own hot code
+       for core (Quake 3, 2026-11-17: 43 a frame) */
+    *libmxk.a:tex.c.o(.text .text.*)
+    *libmxk.a:vcache.c.o(.text .text.*)
+    *libmxk.a:shader.c.o(.text .text.*)
+    *libmxk.a:chain.c.o(.text .text.*)
+    *librt.a:*(.text .text.*)
     *libc.a:libc_machine_mips_mem*.o(.text .text.*)
     *libc.a:libc_string_*.o(.text .text.*)
     *libc.a:libc_machine_mips_str*.o(.text .text.*)
@@ -113,6 +122,10 @@ SECTIONS {
     *libmxk.a:printf.c.o(.rodata .rodata.* .rdata)
     *libmxk.a:string.c.o(.rodata .rodata.* .rdata)
     *libmxk.a:net.c.o(.rodata .rodata.* .rdata)
+    *libmxk.a:tex.c.o(.rodata .rodata.* .rdata)
+    *libmxk.a:vcache.c.o(.rodata .rodata.* .rdata)
+    *libmxk.a:shader.c.o(.rodata .rodata.* .rdata)
+    *librt.a:*(.rodata .rodata.* .rdata)
     *.core.a:*(.rodata .rodata.* .rdata)
     *.coretext.a:*(.rodata .rodata.* .rdata)
     *glue.c.o(.rodata .rodata.* .rdata)
