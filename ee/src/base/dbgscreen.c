@@ -170,7 +170,7 @@ void mx_dbg_screen(void) {
    and slot 30 the EPC the interrupt came at (where the program is) */
 static u32 beats;
 /* an interrupt handler: pinned (mx OS plan 4b) */
-static MX_CORE_FN void beat(void *arg) {
+static MX_IRQ_FN void beat(void *arg) {
   (void)arg;
   extern volatile u32 mx__irq_epc;
   if (++beats & 15)

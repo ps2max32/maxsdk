@@ -18,7 +18,7 @@
 
 MX_CORE_HEAP(512 << 10);
 
-static u8 ring[64 * 1024] MX_ALIGNED(64 * 1024) MX_CORE_DATA;
+static u8 ring[64 * 1024] MX_ALIGNED(64 * 1024) MX_IRQ_DATA;
 
 int main(int argc, char **argv) {
   if (argc > 1 && !strcmp(argv[1], "child")) {

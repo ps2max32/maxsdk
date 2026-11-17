@@ -960,9 +960,9 @@ frames stay where they are while there is room, the LRU may take them, and they 
 in place when it is in front again.
 
 The plan is the address space plan's phase 4 (above, in step 2): 4c, the core gone, and 4d,
-the background shrinks. With both, a process that is not in front keeps only what must stay
-(its handlers' code and data, buffers in a transfer), and all else of it leaves through the
-one LRU when the game needs the frames. No call hands main memory over (user, 2026-11-13).
+the background shrinks. With both, a process that is not in front keeps only buffers in a
+transfer; it has no interrupt handlers of its own (part 4 below), and all of it leaves
+through the one LRU when the game needs the frames. No call hands main memory over (user, 2026-11-13).
 
 - Today, beside a game: the waiting shell keeps a core of 2 MiB, the host link's service 1
   MiB, the kernel 478 KiB below 1 MiB.
@@ -971,15 +971,49 @@ one LRU when the game needs the frames. No call hands main memory over (user, 20
   page sizes chosen as they fit. The parts, in order:
   1. A core at its true size, covered by the largest pages that fit and an entry with one
      half at its end (done, kernel.md: "a core is no longer whole MiBs").
-  2. The core as a region with two states: joined (its frames in place, large entries, while
-     in front) and split (the same frames as 32 KiB pages of its address space, for the
-     pager). What must stay also when split: what its interrupt handlers run and read, and
-     buffers the IOP or the DMAC writes. A frame allocator by page size (2, 8, 32, 128
-     frames; large blocks from the top, single pages from the bottom) and the VM's refill for
-     an address that has an entry with an invalid half.
-  3. Regions a program names beside its core (sections at a page size's multiple, a heap, a
+  2. The core laid out in two parts, by the link script. No change in what runs yet; the
+     kernel knows the border and counts both parts for each process.
+     - The interrupt part: the code and data of the drawing handlers (below), and what a
+       thread touches with interrupts off. `MX_IRQ_FN`, `MX_IRQ_DATA`, `MX_IRQ_BSS`; the
+       link's check (`tools/pinned-check.py`) refuses code that runs with interrupts off
+       outside it.
+     - The fast part, from a 32 KiB border: what is in the core for its speed only, and the
+       core heap. `MX_FAST_FN`, `MX_FAST_DATA`, `MX_FAST_BSS`, `MX_FAST_OBJS`,
+       `MX_FAST_TEXT_OBJS` (the names `MX_CORE_*` go).
+  3. A frame allocator by page size (2, 8, 32, 128 frames; large blocks from the top, single
+     pages from the bottom) and the VM's refill for an address that has an entry with an
+     invalid half.
+  4. Interrupts by one rule (decided 2026-11-17, user): only the process in front gets
+     interrupts itself, and only those of drawing; all else comes through the kernel.
+     - Drawing is a session (`<mx/draw.h>`, a working name): a program asks for the drawing
+       hardware, registers its handlers in the session, and names a function for "lost" and
+       one for "back". In a session: the GS, GIF and VIF interrupts, the DMA channels'
+       ends, the vblank as the moment a picture is shown, the IPU, the timer a program may
+       claim (hires), and the scratchpad, whose contents go with the front.
+     - Losing the front: the kernel waits for the program to end its frame (as now), for a
+       limited time; then it stops the channels itself and the program is told all is lost.
+       A program that hangs does not hold the home button.
+     - Timers (`mx_timer_add`) are no interrupt of a program: the kernel offers sleeping
+       and waits with a time limit, and libmxk runs a timer's function in a thread. One
+       service more: where a thread is (for a program's watchdog, in place of
+       `mx_timer_epc`). The vblank as a clock (frames counted, `mx_frame_begin` woken) is
+       the kernel's for every process.
+     - Showing a picture stays a handler of the process in front. The kernel showing it
+       (a program says "show this buffer at the next vblank") is a possible later step;
+       hires mode shows by a timer inside the frame and keeps its own handler either way.
+  5. The fast part as a region with two states: joined (its frames in place, large entries,
+     while in front) and split (the same frames as 32 KiB pages of its address space, for the
+     pager). Buffers the IOP writes are pinned while the transfer runs, as any page.
+  6. The interrupt part of a process that is not in front leaves too. It has no handlers
+     then, so nothing of it runs with interrupts off from an interrupt; before one of its
+     threads runs, the kernel has the part back: the thread is ready but waits for memory,
+     the pager reads, then it runs (the switch itself, often inside an interrupt, cannot
+     read). Only when the frames are needed: a swap file on USB reads about 1 MiB a second,
+     so a shell whose core left answers the home button a second late. A program chooses
+     what it keeps for that.
+  7. Regions a program names beside its core (sections at a page size's multiple, a heap, a
      mapped file), through the same.
-  4. Only if a program then still refills much in spread data: joining what the refill count
+  8. Only if a program then still refills much in spread data: joining what the refill count
      calls hot.
 - The count is there (kernel version 37, `mx_proc_memory`, `k69_procmem`; also in the kernel's
   log at each program's start). Measured 2026-11-17 on a SCPH-90006, a test program beside

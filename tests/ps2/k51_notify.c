@@ -27,7 +27,7 @@ static void devices(void) {
 
 static u32 seen, secs = 60;
 static volatile int done;
-static u8 tstack[8192] MX_ALIGNED(16) MX_CORE_BSS;
+static u8 tstack[8192] MX_ALIGNED(16) MX_IRQ_BSS;
 /* the time's end: a notification of its own, which ends the wait */
 static void timer(void *arg) {
   (void)arg;

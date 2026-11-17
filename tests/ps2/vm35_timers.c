@@ -5,12 +5,12 @@
 #include <mx/thread.h>
 #include <mx/timer.h>
 
-static volatile u32 every MX_CORE_DATA, once MX_CORE_DATA;
-MX_CORE_FN static void on_every(void *arg) {
+static volatile u32 every MX_IRQ_DATA, once MX_IRQ_DATA;
+MX_IRQ_FN static void on_every(void *arg) {
   (void)arg;
   every++;
 }
-MX_CORE_FN static void on_once(void *arg) {
+MX_IRQ_FN static void on_once(void *arg) {
   (void)arg;
   once++;
 }

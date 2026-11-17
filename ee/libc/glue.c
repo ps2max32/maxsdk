@@ -62,8 +62,8 @@ ssize_t read(int fd, void *buf, size_t n) {
    (calls must be less than 14.5 s apart). There is no real-time clock:
    time() counts from 0 at program start. */
 static unsigned long long cycles(void) {
-  /* read with interrupts off: core (mx OS plan 4b) */
-  static unsigned last MX_CORE_BSS, high MX_CORE_BSS;
+  /* read with interrupts off: the core's interrupt part (mx OS plan 4b, step 6) */
+  static unsigned last MX_IRQ_BSS, high MX_IRQ_BSS;
   int was = mx_di();
   unsigned c = mx_count();
   if (c < last)

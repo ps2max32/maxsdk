@@ -182,6 +182,16 @@ the region's 480i or 576i and confirm it. `mx_gs_init` in libmxk shows its w x h
 `mx_screen_pick` (exact size, the shape it has on the region's TV mode). On PCSX2 the screen is
 set up again after the settings are read. `tests/ps2/k59_video.c`.
 
+Version 38 (2026-11-17, mx OS plan step 6, part 2): a core in two parts (`docs/vm.md`, "The
+core's two parts"): the interrupt part (what runs or is read with interrupts off, the main
+stack) and from a 32 KiB border the fast part (what is core only for speed, the core heap).
+libmxk's note says where the fast part starts (`MXK_NOTE_FAST`); the kernel logs both parts at
+a program's start and `mx_proc_memory` gives the fast part's frames (`struct mx_proc_mem`'s
+`fast`). Programs mark their own with `MX_IRQ_*` and `MX_FAST_*` (`<mx/cpu.h>`) and
+`MX_FAST_OBJS` / `MX_FAST_TEXT_OBJS`. The old names (`MX_CORE_FN`, `MX_CORE_DATA`, `MX_CORE_BSS`,
+`MX_CORE_OBJS`, `MX_CORE_TEXT_OBJS`) are gone: a program says which part. Nothing runs differently
+yet. `tests/ps2/k69_procmem.c`.
+
 Also version 37: a core is no longer whole MiBs (2026-11-17, mx OS plan step 6;
 `apps/mxos/ee/tlb.c`'s `tlb_core_plan`, `core_cover`). A program's core is covered by pairs of
 the largest pages that fit, 4 MiB down to 16 KiB, and its end by an entry with only its even
@@ -216,7 +226,7 @@ with.
 
 | Memory | Chosen by | TLB |
 |---|---|---|
-| Core: code, constants and data of the program | `MX_CORE_FN`, `MX_CORE_DATA`, `MX_CORE_BSS` for one function or variable; `MX_CORE_OBJS` (the Makefile: whole objects), `MX_CORE_TEXT_OBJS` (new: their code and constants only, their data paged); `MX_VM_TEXT=core` (all code) | the core's own entries, 256 KiB to 4 MiB a page |
+| Core: code, constants and data of the program | `MX_FAST_FN`, `MX_FAST_DATA`, `MX_FAST_BSS` for one function or variable (`MX_IRQ_*` for what runs with interrupts off, since version 38); `MX_FAST_OBJS` (the Makefile: whole objects), `MX_FAST_TEXT_OBJS` (their code and constants only, their data paged); `MX_VM_TEXT=core` (all code) | the core's own entries, 256 KiB to 4 MiB a page |
 | Pinned, allocated | `MX_MEM_PINNED`, `MX_MEM_STREAM` heaps, `mx_dma_alloc` | one entry for all of it (`MX_PHYS_WIN`) |
 | A file, resident | `mx_vm_map_file_flags(path, &size, MX_VM_MAP_RESIDENT)` (new, `<mx/vm.h>`): the whole file read into pinned frames at the call, one physical piece; `mx_vm_unmap_file` gives them back, the program's end too | the same entry |
 | Paged | the rest: code and statics, `malloc`, `MX_MEM_PAGED` and `MX_MEM_ASSET` heaps, `mx_vm_map_file` | 32 KiB a page, refills |

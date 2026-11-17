@@ -21,13 +21,17 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 37
+#define MX_KERNEL_VERSION 38
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
 /* a second note of that name: the core heap the program asks for (u32
    bytes), MX_CORE_HEAP in <mx/loader.h> */
 #define MXK_NOTE_HEAP 2
+/* a third (kernel version 38): where the core's fast part starts (u32
+   address, __mx_fast_start of ee/ld/maxsdk-vm.ld; 0: none), the interrupt
+   part below it */
+#define MXK_NOTE_FAST 3
 /* The oldest table libmxk runs on: what came later it uses only when the
    table's version has it (the pad from version 6), else its own code. */
 #define MX_KERNEL_MIN 5

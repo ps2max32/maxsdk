@@ -15,8 +15,8 @@
 
 MX_CORE_HEAP(256 << 10);
 
-static volatile u32 ticks MX_CORE_DATA;
-MX_CORE_FN static void tick(void *arg) {
+static volatile u32 ticks MX_IRQ_DATA;
+MX_IRQ_FN static void tick(void *arg) {
   (void)arg;
   ticks++;
 }

@@ -159,7 +159,7 @@ void mx__gs_event_wait(void) {
   if (ev_sema >= 0)
     mx_sema_wait(ev_sema);
 }
-MX_CORE_FN void mx__gs_event(void) {
+MX_IRQ_FN void mx__gs_event(void) {
   if (ev_sema >= 0)
     mx_isema_signal(ev_sema);
 }
@@ -178,7 +178,7 @@ static int present_release(void) {
 }
 
 /* an interrupt handler: pinned (mx OS plan 4b) */
-static MX_CORE_FN void gs_irq(void *arg) {
+static MX_IRQ_FN void gs_irq(void *arg) {
   u64 csr = CSR;
   if (csr & MX_BIT(GS_CSR_SIGNAL)) {
     mx_gs.last_sigid = (u32)MX_R64(MX_GS_SIGLBLID);
@@ -213,7 +213,7 @@ static MX_CORE_FN void gs_irq(void *arg) {
 void (*mx__vsync_hook)(void);
 
 /* an interrupt handler: pinned (mx OS plan 4b) */
-static MX_CORE_FN void vsync_irq(void *arg) {
+static MX_IRQ_FN void vsync_irq(void *arg) {
   mx_gs.vsync++;
   mx_gs.vsync_at = mx_count();
   if (mx__vsync_hook)

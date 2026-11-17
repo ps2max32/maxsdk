@@ -24,7 +24,7 @@ MX_INLINE void mx_delay_us(u32 us) { mx_delay_cycles(us * (MX_EE_HZ / 1000000u))
 
 /* A software timer: fn(arg) from an interrupt after us microseconds, and
    then every period_us (0: once), each interval at most 4 s; fn and arg in
-   core (MX_CORE_FN, MX_CORE_DATA), fn short (interrupts are off). Its id
+   core (MX_IRQ_FN, MX_IRQ_DATA), fn short (interrupts are off). Its id
    (> 0), -1 when the table is full. A timer once is gone after its call;
    mx_timer_remove stops one. A process's end takes its timers. Accuracy:
    about 2 us, later while interrupts are off. */

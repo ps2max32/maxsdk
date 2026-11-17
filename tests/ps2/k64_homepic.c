@@ -17,7 +17,7 @@
 
 MX_CORE_HEAP(512 << 10);
 
-static u8 ring[64 * 1024] MX_ALIGNED(64 * 1024) MX_CORE_DATA;
+static u8 ring[64 * 1024] MX_ALIGNED(64 * 1024) MX_IRQ_DATA;
 void *mx__home_capture(struct mx_picture *out);
 
 #define BX 100

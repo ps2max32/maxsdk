@@ -10,7 +10,7 @@
 #include <mx/string.h>
 
 static u8 vm_req[MX_MSG_MAX + 16], vm_rep[MX_MSG_MAX];
-static u8 core_req[MX_MSG_MAX] MX_CORE_DATA, core_rep[MX_MSG_MAX] MX_CORE_DATA;
+static u8 core_req[MX_MSG_MAX] MX_IRQ_DATA, core_rep[MX_MSG_MAX] MX_IRQ_DATA;
 
 static int has(const char *s, const char *w) {
   for (u32 n = (u32)strlen(w); *s; s++)

@@ -11,7 +11,7 @@
 
 #define FB_W 640u
 
-static u64 chain[2][64] MX_ALIGNED(64) MX_CORE_BSS;
+static u64 chain[2][64] MX_ALIGNED(64) MX_IRQ_BSS;
 
 int main(int argc, char **argv) {
   const char *path = argc > 1 ? argv[1] : "host:picture.jpg";

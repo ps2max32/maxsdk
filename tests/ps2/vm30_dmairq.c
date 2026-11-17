@@ -8,8 +8,8 @@
 #include <mx/hw/regs.h>
 #include <mx/irq.h>
 
-static volatile u32 got MX_CORE_BSS; /* the handler's: core */
-MX_CORE_FN static void handler(void *arg) {
+static volatile u32 got MX_IRQ_BSS; /* the handler's: core */
+MX_IRQ_FN static void handler(void *arg) {
   (void)arg;
   got++;
 }

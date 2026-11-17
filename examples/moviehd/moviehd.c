@@ -22,7 +22,7 @@
 
 #define MBS (1920u / 16 * (1088u / 16)) /* the largest picture */
 
-static u64 tags[MX_MPEG_CHAIN_QW(MBS) * 2] MX_ALIGNED(64) MX_CORE_BSS;
+static u64 tags[MX_MPEG_CHAIN_QW(MBS) * 2] MX_ALIGNED(64) MX_IRQ_BSS;
 
 struct timing {
   u32 n, sum, worst; /* sum in 16 cycles */

@@ -53,9 +53,9 @@ static const u8 a_pcm[] = {
 };
 
 #define MBS 20 /* the largest: 5 x 4 */
-static u8 buf[8192] MX_ALIGNED(64) MX_CORE_BSS;
-static u32 out[MBS * 256] MX_ALIGNED(64) MX_CORE_BSS;
-static u64 tags[MX_MPEG_CHAIN_QW(MBS) * 2] MX_ALIGNED(64) MX_CORE_BSS;
+static u8 buf[8192] MX_ALIGNED(64) MX_IRQ_BSS;
+static u32 out[MBS * 256] MX_ALIGNED(64) MX_IRQ_BSS;
+static u64 tags[MX_MPEG_CHAIN_QW(MBS) * 2] MX_ALIGNED(64) MX_IRQ_BSS;
 
 /* "The lower 6 bits are rounded down": of the product's magnitude, so
    towards 0 (the PS2's answer; docs/ipu.md) */
@@ -173,7 +173,7 @@ static void stream(const char *name, const u8 *es, u32 es_size, const u8 *yuv, u
    differences add up from picture to picture). */
 static void stream_refs(const char *name, const u8 *es, u32 es_size, const u8 *yuv, u32 yuv_size, u32 w,
                         u32 h) {
-  static u8 frames[MX_MPEG_REF_BYTES(5, 4)] MX_ALIGNED(64) MX_CORE_BSS;
+  static u8 frames[MX_MPEG_REF_BYTES(5, 4)] MX_ALIGNED(64) MX_IRQ_BSS;
   u32 size = es_size;
   memset(buf, 0, sizeof buf);
   memcpy(buf, es, es_size);

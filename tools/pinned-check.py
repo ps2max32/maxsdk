@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
-"""Code that runs with interrupts off reaches only pinned code (mx OS plan,
-phase 4b).
+"""Code that runs with interrupts off reaches only the core's interrupt
+part (mx OS plan, phase 4b and step 6).
 
   pinned-check.py <program.elf> [...]     (its map next to it: <program>.map)
 
 A page of VM that is not resident cannot be brought in with interrupts off
-(a handler, code under mx_di): the fault ends the program. The roots are
-  - the functions marked MX_CORE_FN (input sections .text.mx.core*, from the
+(a handler, code under mx_di): the fault ends the program. The same holds
+for the core's fast part (from __mx_fast_start to _end, docs/vm.md "The
+core's two parts"), which is to become pages when the program is not in
+front. The roots are
+  - the functions marked MX_IRQ_FN (input sections .text.mx.irq*, from the
     map): interrupt handlers and what the kernel calls with interrupts off;
   - the calls a function makes after a di, until the next ei.
-Every function reached from them by a call (jal, j) must be in core (below
-0x0800_0000); each one in VM is reported with the root it is reached from.
-Calls through a pointer (jalr) are not seen. Exit status 1 when anything is
+Every function reached from them by a call (jal, j), and the data they
+use, must be in the interrupt part (core, below __mx_fast_start); each one
+in VM or in the fast part is reported with the root it is reached from, and
+so is a function in the fast part that turns interrupts off itself. Calls
+through a pointer (jalr) are not seen. Exit status 1 when anything is
 reported. LLVM is the directory of llvm-objdump (default: the feature
 LLVM's build)."""
 
@@ -40,7 +45,7 @@ def inputs(mapfile):
 
 
 def marked(mapfile):
-    """The functions in .text.mx.core* input sections."""
+    """The functions in .text.mx.irq* input sections."""
     out, sec = set(), None
     rx = re.compile(r"^\s*[0-9a-f]+\s+[0-9a-f]+\s+[0-9a-f]+\s+\d+\s(.*)$")
     for line in open(mapfile):
@@ -53,7 +58,7 @@ def marked(mapfile):
             sec = None
         elif re.search(r":\(\S+\)$", body):
             sec = re.search(r":\((\S+)\)$", body).group(1)
-        elif sec and sec.startswith(".text.mx.core") and "=" not in body:
+        elif sec and sec.startswith(".text.mx.irq") and "=" not in body:
             out.add(body)
     return out
 
@@ -199,6 +204,16 @@ def check(elf):
         window[f] = w - {f}
         wdata[f] = d
 
+    # outside the interrupt part: VM, or the fast part
+    fast_lo, fast_hi = syms.get("__mx_fast_start", 0), syms.get("_end", 0)
+
+    def outside(a):
+        if VM_LO <= a < VM_HI:
+            return "VM"
+        if fast_lo and fast_lo <= a < fast_hi:
+            return "in the core's fast part"
+        return None
+
     mapfile = os.path.splitext(elf)[0] + ".map"
     want = marked(mapfile) if os.path.exists(mapfile) else set()
     roots = {f: name[f] for f in name if name[f] in want and f < VM_LO}
@@ -216,9 +231,14 @@ def check(elf):
                 seen[c] = seen[f]
                 work.append(c)
     elfname = os.path.basename(elf)
-    bad = sorted((name.get(f, hex(f)), r) for f, r in seen.items() if VM_LO <= f < VM_HI)
-    for f, r in bad:
-        print("%s: %s is VM, reached from %s" % (elfname, f, r))
+    bad = sorted((name.get(f, hex(f)), r, outside(f)) for f, r in seen.items() if outside(f))
+    # a function that turns interrupts off runs on with them off: its own
+    # code too (in VM it was resident at the di: the old rule, not checked)
+    bad += sorted((name[f], "itself (it turns interrupts off)", outside(f)) for f in window
+                  if body[f] and any(op == "di" for _, op, _ in body[f]) and outside(f) and
+                  outside(f) != "VM" and f not in seen)
+    for f, r, w in bad:
+        print("%s: %s is %s, reached from %s" % (elfname, f, w, r))
     # the data they use: every reference of a function reached, those after
     # a di of the one that turns interrupts off
     data = set()
@@ -237,14 +257,16 @@ def check(elf):
                 return " (" + obj + ")"
         return ""
 
-    dbad = sorted({(sym, r, where(a)) for sym, a, r in data if VM_LO <= a < VM_HI})
-    for sym, r, w in dbad:
-        print("%s: data %s%s is VM, used from %s" % (elfname, sym, w, r))
+    dbad = sorted({(sym, r, where(a), outside(a)) for sym, a, r in data if outside(a)})
+    for sym, r, w, o in dbad:
+        print("%s: data %s%s is %s, used from %s" % (elfname, sym, w, o, r))
     return bool(bad or dbad)
 
 
 bad = [check(e) for e in sys.argv[1:]]
 if any(bad):
-    print("pinned-check: code run with interrupts off must be core: MX_CORE_FN, or its object "
-          "in ee/ld/maxsdk-vm.ld's pinned list (mx OS plan 4b)", file=sys.stderr)
+    print("pinned-check: code run with interrupts off, and its data, must be in the core's "
+          "interrupt part: MX_IRQ_FN / MX_IRQ_DATA / MX_IRQ_BSS, or its object in "
+          "ee/ld/maxsdk-vm.ld's interrupt list (docs/vm.md, \"The core's two parts\")",
+          file=sys.stderr)
 sys.exit(1 if any(bad) else 0)

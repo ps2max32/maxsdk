@@ -10,8 +10,8 @@
    Slot 0 and the colour: the step. Slot 1: the round (step 4), slot 2: a
    value checked. Slots 4-6: swap ins, swap outs, page faults. Heartbeat in
    slots 30 and 31.
-     1 started by mxload, VM on; main, .data and .bss in VM, a MX_CORE_FN
-       function and a MX_CORE_DATA variable in core
+     1 started by mxload, VM on; main, .data and .bss in VM, a MX_IRQ_FN
+       function and a MX_IRQ_DATA variable in core
      2 .data, .rodata and a 256 KiB .bss as in the file
      3 core calls VM: a core function calling a VM function pointer
      4 code pages: four functions, each on a page of its own at the same
@@ -35,8 +35,8 @@ static const u32 table[64] = {
     1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610, 987, 1597,
 };
 static u8 big[256 * 1024];
-static u32 core_word MX_CORE_DATA = 0xC0DE0001u;
-static u8 tstack[16384] MX_CORE_DATA MX_ALIGNED(16);
+static u32 core_word MX_IRQ_DATA = 0xC0DE0001u;
+static u8 tstack[16384] MX_IRQ_DATA MX_ALIGNED(16);
 
 #define FN(n, v)                                                                                 \
   __attribute__((noinline, aligned(32768))) static u32 f##n(u32 x) { return x * 3 + (v); }
@@ -64,7 +64,7 @@ static void step(u32 n, const char *what) {
   mx_printf("vm11: %u %s\n", n, what);
 }
 
-MX_CORE_FN __attribute__((noinline)) static u32 core_call(u32 (*fn)(u32), u32 x) {
+MX_IRQ_FN __attribute__((noinline)) static u32 core_call(u32 (*fn)(u32), u32 x) {
   return fn(x) + core_word;
 }
 

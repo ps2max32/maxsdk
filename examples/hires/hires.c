@@ -28,8 +28,8 @@
 #define H 540
 
 /* core memory: the DMAC reads the records (an MXOS build is linked into VM) */
-static u8 rec[3 * 128 * 1024] MX_CORE_BSS MX_ALIGNED(64);
-static u8 srec[MX_HIRES_SLOTS * MX_HIRES_PASSES * 1024] MX_CORE_BSS MX_ALIGNED(64);
+static u8 rec[3 * 128 * 1024] MX_IRQ_BSS MX_ALIGNED(64);
+static u8 srec[MX_HIRES_SLOTS * MX_HIRES_PASSES * 1024] MX_IRQ_BSS MX_ALIGNED(64);
 
 static u32 px(float x) { return mx_gs_px(0) + (u32)(x * 16.0f); }
 static u32 py(float y) { return mx_gs_py(0) + (u32)(y * 16.0f); }

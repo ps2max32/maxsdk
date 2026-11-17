@@ -17,8 +17,8 @@
 #define FB_W 640u
 #define MBS_MAX 1280u /* 640 x 512 */
 
-static u64 tags[2][(MX_MPEG_CHAIN_QW(MBS_MAX) + 3) * 2] MX_ALIGNED(64) MX_CORE_BSS;
-static u64 clear[2 * 20] MX_ALIGNED(64) MX_CORE_BSS;
+static u64 tags[2][(MX_MPEG_CHAIN_QW(MBS_MAX) + 3) * 2] MX_ALIGNED(64) MX_IRQ_BSS;
+static u64 clear[2 * 20] MX_ALIGNED(64) MX_IRQ_BSS;
 
 int main(int argc, char **argv) {
   const char *path = argc > 1 ? argv[1] : "host:movie.mpg";

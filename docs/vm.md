@@ -34,15 +34,15 @@ virtual memory at 0x0800_0000, in 32 KiB pages held in the physical memory left 
   start-up, interrupt, SIF, DMA, frame pipeline, GS, VU, debug, printf and string code;
   picolibc's `mem*`, `str*`), libmxc's glue, the VU and HLSL objects, VU microcode,
   constructors, packets, `MX_DMA_LINES` buffers, `mx_vm_config`, and what the program marks
-  `MX_CORE_FN` / `MX_CORE_DATA` / `MX_CORE_BSS` (a zero buffer, no room in the ELF) stay core.
+  `MX_IRQ_*` / `MX_FAST_*` (below: "The core's two parts") stay core.
   `jal` reaches between the two. Each link of an MXOS program runs `tools/pinned-check.py`
-  (the link keeps its relocations, `--emit-relocs`, for it): what an `MX_CORE_FN` function (an
+  (the link keeps its relocations, `--emit-relocs`, for it): what an `MX_IRQ_FN` function (an
   interrupt handler) or code after a `di` calls or reads must be core, else the link fails.
   What it cannot see (a handler's argument, a DMA address) is checked when it is used:
   `mx_irq_*` refuse a handler or argument in VM, and `mx_paddr_of`, `MX_UNCACHED` and
   `MX_UCAB` of VM that is not pinned end the program with a report.
-  A library linked as objects stays core when the program lists them in `MX_CORE_OBJS`
-  (the link puts them in an archive of their own): Quake's `MX_CORE_OBJS = $(MXGL_OBJS)`.
+  A library linked as objects stays core when the program lists them in `MX_FAST_OBJS`
+  (the link puts them in an archive of their own): Quake's `MX_FAST_OBJS = $(MXGL_OBJS)`.
 * `MX_VM_TEXT=core` (with `MX_MEMORY=vm`, `ee/ld/maxsdk-vm-coretext.ld`): the program's code
   stays core too, only its rodata, data and bss are VM. The code then takes no VM TLB
   entries and is never paged, at the cost of as many frames. Quake III (2.2 MiB of code):
@@ -68,6 +68,35 @@ virtual memory at 0x0800_0000, in 32 KiB pages held in the physical memory left 
   argument) and a DMA queue's `on_done` end the program with a report when given VM
   (`mx__need_core`, `<mx/cpu.h>`); thread stacks already did (`mx_thread_start`). What the
   handler reads further on is not checked.
+
+### The core's two parts
+
+Since kernel version 38 (2026-11-17, mx OS plan step 6, part 2) a program's core is laid out in
+two parts, so that the kernel can later treat them apart: the fast part to be split into
+pages while the program is not in front, the interrupt part to be back before one of its
+threads runs. Nothing is treated apart yet; the kernel knows the border and counts both.
+
+* The interrupt part, from 0x10_0000 (segment `text`): crt0, the libraries' objects that run
+  with interrupts off or before the VM is on (the list in `ee/ld/maxsdk-vm.ld`) with their
+  data, constructors, `MX_DMA_LINES` buffers, the small data, the main stack, and what the
+  program marks `MX_IRQ_FN` / `MX_IRQ_DATA` / `MX_IRQ_BSS`.
+* The fast part, from the next 32 KiB border (`__mx_fast_start`, segment `fast`): what is
+  core only to be fast: libmxk's per-frame texture, shader and chain code, the compiler's
+  helpers, picolibc's `mem*` and `str*`, libmxc's glue, the VU and HLSL objects, VU microcode,
+  packets, what the program marks `MX_FAST_FN` / `MX_FAST_DATA` / `MX_FAST_BSS` or lists in
+  `MX_FAST_OBJS` / `MX_FAST_TEXT_OBJS` (`mk/maxsdk.mk`); with `MX_VM_TEXT=core` all other code.
+  The core heap follows it.
+* The old names `MX_CORE_FN` / `MX_CORE_DATA` / `MX_CORE_BSS`, `MX_CORE_OBJS` and
+  `MX_CORE_TEXT_OBJS` are gone; a Makefile that still sets the last two stops with a message.
+* libmxk's note tells the kernel the border (`MXK_NOTE_FAST`, `<mx/kernel.h>`); the kernel
+  logs both parts at the start (`its core at ...: interrupt part N KiB, fast part M KiB`) and
+  `mx_proc_memory` gives the fast part's frames (`fast`).
+* `tools/pinned-check.py` now checks against the border: what an interrupt handler or code
+  after a `di` calls or reads must be in the interrupt part, and a function in the fast part
+  must not turn interrupts off.
+* Measured (SCPH-70004, SCPH-90006): a test program with its code in VM has an interrupt
+  part of 352 KiB (128 KiB of it the stack) and a fast part of 288 KiB (6 KiB of code, the
+  256 KiB core heap). The border costs up to 32 KiB of memory no one uses.
 
 ### Mapped files
 
@@ -204,7 +233,7 @@ interrupt in slots 30–31 (it stops when interrupts stay off), and at the end b
 | `vm9_pins` | 200 gathers of 1–4 pages at random places with every frame in use, the tables and the TLB checked after each (`mx__vm_check`: no two TLB entries match one address) |
 | `vm11_vmlink` | a program linked into VM (`MX_MEMORY=vm`, `ee/ld/maxsdk-vm.ld`), started by mxlink, with 16 frames and a swap file: its own code and data in VM, maxsdk and `MX_CORE_FN`/`MX_CORE_DATA` in core, core calling VM, four functions on pages of their own at one I-cache index called between rounds of heap writes (their frames reused for each other's code), a thread whose function is in VM |
 | `vm12_elfpage` | a program linked into VM paged from its ELF: few pages read at `main`, a 128 KiB table and a 64 KiB array read when touched, evicted and read from the ELF again, half the array written and then from the swap file |
-| `vm13_guards` | in a program linked into VM, `MX_CORE_FN` handlers with `MX_CORE_DATA` data run (a timer, the vblank start); each guard refuses a VM handler or argument (with a test hook instead of the report): timer, INTC, DMAC, SIF server, a DMA queue's `on_done` |
+| `vm13_guards` | in a program linked into VM, `MX_IRQ_FN` handlers with `MX_IRQ_DATA` data run (a timer, the vblank start); each guard refuses a VM handler or argument (with a test hook instead of the report): timer, INTC, DMAC, SIF server, a DMA queue's `on_done` |
 | `vm14_mapfile` | a 300 KiB file mapped with 8 frames and no swap file: in the file window, read twice (read again, dropped, never written out), random reads, a DMA pin and a VIF1 transfer of mapped data, a write pin refused, `mx_fio_write` from the mapping, two files mapped, unmapped and mapped again at the same places. `vm14_mapfile.elf store`: a store into the mapping, which ends the program (status 255) |
 | `vm15_overwrite` | `mx_fio_read` into VM pinned with `MX_VM_PIN_OVERWRITE`, 8 frames: a read at byte 100 over 5 pages in the swap file (4 not read in, the bytes around as they were), a short read over 4 pages (the rest of 2 restored from the swap file), reads into new pages (no zero fill; past a short read, zero) |
 | `vm16_lock` | in a program linked into VM: a static buffer locked and sent through `mx_paddr_of`; 3 pages of a mapped file locked, sent from 3 places, unmoved by 40 pages of heap writes; unlocked and dropped, locked again from the file; `mx_frame_unlock` holds the lock until the frame that REFs the range is done |

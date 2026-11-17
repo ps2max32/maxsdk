@@ -126,7 +126,7 @@ static int test_listen(void) {
 
 /* Stage 7: a thread below this one counts; it only runs while this one sleeps */
 static volatile u32 counted;
-static u8 counter_stack[4096] MX_CORE_DATA MX_ALIGNED(16); /* thread stacks: core */
+static u8 counter_stack[4096] MX_IRQ_DATA MX_ALIGNED(16); /* thread stacks: core */
 static void counter(void *arg) {
   (void)arg;
   for (;;)

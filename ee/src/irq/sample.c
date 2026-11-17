@@ -37,7 +37,7 @@ u32 mx_trace_units(void) {
 }
 
 /* a timer handler: pinned (mx OS plan 4b) */
-static MX_CORE_FN void sample(void *arg) {
+static MX_IRQ_FN void sample(void *arg) {
   (void)arg;
   u32 s = mx_trace_units();
   samples++;

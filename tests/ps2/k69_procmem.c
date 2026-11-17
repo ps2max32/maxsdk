@@ -33,7 +33,7 @@ int main(int argc, char **argv) {
     mx_sleep_us(1000000);
     return 5;
   }
-  CHECK(mx__kernel && mx__kernel->version >= 37);
+  CHECK(mx__kernel && mx__kernel->version >= 38);
   static char args[256];
   u32 n = (u32)strlen(argv[0]) + 1;
   memcpy(args, argv[0], n);
@@ -55,9 +55,13 @@ int main(int argc, char **argv) {
     for (int k = 0; k < ni && k < 8; k++)
       if (m[i].id && info[k].id == m[i].id)
         name = info[k].name;
-    mx_printf("k69: %-28s %s core %3u pinned %3u paged %3u\n", name,
-              !m[i].id ? "       " : m[i].state == MX_PROC_FRONT ? "front  " : "behind ", m[i].core, m[i].pinned,
-              m[i].paged);
+    mx_printf("k69: %-28s %s core %3u (fast %3u) pinned %3u paged %3u\n", name,
+              !m[i].id ? "       " : m[i].state == MX_PROC_FRONT ? "front  " : "behind ", m[i].core, m[i].fast,
+              m[i].pinned, m[i].paged);
+    /* its core in two parts (kernel version 38): an interrupt part, and a
+       fast part with the code (MX_VM_TEXT=core) and the core heap */
+    if (m[i].id == id || m[i].id == self)
+      CHECK(m[i].fast >= 1 && m[i].fast < m[i].core);
     if (m[i].id)
       held += m[i].core + m[i].pinned;
     if (m[i].id && m[i].state != MX_PROC_FRONT)
@@ -77,6 +81,7 @@ int main(int argc, char **argv) {
   }
   CHECK_EQ(m[0].id, 0);
   CHECK_EQ(m[0].core, 32);
+  CHECK_EQ(m[0].fast, 0);
   CHECK_EQ(seen, 3);
   CHECK_EQ(held + m[0].pinned, v.pinned_frames);
   mx_printf("k69: the processes not in front hold %u frames (%u KiB) resident, the kernel %u in the pool\n",

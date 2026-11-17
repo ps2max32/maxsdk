@@ -15,7 +15,7 @@ static u32 total, lost;
 static int timer = -1;
 
 /* a timer handler: pinned (mx OS plan 4b) */
-static MX_CORE_FN void sample(void *arg) {
+static MX_IRQ_FN void sample(void *arg) {
   (void)arg;
   u32 epc = mx_timer_epc();
   u32 key = (epc >> 4) + 1;

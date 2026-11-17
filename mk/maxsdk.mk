@@ -50,7 +50,7 @@ ifeq ($(MX_KERNEL)$(MX_MEMORY),1phys)
 $(error MX_KERNEL=1 with MX_MEMORY=phys: an MXOS program is VM (MX_TARGET=mxos); all in physical memory is a standalone ELF (MX_TARGET=standalone))
 endif
 ifeq ($(MX_TARGET),mxos-core)
-$(error MX_TARGET=mxos-core is gone: an MXOS program is VM (mxos), its DMA data in core (MX_CORE_DATA))
+$(error MX_TARGET=mxos-core is gone: an MXOS program is VM (mxos), its DMA data in core (MX_FAST_DATA))
 endif
 ifndef MX_TARGET
 MX_TARGET := $(if $(filter phys,$(MX_MEMORY)),standalone,mxos)
@@ -77,23 +77,30 @@ MX_LOADER = $(abspath $(MAXSDK)/../../build/apps/mxos-emu/mxkernel.elf)
 MX_HDRS := $(wildcard $(MAXSDK)/ee/include/mx/*.h $(MAXSDK)/ee/include/mx/hw/*.h)
 # $(call link,out,objs)
 # With MX_MEMORY=vm a program chooses what of its own stays core (resident,
-# under large TLB entries: no TLB refills; the rest is paged, 32 KiB a page):
-#   MX_CORE_OBJS       objects of objs all of whose code and data stay core
+# under large TLB entries: no TLB refills; the rest is paged, 32 KiB a page),
+# in the core's fast part (docs/vm.md, "The core's two parts"):
+#   MX_FAST_OBJS       objects of objs all of whose code and data stay core
 #                      (also a library linked as objects, e.g. libgl's);
-#   MX_CORE_TEXT_OBJS  objects whose code and constants stay core, their
+#   MX_FAST_TEXT_OBJS  objects whose code and constants stay core, their
 #                      data paged: the hot code of a large program.
-# They are linked from archives of their own ($(out:.elf=.core.a),
-# .coretext.a), whose members ee/ld/maxsdk-vm.ld keeps core. A function or
-# a variable alone: MX_CORE_FN, MX_CORE_DATA, MX_CORE_BSS (<mx/cpu.h>). All
-# code: MX_VM_TEXT=core. Core is memory the rest of the program cannot
+# They are linked from archives of their own ($(out:.elf=.fast.a),
+# .fasttext.a), whose members ee/ld/maxsdk-vm.ld keeps core. A function or
+# a variable alone: MX_FAST_FN, MX_FAST_DATA, MX_FAST_BSS; what runs or is
+# read with interrupts off MX_IRQ_FN, MX_IRQ_DATA, MX_IRQ_BSS (<mx/cpu.h>).
+# All code: MX_VM_TEXT=core. Core is memory the rest of the program cannot
 # page with: mx_vm_refill_hist (<mx/vm.h>) says which pages are worth it.
+ifneq ($(MX_CORE_OBJS)$(MX_CORE_TEXT_OBJS),)
+$(error MX_CORE_OBJS and MX_CORE_TEXT_OBJS are gone (kernel version 38): MX_FAST_OBJS, MX_FAST_TEXT_OBJS; see docs/vm.md, "The core's two parts")
+endif
+MX_CORE_SETS = $(if $(MX_FAST_OBJS),fast) $(if $(MX_FAST_TEXT_OBJS),fasttext)
+MX_CORE_ALL  = $(MX_FAST_OBJS) $(MX_FAST_TEXT_OBJS)
 link_ar   = $(if $(3),rm -f $(1:.elf=.$(2).a) && $(LLVM)/llvm-ar rcs $(1:.elf=.$(2).a) $(filter $(3),$(4)) && )
-link_objs = $(filter-out $(MX_CORE_OBJS) $(MX_CORE_TEXT_OBJS),$(2)) --whole-archive \
-            $(if $(MX_CORE_OBJS),$(1:.elf=.core.a)) $(if $(MX_CORE_TEXT_OBJS),$(1:.elf=.coretext.a)) --no-whole-archive
-link     = $(if $(filter vm,$(MX_MEMORY)),$(call link_ar,$(1),core,$(MX_CORE_OBJS),$(2))$(call link_ar,$(1),coretext,$(MX_CORE_TEXT_OBJS),$(2))) \
+link_objs = $(filter-out $(MX_CORE_ALL),$(2)) --whole-archive \
+            $(foreach k,$(MX_CORE_SETS),$(1:.elf=.$(k).a)) --no-whole-archive
+link     = $(if $(filter vm,$(MX_MEMORY)),$(call link_ar,$(1),fast,$(MX_FAST_OBJS),$(2))$(call link_ar,$(1),fasttext,$(MX_FAST_TEXT_OBJS),$(2))) \
            $(LLVM)/ld.lld -m elf32ltsmipn32 -T$(MX_LD) -z max-page-size=128 \
            --gc-sections $(if $(MX_PIN_CHECK),--emit-relocs) -Map $(1:.elf=.map) -o $(1) \
-           $(if $(and $(filter vm,$(MX_MEMORY)),$(MX_CORE_OBJS)$(MX_CORE_TEXT_OBJS)),$(call link_objs,$(1),$(2)),$(2)) \
+           $(if $(and $(filter vm,$(MX_MEMORY)),$(strip $(MX_CORE_ALL))),$(call link_objs,$(1),$(2)),$(2)) \
            $(if $(MX_BIOS_CHECK),&& { $(MX_BIOS_CHECK) $(1) || { rm -f $(1); exit 1; }; }) \
            $(if $(MX_PIN_CHECK),&& { $(MX_PIN_CHECK) $(1) || { rm -f $(1); exit 1; }; })
 

@@ -41,7 +41,7 @@ MX_CORE_HEAP(256 << 10);
 #define ENTRY 47
 #define MAGIC 0x600D600Du
 
-static u32 page[2048] MX_ALIGNED(8192) MX_CORE_DATA = {MAGIC, [1024] = MAGIC + 1};
+static u32 page[2048] MX_ALIGNED(8192) MX_IRQ_DATA = {MAGIC, [1024] = MAGIC + 1};
 
 /* core: nothing here may fault while the entry is not the VM's.
    No tlbr: it puts the entry's ASID into EntryHi, and a program's core is
@@ -52,7 +52,7 @@ static u32 page[2048] MX_ALIGNED(8192) MX_CORE_DATA = {MAGIC, [1024] = MAGIC + 1
    invalid, as the VM's tlb_clear), and the VM writes it again when the page
    it held is next used.
    odd < 0: no read. both: the odd half valid too (the page's second 4 KiB). */
-__attribute__((noinline)) static MX_CORE_FN u32 probe(int odd, int both) {
+__attribute__((noinline)) static MX_IRQ_FN u32 probe(int odd, int both) {
   u32 phys = mx_paddr_of(page).v;
   int was = mx_di();
   u32 hi, v;

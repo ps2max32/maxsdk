@@ -1,13 +1,19 @@
 /* Linker script for maxsdk programs linked into VM (MX_MEMORY=vm in
    mk/maxsdk.mk, docs/vm.md). Started by mxlink only.
 
-   Core (from 0x100000, physical, loaded by mxlink): crt0, the libraries'
-   code that runs with interrupts off or before the VM is on (listed below,
-   checked by tools/pinned-check.py at each link), the libraries' rodata,
-   data and bss (archive members), libmxc's glue, the VU
-   and HLSL objects (in directories vu/ and hlsl/), and what the program marks
-   MX_CORE_FN / MX_CORE_DATA (<mx/cpu.h>); VU microcode, constructors,
-   packets and MX_DMA_LINES buffers wherever they come from.
+   Core (from 0x100000, physical, loaded by the kernel), in two parts
+   (docs/vm.md, "The core's two parts"; mx OS plan step 6):
+   - the interrupt part, segment text: crt0, the libraries' code that runs
+     with interrupts off or before the VM is on (listed below, checked by
+     tools/pinned-check.py at each link) and its data, what the program
+     marks MX_IRQ_FN / MX_IRQ_DATA / MX_IRQ_BSS, libmxc's glue (its clock
+     reads with interrupts off), constructors, MX_DMA_LINES buffers, the main
+     stack;
+   - the fast part, segment fast, from a 32 KiB border (__mx_fast_start,
+     told to the kernel in libmxk's note): what is core to be fast: the
+     libraries' code run every frame, the compiler's helpers, the VU and HLSL objects (in directories vu/ and hlsl/), VU microcode,
+     packets, what the program marks MX_FAST_* or lists in MX_FAST_OBJS /
+     MX_FAST_TEXT_OBJS; the core heap follows it (from _end).
    VM (from MX_VM_BASE, 0x0800_0000): the rest of the libraries' code (mx OS
    plan 4b) and of the program's own objects,
    text and rodata in one segment, data and bss in another, each starting
@@ -27,6 +33,7 @@ MEMORY {
 PHDRS {
   text PT_LOAD;
   note PT_NOTE;
+  fast PT_LOAD;
   vmtext PT_LOAD;
   vmdata PT_LOAD;
 }
@@ -63,32 +70,14 @@ SECTIONS {
     *libmxk.a:sample.c.o(.text .text.*)
     *libmxk.a:printf.c.o(.text .text.*)
     *libmxk.a:string.c.o(.text .text.*)
-    /* run every frame by any program that draws with textures or shaders,
-       and the compiler's helpers (float, 64-bit, atomics): paged, they were
-       the code refills left in a program that had chosen its own hot code
-       for core (Quake 3, 2026-11-17: 43 a frame) */
-    *libmxk.a:tex.c.o(.text .text.*)
-    *libmxk.a:vcache.c.o(.text .text.*)
-    *libmxk.a:shader.c.o(.text .text.*)
-    *libmxk.a:chain.c.o(.text .text.*)
-    *librt.a:*(.text .text.*)
-    *libc.a:libc_machine_mips_mem*.o(.text .text.*)
-    *libc.a:libc_string_*.o(.text .text.*)
-    *libc.a:libc_machine_mips_str*.o(.text .text.*)
-    *.core.a:*(.text .text.*)
-    *.coretext.a:*(.text .text.*)
     *glue.c.o(.text .text.*)
-    */vu/*.o(.text .text.*)
-    */hlsl/*.o(.text .text.*)
-    *(.text.mx.core .text.mx.core.*)
+    *(.text.mx.irq .text.mx.irq.*)
     __text_end = .;
   } >ram :text
 
   /* libmxk's note for the kernel (src/base/kstubs.c): in the text segment
      and a PT_NOTE of its own */
   .note.mxk : ALIGN(4) { KEEP(*(.note.mxk .note.mxk.*)) } >ram :text :note
-
-  .vutext : ALIGN(16) { *(.vutext .vutext.*) } >ram :text
 
   .rodata : ALIGN(128) {
     *crt0.o(.rodata .rodata.* .rdata)
@@ -122,17 +111,9 @@ SECTIONS {
     *libmxk.a:printf.c.o(.rodata .rodata.* .rdata)
     *libmxk.a:string.c.o(.rodata .rodata.* .rdata)
     *libmxk.a:net.c.o(.rodata .rodata.* .rdata)
-    *libmxk.a:tex.c.o(.rodata .rodata.* .rdata)
-    *libmxk.a:vcache.c.o(.rodata .rodata.* .rdata)
-    *libmxk.a:shader.c.o(.rodata .rodata.* .rdata)
-    *librt.a:*(.rodata .rodata.* .rdata)
-    *.core.a:*(.rodata .rodata.* .rdata)
-    *.coretext.a:*(.rodata .rodata.* .rdata)
     *glue.c.o(.rodata .rodata.* .rdata)
-    */vu/*.o(.rodata .rodata.* .rdata)
-    */hlsl/*.o(.rodata .rodata.* .rdata)
-    *(.rodata.mx.core .rodata.mx.core.*)
-  } >ram
+    *(.rodata.mx.irq .rodata.mx.irq.*)
+  } >ram :text
 
   .init_array : ALIGN(16) {
     __init_array_start = .;
@@ -170,24 +151,20 @@ SECTIONS {
     *libmxk.a:printf.c.o(.data .data.*)
     *libmxk.a:string.c.o(.data .data.*)
     *libmxk.a:net.c.o(.data .data.*)
-    *.core.a:*(.data .data.*)
     *glue.c.o(.data .data.*)
-    */vu/*.o(.data .data.*)
-    */hlsl/*.o(.data .data.*)
-    *(.data.mx.core .data.mx.core.*)
+    *(.data.mx.irq .data.mx.irq.*)
   } >ram
 
   _gp = ALIGN(128) + 0x7ff0;
   .sdata : ALIGN(128) { *(.lit4) *(.lit8) *(.sdata .sdata.*) } >ram
-
-  .mx.packets : ALIGN(64) { *(.mx.packets .mx.packets.*) . = ALIGN(64); } >ram
 
   .bss (NOLOAD) : ALIGN(128) {
     __bss_start = .;
     *(.bss.mx.lines)
     . = ALIGN(64);
     *(.sbss .sbss.*) *(.scommon)
-    *(.bss.mx.core .bss.mx.core.*)
+    *(.bss.mx.irq .bss.mx.irq.*)
+    *glue.c.o(.bss .bss.* COMMON)
     *crt0.o(.bss .bss.* COMMON)
     *libmxk.a:start.c.o(.bss .bss.* COMMON)
     *libmxk.a:kstubs.c.o(.bss .bss.* COMMON)
@@ -216,10 +193,6 @@ SECTIONS {
     *libmxk.a:printf.c.o(.bss .bss.* COMMON)
     *libmxk.a:string.c.o(.bss .bss.* COMMON)
     *libmxk.a:net.c.o(.bss .bss.* COMMON)
-    *.core.a:*(.bss .bss.* COMMON)
-    *glue.c.o(.bss .bss.* COMMON)
-    */vu/*.o(.bss .bss.* COMMON)
-    */hlsl/*.o(.bss .bss.* COMMON)
     . = ALIGN(16);
     __bss_end = .;
   } >ram
@@ -233,6 +206,54 @@ SECTIONS {
     __mx_main_stack = .;
     . += DEFINED(__mx_stack_size) ? __mx_stack_size : 128 * 1024;
   } >ram
+  /* The fast part, from a 32 KiB border (a VM page: mx OS plan step 6
+     splits it into pages when the program is not in front) */
+  .fast.text : ALIGN(32768) {
+    __mx_fast_start = .;
+    /* run every frame by any program that draws with textures or shaders,
+       and the compiler's helpers (float, 64-bit, atomics): paged, they were
+       the code refills left in a program that had chosen its own hot code
+       for core (Quake 3, 2026-11-17: 43 a frame) */
+    *libmxk.a:tex.c.o(.text .text.*)
+    *libmxk.a:vcache.c.o(.text .text.*)
+    *libmxk.a:shader.c.o(.text .text.*)
+    *libmxk.a:chain.c.o(.text .text.*)
+    *librt.a:*(.text .text.*)
+    *libc.a:libc_machine_mips_mem*.o(.text .text.*)
+    *libc.a:libc_string_*.o(.text .text.*)
+    *libc.a:libc_machine_mips_str*.o(.text .text.*)
+    *.fast.a:*(.text .text.*)
+    *.fasttext.a:*(.text .text.*)
+    */vu/*.o(.text .text.*)
+    */hlsl/*.o(.text .text.*)
+    *(.text.mx.fast .text.mx.fast.*)
+  } >ram :fast
+  .vutext : ALIGN(16) { *(.vutext .vutext.*) } >ram :fast
+  .fast.rodata : ALIGN(128) {
+    *libmxk.a:tex.c.o(.rodata .rodata.* .rdata)
+    *libmxk.a:vcache.c.o(.rodata .rodata.* .rdata)
+    *libmxk.a:shader.c.o(.rodata .rodata.* .rdata)
+    *librt.a:*(.rodata .rodata.* .rdata)
+    *.fast.a:*(.rodata .rodata.* .rdata)
+    *.fasttext.a:*(.rodata .rodata.* .rdata)
+    */vu/*.o(.rodata .rodata.* .rdata)
+    */hlsl/*.o(.rodata .rodata.* .rdata)
+    *(.rodata.mx.fast .rodata.mx.fast.*)
+  } >ram :fast
+  .fast.data : ALIGN(128) {
+    *.fast.a:*(.data .data.*)
+    */vu/*.o(.data .data.*)
+    */hlsl/*.o(.data .data.*)
+    *(.data.mx.fast .data.mx.fast.*)
+  } >ram :fast
+  .mx.packets : ALIGN(64) { *(.mx.packets .mx.packets.*) . = ALIGN(64); } >ram :fast
+  .fast.bss (NOLOAD) : ALIGN(128) {
+    *(.bss.mx.fast .bss.mx.fast.*)
+    *.fast.a:*(.bss .bss.* COMMON)
+    */vu/*.o(.bss .bss.* COMMON)
+    */hlsl/*.o(.bss .bss.* COMMON)
+    . = ALIGN(16);
+  } >ram :fast
   _end = .;
 
   /* VM: the program's own objects */

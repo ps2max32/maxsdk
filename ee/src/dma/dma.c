@@ -256,7 +256,7 @@ static void q_start(struct mx_dmaq *q, struct mx_dma_seg *s) {
 
 /* Channel end: the segment at head is done; start the next one at once. */
 /* an interrupt handler: pinned (mx OS plan 4b) */
-static MX_CORE_FN void q_irq(void *arg) {
+static MX_IRQ_FN void q_irq(void *arg) {
   struct mx_dmaq *q = arg;
   q->t_last_end = mx_count();
   if (!q->running || mx_dma_busy(q->ch))

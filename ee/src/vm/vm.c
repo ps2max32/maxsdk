@@ -2430,7 +2430,7 @@ void mx__core_fault(const void *p, const char *what) {
     return;
   }
   mx_printf("\nVM: %s at %p is VM: what an interrupt handler runs or reads must be core "
-            "(MX_CORE_FN, MX_CORE_DATA, pinned memory; <mx/cpu.h>, <mx/mem.h>)\n",
+            "(MX_IRQ_FN, MX_IRQ_DATA, pinned memory; <mx/cpu.h>, <mx/mem.h>)\n",
             what, p);
   MX_TEST_END(255);
   /* in a kernel: the program's end, not the kernel's mx_exit (that hung the

@@ -40,11 +40,14 @@ struct mx_proc_info {
    the kernel's: all pinned frames that are no process's). paged: frames
    that hold pages of its now, which the pager may take. A process that is
    not in front keeps core and pinned (mx OS plan step 6: they are to leave
-   too). */
+   too). fast (kernel version 38): of core, the frames of its fast part
+   (docs/vm.md, "The core's two parts"), with its core heap; the rest of
+   core is its interrupt part. */
 struct mx_proc_mem {
   u8 id, state; /* as mx_proc_info */
   u16 flags;
   u32 core, pinned, paged;
+  u32 fast;
 };
 int mx_proc_memory(struct mx_proc_mem *m, int max);
 

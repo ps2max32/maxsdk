@@ -18,10 +18,10 @@
 #define W 640
 #define H 448
 
-static u64 pk[4096] MX_CORE_BSS MX_ALIGNED(64);
-static u64 env[128] MX_CORE_BSS MX_ALIGNED(64);
-static u32 tex[64 * 64] MX_CORE_BSS MX_ALIGNED(64);
-static u32 up[256] MX_CORE_BSS MX_ALIGNED(64);
+static u64 pk[4096] MX_IRQ_BSS MX_ALIGNED(64);
+static u64 env[128] MX_IRQ_BSS MX_ALIGNED(64);
+static u32 tex[64 * 64] MX_IRQ_BSS MX_ALIGNED(64);
+static u32 up[256] MX_IRQ_BSS MX_ALIGNED(64);
 
 static u32 median(u32 *v, int n) {
   for (int i = 1; i < n; i++)

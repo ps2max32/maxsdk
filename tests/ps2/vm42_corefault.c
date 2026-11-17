@@ -13,7 +13,7 @@
 
 static u32 in_vm[64]; /* .bss of the program: VM */
 
-MX_CORE_FN static void handler(void *arg) { (void)arg; }
+MX_IRQ_FN static void handler(void *arg) { (void)arg; }
 
 int main(int argc, char **argv) {
   if (argc > 1 && !strcmp(argv[1], "arg")) {

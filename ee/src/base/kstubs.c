@@ -23,6 +23,17 @@ struct mxk_note {
 __attribute__((section(".note.mxk"), used, aligned(4))) static const struct mxk_note mxk_note = {
     4, 8, MXK_NOTE_TYPE, "MXK", MX_KERNEL_VERSION, &mx__core_off};
 
+/* where the core's fast part starts (ee/ld/maxsdk-vm.ld; 0 in a program
+   without one): the kernel counts the two parts (mx OS plan step 6) */
+extern char __mx_fast_start[] __attribute__((weak));
+struct mxk_note_fast {
+  u32 namesz, descsz, type;
+  char name[4];
+  const char *fast;
+};
+__attribute__((section(".note.mxk"), used, aligned(4))) static const struct mxk_note_fast mxk_note_fast = {
+    4, 4, MXK_NOTE_FAST, "MXK", __mx_fast_start};
+
 /* <mx/mem.h>'s default heaps: const for programs, set here at the start */
 struct mx_heap *heap_pinned __asm__("mx_heap_pinned");
 struct mx_heap *heap_stream __asm__("mx_heap_stream");

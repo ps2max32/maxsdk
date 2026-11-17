@@ -7,10 +7,10 @@
 
 #include "t.h"
 
-static u8 bs[512] MX_ALIGNED(64) MX_CORE_BSS;
-static u32 out[4 * 256] MX_ALIGNED(64) MX_CORE_BSS;  /* 4 macroblocks RGB32 */
-static u32 out2[4 * 256] MX_ALIGNED(64) MX_CORE_BSS; /* PACK's output */
-static u8 raw8[2 * 384] MX_ALIGNED(64) MX_CORE_BSS;
+static u8 bs[512] MX_ALIGNED(64) MX_IRQ_BSS;
+static u32 out[4 * 256] MX_ALIGNED(64) MX_IRQ_BSS;  /* 4 macroblocks RGB32 */
+static u32 out2[4 * 256] MX_ALIGNED(64) MX_IRQ_BSS; /* PACK's output */
+static u8 raw8[2 * 384] MX_ALIGNED(64) MX_IRQ_BSS;
 
 /* ---- a bit stream writer ------------------------------------------------ */
 
@@ -262,7 +262,7 @@ static void bdec(void) {
   put_blocks(&mbs[1]);
   put(1, 1); /* the next macroblock: no start code follows */
   bs_end();
-  static s16 mb16[384] MX_ALIGNED(64) MX_CORE_BSS;
+  static s16 mb16[384] MX_ALIGNED(64) MX_IRQ_BSS;
   mx_ipu_input(bs, sizeof bs / 16, 0);
   int n = mx_ipu_bdec(0, 2, MX_IPU_BDEC_INTRA | MX_IPU_BDEC_DCR, mb16);
   mx_dcache_invalidate(mb16, sizeof mb16);

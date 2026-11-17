@@ -18,7 +18,7 @@
 const struct mx_vm_config mx_vm_config = {.swap = "host:vm40swap.bin", .frames = 16 * PAGE};
 
 static u8 pages[NP][PAGE];
-static u32 stack[STACK / 4] MX_ALIGNED(16) MX_CORE_DATA;
+static u32 stack[STACK / 4] MX_ALIGNED(16) MX_IRQ_DATA;
 static volatile u32 phase_depth[4];
 static volatile u32 bad;
 

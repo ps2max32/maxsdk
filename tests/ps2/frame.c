@@ -11,14 +11,14 @@ extern const u8 render_vu[], render_vu_end[], dbl_vu[], dbl_vu_end[];
 #define VERTS 600
 
 /* what DMA and the VUs read: core (under the kernel, k40_frame, statics are VM) */
-static u8 ring[64 * 1024] MX_ALIGNED(64 * 1024) MX_CORE_DATA;
-static float mesh[2][VERTS][3][4] MX_ALIGNED(64) MX_CORE_DATA;
-static float quad[6][3][4] MX_ALIGNED(64) MX_CORE_DATA;
-static u32 tex[16 * 16] MX_ALIGNED(64) MX_CORE_DATA;
-static float hdr[3][7][4] MX_ALIGNED(16) MX_CORE_DATA;
-static u32 px[64] MX_ALIGNED(64) MX_CORE_DATA;
-static float cin[200][4] MX_ALIGNED(64) MX_CORE_DATA;
-static float cout[200][4] MX_ALIGNED(64) MX_CORE_DATA;
+static u8 ring[64 * 1024] MX_ALIGNED(64 * 1024) MX_IRQ_DATA;
+static float mesh[2][VERTS][3][4] MX_ALIGNED(64) MX_IRQ_DATA;
+static float quad[6][3][4] MX_ALIGNED(64) MX_IRQ_DATA;
+static u32 tex[16 * 16] MX_ALIGNED(64) MX_IRQ_DATA;
+static float hdr[3][7][4] MX_ALIGNED(16) MX_IRQ_DATA;
+static u32 px[64] MX_ALIGNED(64) MX_IRQ_DATA;
+static float cin[200][4] MX_ALIGNED(64) MX_IRQ_DATA;
+static float cout[200][4] MX_ALIGNED(64) MX_IRQ_DATA;
 
 static const struct mx_kernel render = {.vu = 1,
                                         .code = render_vu,

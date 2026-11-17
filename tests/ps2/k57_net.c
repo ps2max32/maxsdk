@@ -44,7 +44,7 @@ static void show(void) {
 }
 
 static volatile int done;
-static u8 tstack[4096] MX_ALIGNED(16) MX_CORE_DATA;
+static u8 tstack[4096] MX_ALIGNED(16) MX_IRQ_DATA;
 static u32 secs = 10;
 static void timer(void *arg) {
   (void)arg;

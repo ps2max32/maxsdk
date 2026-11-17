@@ -165,7 +165,7 @@ static void keep(const char *mode) {
 /* the kernel's console as it is in GS memory (page 0) to host:k59.raw:
    w x h pixels of psm (for a look at it on the PC) */
 static void grab(u32 w, u32 h, u32 psm) {
-  static u8 line[1920 * 4] MX_ALIGNED(64) MX_CORE_DATA;
+  static u8 line[1920 * 4] MX_ALIGNED(64) MX_IRQ_DATA;
   u32 bpp = psm == MX_GS_PSM_CT32 ? 4 : 2;
   /* the GS's interrupts for the download (a GS reset keeps its memory) */
   mx_gs_init_video(&mx_video_ntsc);

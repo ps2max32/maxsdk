@@ -92,8 +92,8 @@ void mx__paddr_fault(const void *p, u32 bytes) __attribute__((noreturn));
 /* What runs or is read in an interrupt handler (the handler, its argument,
    a DMA queue) must be core: a VM page that is not resident cannot be
    brought in with interrupts off. In a program linked into VM, the
-   program's own functions and data are VM unless marked MX_CORE_FN /
-   MX_CORE_DATA. VM ends the program with a report naming what; with
+   program's own functions and data are VM unless marked MX_IRQ_FN /
+   MX_IRQ_DATA. VM ends the program with a report naming what; with
    mx__core_fault_hook set (tests), the hook is called instead and the call
    is refused (returns -1). */
 extern void (*mx__core_fault_hook)(const void *p, const char *what);
@@ -142,15 +142,25 @@ MX_INLINE mx_paddr mx_paddr_add(mx_paddr a, u32 bytes) { return (mx_paddr){a.v +
 #define MX_DMA_LINES __attribute__((section(".bss.mx.lines"), aligned(64)))
 
 /* In a program linked into VM (ee/ld/maxsdk-vm.ld): a function or a variable of
-   the program's own that stays in core memory, for what runs or is read
-   with interrupts off (interrupt handlers and their data), thread stacks,
-   and what the DMAC follows. MX_CORE_DATA puts the variable in .data (also
-   a zero one). In a physical program they change nothing. */
-#define MX_CORE_FN __attribute__((section(".text.mx.core")))
-#define MX_CORE_DATA __attribute__((section(".data.mx.core")))
-/* As MX_CORE_DATA for a zero variable, without a place in the ELF (a
-   buffer the DMAC or the IOP reads or writes) */
-#define MX_CORE_BSS __attribute__((section(".bss.mx.core")))
+   the program's own that stays in core memory, in one of the core's two
+   parts (docs/vm.md, "The core's two parts"). In a physical program they
+   change nothing.
+
+   The interrupt part: what runs or is read with interrupts off (interrupt
+   handlers and their data, code under mx_di), checked at each link
+   (tools/pinned-check.py). MX_IRQ_DATA puts the variable in .data (also a
+   zero one); MX_IRQ_BSS a zero one without a place in the ELF. */
+#define MX_IRQ_FN __attribute__((section(".text.mx.irq")))
+#define MX_IRQ_DATA __attribute__((section(".data.mx.irq")))
+#define MX_IRQ_BSS __attribute__((section(".bss.mx.irq")))
+/* The fast part: what is core only to be fast (no TLB refills, no faults
+   while the program is in front), and what the DMAC follows when the
+   program draws. */
+#define MX_FAST_FN __attribute__((section(".text.mx.fast")))
+#define MX_FAST_DATA __attribute__((section(".data.mx.fast")))
+#define MX_FAST_BSS __attribute__((section(".bss.mx.fast")))
+/* MX_CORE_FN, MX_CORE_DATA and MX_CORE_BSS are gone (kernel version 38):
+   one of the two parts, as what they are for. */
 
 /* ---- Register access --------------------------------------------------- */
 

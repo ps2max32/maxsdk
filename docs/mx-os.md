@@ -150,10 +150,14 @@ Retail PS2s have 32 MiB; never count on more.
    Every MXOS program is VM (`MX_TARGET=mxos`): one that stays while another runs (the shell,
    a service, one that starts others and waits) has an address space of its own on the
    kernel's frames and swap file (plan phase 3a, `kernel.md`); what the DMAC, the VUs or the
-   IOP read is in core (`MX_CORE_DATA`, `MX_CORE_BSS`, `MX_CORE_FN`). Since plan phase 4b the
-   libraries' code and data are VM too, but for what runs with interrupts off or before the VM
-   is on; each link checks that (`tools/pinned-check.py`: what a handler or code after a `di`
-   calls or reads must be core). `mxos-core` (all in core) went with phase 3d; all in physical
+   IOP read is in core. Since plan phase 4b the libraries' code and data are VM too, but for
+   what runs with interrupts off or before the VM is on; each link checks that
+   (`tools/pinned-check.py`: what a handler or code after a `di` calls or reads must be in the
+   core's interrupt part). The core has two parts (kernel version 38, `vm.md`): the interrupt
+   part (`MX_IRQ_FN`, `MX_IRQ_DATA`, `MX_IRQ_BSS`) and the fast part
+   (`MX_FAST_FN`, `MX_FAST_DATA`, `MX_FAST_BSS`, `MX_FAST_OBJS`, `MX_FAST_TEXT_OBJS`): what is
+   core only to be fast, or only read by the DMAC and the VUs while the program draws, goes in
+   the fast part, which is to leave when the program is not in front. `mxos-core` (all in core) went with phase 3d; all in physical
    memory is a standalone ELF.
 2. **Paths are relative.** A path without a device is in the directory of the ELF, so one ELF runs
    from `host:` and `usb0:`. Never write `host:` or a device name in a game; make engine base
@@ -176,7 +180,7 @@ Retail PS2s have 32 MiB; never count on more.
    link starts may bring its own file on `host:` for that run (`host:mxswap.txt`, read by
    mxlink's app at execee; kernel version 28): MXOS's is used again after it.
 7. **DMA.** Tags, chains, DMA buffers, thread stacks and interrupt handler data must be core or
-   pinned (`mx_vm_lock`, `mx_vm_pin`, `MX_CORE_FN`, `MX_CORE_DATA`, `MX_CORE_BSS`), never plain
+   pinned (`mx_vm_lock`, `mx_vm_pin`, `MX_IRQ_*`, `MX_FAST_*`), never plain
    VM: `mx_paddr_of`, `MX_UNCACHED` and `MX_UCAB` of VM that is not pinned end the program with a
    report (status 255; before phase 4b `MX_UNCACHED` of VM reached other memory). A physical
    address only from `mx_paddr_of` / `mx_paddr_range`, an uncached view only from `MX_UNCACHED` /

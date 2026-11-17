@@ -10,18 +10,18 @@
 
 #define CMD(code, option) (MX_R32(MX_IPU_CMD) = (u32)(MX_IPU_##code) << 28 | (u32)(option))
 
-static MX_CORE_DATA int sema = -1;
+static MX_IRQ_DATA int sema = -1;
 static u32 fed; /* quadwords given to toIPU since mx_ipu_input */
 /* the command with output under way */
 static struct {
   u32 total, mbq; /* quadwords fromIPU was started with, and a macroblock's; 0: no output */
 } cur;
-static u8 table[64] MX_ALIGNED(64) MX_CORE_BSS; /* SETIQ's and SETVQ's, sent by DMA */
+static u8 table[64] MX_ALIGNED(64) MX_FAST_BSS; /* SETIQ's and SETVQ's, sent by DMA */
 static u8 direct;                               /* mx_ipu_direct */
 static u8 qsc_is_scale;                         /* IDEC's QSC is taken as the scale (PCSX2) */
 static u8 q_type;                               /* IPU_CTRL.QST as last written */
 
-static MX_CORE_FN void wake(void *arg) {
+static MX_IRQ_FN void wake(void *arg) {
   (void)arg;
   mx_isema_signal(sema);
 }
@@ -54,7 +54,7 @@ void mx_ipu_reset(void) {
    coefficient, 2 at the first place after DC, under a matrix of 16s and QSC
    31. Its corner comes out 21 above grey for a scale of 62, 11 for 31. */
 static void probe_qsc(void) {
-  static u32 px[256] MX_ALIGNED(64) MX_CORE_BSS;
+  static u32 px[256] MX_ALIGNED(64) MX_FAST_BSS;
   /* macroblock_type 1; Y0: DC difference 0, run 0 level 2, EOB; the other
      blocks DC difference 0, EOB; a start code */
   static const u8 mb[16] = {0xC4, 0x52, 0x94, 0x88, 0x80, 0x00, 0x00, 0x01, 0xB7};

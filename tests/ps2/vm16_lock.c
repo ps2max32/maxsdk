@@ -38,8 +38,8 @@
 const struct mx_vm_config mx_vm_config = {.swap = "host:vm16swap.bin", .frames = 16 * PAGE};
 
 static u32 sbuf[64] MX_ALIGNED(64); /* VM: the program's own bss */
-static u64 tags[4][2] MX_CORE_DATA MX_ALIGNED(64);
-static u8 slots[64 * 1024] MX_CORE_DATA MX_ALIGNED(64);
+static u64 tags[4][2] MX_IRQ_DATA MX_ALIGNED(64);
+static u8 slots[64 * 1024] MX_IRQ_DATA MX_ALIGNED(64);
 
 static u32 E(u32 i) { return i * 2654435761u ^ 0x1E1E1E1Eu; }
 

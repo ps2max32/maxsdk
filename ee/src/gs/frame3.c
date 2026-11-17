@@ -109,7 +109,7 @@ static void report(void) {
 }
 
 /* an interrupt handler: pinned (mx OS plan 4b) */
-static MX_CORE_FN void vif1_irq(void *arg) {
+static MX_IRQ_FN void vif1_irq(void *arg) {
   (void)arg;
   release();
 }

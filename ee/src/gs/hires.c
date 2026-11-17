@@ -204,7 +204,7 @@ static void start_next(void) {
 void mx__gs_event(void); /* gs.c: a thread that waits for a record looks again */
 /* A pass's DMA has ended (the queue's end interrupt): its time, from its
    start; then the next one. */
-static MX_CORE_FN void pass_done(void *arg) {
+static MX_IRQ_FN void pass_done(void *arg) {
   (void)arg;
   if (!h.busy)
     return;
@@ -275,7 +275,7 @@ static void too_late(u32 k) {
    which may run now. The pass of the last strip but one waits for the end
    of the last strip, the vblank (vsync_hook). */
 /* an interrupt handler: pinned (mx OS plan 4b) */
-static MX_CORE_FN void timer_irq(void *arg) {
+static MX_IRQ_FN void timer_irq(void *arg) {
   (void)arg;
   TMR_MODE = TMR_MODE | (u32)MX_BIT(TIMER_MODE_EQUF);
   u32 j = h.next_line;

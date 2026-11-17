@@ -28,7 +28,7 @@ static void idle(void *a) {
   mx_bios_sleep_thread();
 }
 /* core: a VM program's thread stacks may not be in VM */
-static u8 stack[4096] MX_ALIGNED(16) MX_CORE_DATA;
+static u8 stack[4096] MX_ALIGNED(16) MX_IRQ_DATA;
 
 int main(void) {
   mx_printf("p34_ids: this thread %d\n", mx_bios_get_thread_id());

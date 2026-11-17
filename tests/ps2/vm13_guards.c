@@ -7,7 +7,7 @@
 
    Slot 0 and the colour: the step. Slot 1: the core handlers' counts,
    slot 2: the guards that refused. Heartbeat in slots 30 and 31.
-     1 MX_CORE_FN handlers with MX_CORE_DATA data work: a timer and the
+     1 MX_IRQ_FN handlers with MX_IRQ_DATA data work: a timer and the
        vblank start, counting
      2 with mx__core_fault_hook set (instead of the report that ends the
        program), each refuses a VM function or argument and installs
@@ -26,19 +26,19 @@
 struct counts {
   volatile u32 timer, vblank;
 };
-static struct counts core_counts MX_CORE_DATA;
+static struct counts core_counts MX_IRQ_DATA;
 static struct counts vm_counts; /* VM */
-static struct mx_dmaq q MX_CORE_DATA;
-static u32 nop_qw[4] MX_CORE_DATA MX_ALIGNED(64);
+static struct mx_dmaq q MX_IRQ_DATA;
+static u32 nop_qw[4] MX_IRQ_DATA MX_ALIGNED(64);
 
-MX_CORE_FN static void core_timer(void *arg) { ((struct counts *)arg)->timer++; }
-MX_CORE_FN static void core_vblank(void *arg) { ((struct counts *)arg)->vblank++; }
+MX_IRQ_FN static void core_timer(void *arg) { ((struct counts *)arg)->timer++; }
+MX_IRQ_FN static void core_vblank(void *arg) { ((struct counts *)arg)->vblank++; }
 static void vm_handler(void *arg) { (void)arg, vm_counts.timer++; }
 static void vm_server(int fno, void *arg) { (void)fno, (void)arg, vm_counts.vblank++; }
 
-static u32 refused MX_CORE_BSS; /* the hook's (MX_CORE_FN): core */
-static const char *last MX_CORE_BSS;
-MX_CORE_FN static void hook(const void *p, const char *what) {
+static u32 refused MX_IRQ_BSS; /* the hook's (MX_IRQ_FN): core */
+static const char *last MX_IRQ_BSS;
+MX_IRQ_FN static void hook(const void *p, const char *what) {
   (void)p;
   refused++;
   last = what;

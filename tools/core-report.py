@@ -26,8 +26,10 @@ KIND = {
 
 
 def origin(path, section):
-    if section.startswith((".text.mx.core", ".rodata.mx.core", ".data.mx.core")):
-        return "program: MX_CORE_*"
+    if section.startswith((".text.mx.irq", ".rodata.mx.irq", ".data.mx.irq", ".bss.mx.irq")):
+        return "program: MX_IRQ_*"
+    if section.startswith((".text.mx.fast", ".rodata.mx.fast", ".data.mx.fast", ".bss.mx.fast")):
+        return "program: MX_FAST_*"
     if section.startswith(".bss.mx.lines"):
         return "DMA lines"
     if section.startswith(".mx.packets"):

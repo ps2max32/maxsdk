@@ -9,8 +9,8 @@
 
 #define N 4096
 static u32 vm_buf[N];
-static u32 core_buf[N] MX_CORE_DATA;
-static volatile u32 vblanks MX_CORE_DATA;
+static u32 core_buf[N] MX_IRQ_DATA;
+static volatile u32 vblanks MX_IRQ_DATA;
 
 static u32 entry_hi(void) {
   u32 v;
@@ -24,7 +24,7 @@ static u32 asid(void) {
   return v & 0xFFu;
 }
 
-MX_CORE_FN static void vblank(void *arg) {
+MX_IRQ_FN static void vblank(void *arg) {
   (void)arg;
   vblanks++;
 }

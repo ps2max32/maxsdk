@@ -14,7 +14,7 @@
 MX_CORE_HEAP(256 << 10);
 
 static volatile int round_now, stage;
-static u8 stack[8192] MX_CORE_BSS __attribute__((aligned(16)));
+static u8 stack[8192] MX_IRQ_BSS __attribute__((aligned(16)));
 
 static void watch(void *arg) {
   (void)arg;
