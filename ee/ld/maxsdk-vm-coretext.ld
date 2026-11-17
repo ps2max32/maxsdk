@@ -73,6 +73,10 @@ SECTIONS {
     *libc.a:libc_string_*.o(.text .text.*)
     *libc.a:libc_machine_mips_str*.o(.text .text.*)
     *glue.c.o(.text .text.*)
+    *libc/glue.o(.text .text.*)
+    /* libmxc's __atomic_* calls: interrupts off around each */
+    *atomic.c.o(.text .text.*)
+    *libc/atomic.o(.text .text.*)
     *(.text.mx.irq .text.mx.irq.*)
     __text_end = .;
   } >ram :text
@@ -115,6 +119,7 @@ SECTIONS {
     *libmxk.a:net.c.o(.rodata .rodata.* .rdata)
     *librt.a:*(.rodata .rodata.* .rdata)
     *glue.c.o(.rodata .rodata.* .rdata)
+    *libc/glue.o(.rodata .rodata.* .rdata)
     *(.rodata.mx.irq .rodata.mx.irq.*)
   } >ram :text
 
@@ -155,6 +160,7 @@ SECTIONS {
     *libmxk.a:string.c.o(.data .data.*)
     *libmxk.a:net.c.o(.data .data.*)
     *glue.c.o(.data .data.*)
+    *libc/glue.o(.data .data.*)
     *(.data.mx.irq .data.mx.irq.*)
   } >ram
 
@@ -168,6 +174,7 @@ SECTIONS {
     *(.sbss .sbss.*) *(.scommon)
     *(.bss.mx.irq .bss.mx.irq.*)
     *glue.c.o(.bss .bss.* COMMON)
+    *libc/glue.o(.bss .bss.* COMMON)
     *crt0.o(.bss .bss.* COMMON)
     *libmxk.a:start.c.o(.bss .bss.* COMMON)
     *libmxk.a:kstubs.c.o(.bss .bss.* COMMON)

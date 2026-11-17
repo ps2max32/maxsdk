@@ -78,7 +78,7 @@ threads runs. Nothing is treated apart yet; the kernel knows the border and coun
 
 * The interrupt part, from 0x10_0000 (segment `text`): crt0, the libraries' objects that run
   with interrupts off or before the VM is on (the list in `ee/ld/maxsdk-vm.ld`) with their
-  data, libmxc's glue, the compiler's helpers and picolibc's `mem*` and `str*` (handlers call
+  data, libmxc's glue and `__atomic_*` calls, the compiler's helpers and picolibc's `mem*` and `str*` (handlers call
   them), constructors, `MX_DMA_LINES` buffers, the small data, the main stack, and what the
   program marks `MX_IRQ_FN` / `MX_IRQ_DATA` / `MX_IRQ_BSS`.
 * The fast part, from the next 32 KiB border (`__mx_fast_start`, segment `fast`): what is
