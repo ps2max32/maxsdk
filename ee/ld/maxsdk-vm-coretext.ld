@@ -66,6 +66,12 @@ SECTIONS {
     *libmxk.a:sample.c.o(.text .text.*)
     *libmxk.a:printf.c.o(.text .text.*)
     *libmxk.a:string.c.o(.text .text.*)
+    /* the compiler's helpers (float, 64-bit, atomics) and picolibc's mem*
+       and str*: called from handlers too (a struct copy, a division) */
+    *librt.a:*(.text .text.*)
+    *libc.a:libc_machine_mips_mem*.o(.text .text.*)
+    *libc.a:libc_string_*.o(.text .text.*)
+    *libc.a:libc_machine_mips_str*.o(.text .text.*)
     *glue.c.o(.text .text.*)
     *(.text.mx.irq .text.mx.irq.*)
     __text_end = .;
@@ -107,6 +113,7 @@ SECTIONS {
     *libmxk.a:printf.c.o(.rodata .rodata.* .rdata)
     *libmxk.a:string.c.o(.rodata .rodata.* .rdata)
     *libmxk.a:net.c.o(.rodata .rodata.* .rdata)
+    *librt.a:*(.rodata .rodata.* .rdata)
     *glue.c.o(.rodata .rodata.* .rdata)
     *(.rodata.mx.irq .rodata.mx.irq.*)
   } >ram :text
@@ -206,18 +213,13 @@ SECTIONS {
      splits it into pages when the program is not in front) */
   .fast.text : ALIGN(32768) {
     __mx_fast_start = .;
-    /* run every frame by any program that draws with textures or shaders,
-       and the compiler's helpers (float, 64-bit, atomics): paged, they were
-       the code refills left in a program that had chosen its own hot code
-       for core (Quake 3, 2026-11-17: 43 a frame) */
+    /* run every frame by any program that draws with textures or shaders:
+       paged, they were the code refills left in a program that had chosen
+       its own hot code for core (Quake 3, 2026-11-17: 43 a frame) */
     *libmxk.a:tex.c.o(.text .text.*)
     *libmxk.a:vcache.c.o(.text .text.*)
     *libmxk.a:shader.c.o(.text .text.*)
     *libmxk.a:chain.c.o(.text .text.*)
-    *librt.a:*(.text .text.*)
-    *libc.a:libc_machine_mips_mem*.o(.text .text.*)
-    *libc.a:libc_string_*.o(.text .text.*)
-    *libc.a:libc_machine_mips_str*.o(.text .text.*)
     *.fast.a:*(.text .text.*)
     *.fasttext.a:*(.text .text.*)
     */vu/*.o(.text .text.*)
@@ -231,7 +233,6 @@ SECTIONS {
     *libmxk.a:tex.c.o(.rodata .rodata.* .rdata)
     *libmxk.a:vcache.c.o(.rodata .rodata.* .rdata)
     *libmxk.a:shader.c.o(.rodata .rodata.* .rdata)
-    *librt.a:*(.rodata .rodata.* .rdata)
     *.fast.a:*(.rodata .rodata.* .rdata)
     *.fasttext.a:*(.rodata .rodata.* .rdata)
     */vu/*.o(.rodata .rodata.* .rdata)

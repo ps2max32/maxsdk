@@ -5,13 +5,14 @@
    (docs/vm.md, "The core's two parts"; mx OS plan step 6):
    - the interrupt part, segment text: crt0, the libraries' code that runs
      with interrupts off or before the VM is on (listed below, checked by
-     tools/pinned-check.py at each link) and its data, what the program
+     tools/pinned-check.py at each link) and its data, the compiler's
+     helpers and picolibc's mem* and str*, what the program
      marks MX_IRQ_FN / MX_IRQ_DATA / MX_IRQ_BSS, libmxc's glue (its clock
      reads with interrupts off), constructors, MX_DMA_LINES buffers, the main
      stack;
    - the fast part, segment fast, from a 32 KiB border (__mx_fast_start,
      told to the kernel in libmxk's note): what is core to be fast: the
-     libraries' code run every frame, the compiler's helpers, the VU and HLSL objects (in directories vu/ and hlsl/), VU microcode,
+     libraries' code run every frame, the VU and HLSL objects (in directories vu/ and hlsl/), VU microcode,
      packets, what the program marks MX_FAST_* or lists in MX_FAST_OBJS /
      MX_FAST_TEXT_OBJS; the core heap follows it (from _end).
    VM (from MX_VM_BASE, 0x0800_0000): the rest of the libraries' code (mx OS
@@ -70,6 +71,12 @@ SECTIONS {
     *libmxk.a:sample.c.o(.text .text.*)
     *libmxk.a:printf.c.o(.text .text.*)
     *libmxk.a:string.c.o(.text .text.*)
+    /* the compiler's helpers (float, 64-bit, atomics) and picolibc's mem*
+       and str*: called from handlers too (a struct copy, a division) */
+    *librt.a:*(.text .text.*)
+    *libc.a:libc_machine_mips_mem*.o(.text .text.*)
+    *libc.a:libc_string_*.o(.text .text.*)
+    *libc.a:libc_machine_mips_str*.o(.text .text.*)
     *glue.c.o(.text .text.*)
     *(.text.mx.irq .text.mx.irq.*)
     __text_end = .;
@@ -111,6 +118,7 @@ SECTIONS {
     *libmxk.a:printf.c.o(.rodata .rodata.* .rdata)
     *libmxk.a:string.c.o(.rodata .rodata.* .rdata)
     *libmxk.a:net.c.o(.rodata .rodata.* .rdata)
+    *librt.a:*(.rodata .rodata.* .rdata)
     *glue.c.o(.rodata .rodata.* .rdata)
     *(.rodata.mx.irq .rodata.mx.irq.*)
   } >ram :text
@@ -210,18 +218,13 @@ SECTIONS {
      splits it into pages when the program is not in front) */
   .fast.text : ALIGN(32768) {
     __mx_fast_start = .;
-    /* run every frame by any program that draws with textures or shaders,
-       and the compiler's helpers (float, 64-bit, atomics): paged, they were
-       the code refills left in a program that had chosen its own hot code
-       for core (Quake 3, 2026-11-17: 43 a frame) */
+    /* run every frame by any program that draws with textures or shaders:
+       paged, they were the code refills left in a program that had chosen
+       its own hot code for core (Quake 3, 2026-11-17: 43 a frame) */
     *libmxk.a:tex.c.o(.text .text.*)
     *libmxk.a:vcache.c.o(.text .text.*)
     *libmxk.a:shader.c.o(.text .text.*)
     *libmxk.a:chain.c.o(.text .text.*)
-    *librt.a:*(.text .text.*)
-    *libc.a:libc_machine_mips_mem*.o(.text .text.*)
-    *libc.a:libc_string_*.o(.text .text.*)
-    *libc.a:libc_machine_mips_str*.o(.text .text.*)
     *.fast.a:*(.text .text.*)
     *.fasttext.a:*(.text .text.*)
     */vu/*.o(.text .text.*)
@@ -233,7 +236,6 @@ SECTIONS {
     *libmxk.a:tex.c.o(.rodata .rodata.* .rdata)
     *libmxk.a:vcache.c.o(.rodata .rodata.* .rdata)
     *libmxk.a:shader.c.o(.rodata .rodata.* .rdata)
-    *librt.a:*(.rodata .rodata.* .rdata)
     *.fast.a:*(.rodata .rodata.* .rdata)
     *.fasttext.a:*(.rodata .rodata.* .rdata)
     */vu/*.o(.rodata .rodata.* .rdata)
