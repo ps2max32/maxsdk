@@ -86,6 +86,8 @@ SECTIONS {
     *(.bss.mx.lines)
     . = ALIGN(64);
     *(.sbss .sbss.*) *(.scommon)
+    /* MX_CORE_BSS (<mx/cpu.h>): a program's statics that must be core */
+    *(.bss.mx.core .bss.mx.core.*)
     *crt0.o(.bss .bss.* COMMON)
     *.a:*(.bss .bss.* COMMON)
     *glue.c.o(.bss .bss.* COMMON)
