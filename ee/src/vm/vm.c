@@ -131,7 +131,12 @@ static struct {
   u16 *page_of;
   u8 *frame_space; /* the space of each frame's page */
   u32 bpp;              /* TLB entries a page can have: 1, BPP with a trace */
-  u32 nfree, free_hint;
+  u32 nfree;
+  /* no free frame below it (mx OS plan step 6, part 3): single frames are
+     taken from the bottom, runs (pin_run) from the top, so that a run for
+     a core's large pages finds fewer pages in its way */
+  u32 free_hint;
+  u32 moves; /* pages moved out of a run's way (vacate) */
   int dbit;
   int fd;
   u32 nslots;
@@ -208,6 +213,13 @@ int mx_vm_active(void) { return vm.active; }
 u32 mx_vm_size(void) { return vs->npages * PAGE; }
 
 static u8 *frame_ptr(u32 f) { return vm.frames + f * PAGE; }
+
+/* frame f is free again: frame_take looks from there. Interrupts off. */
+static inline void frame_freed(u32 f) {
+  if (f < vm.free_hint)
+    vm.free_hint = f;
+}
+
 
 /* ---- the TLB -------------------------------------------------------------- */
 
@@ -915,6 +927,7 @@ void mx__vm_space_free(struct vm_space *n) {
     if (page_in(f) >= 0 && space_in(f) == n) {
       vm.page_of[f] = 0;
       vm.nfree++;
+      frame_freed(f);
     } else if (vm.page_of[f] == FRAME_PINNED && vm.frame_space[f] == n->id) {
       /* pinned memory taken while it was the space in use (its program's
          heaps, mem.c): the program is gone, and nothing gave it back
@@ -922,6 +935,7 @@ void mx__vm_space_free(struct vm_space *n) {
          the fourth run swapped) */
       vm.page_of[f] = 0;
       vm.nfree++;
+      frame_freed(f);
       vm.pinned_frames--;
     }
   for (u32 pg = 0; pg < n->npages + n->nmap + n->nheap; pg++) {
@@ -1020,19 +1034,25 @@ static void unmap_s(struct vm_space *s, u32 pg) {
 }
 static void unmap(u32 pg) { unmap_s(vs, pg); }
 
-/* A free frame, marked taken, or -1. Interrupts off. */
+/* A free frame, marked taken, or -1: the lowest one. Interrupts off. */
 static int frame_take(void) {
   if (!vm.nfree)
     return -1;
-  for (u32 n = 0; n < vm.nframes; n++) {
-    u32 f = vm.free_hint;
-    vm.free_hint = f + 1 < vm.nframes ? f + 1 : 0;
+  for (u32 f = vm.free_hint < vm.nframes ? vm.free_hint : 0; f < vm.nframes; f++)
     if (!vm.page_of[f]) {
+      vm.free_hint = f + 1;
       vm.nfree--;
       vm.page_of[f] = FRAME_TAKEN;
       return (int)f;
     }
-  }
+  /* the hint was wrong (a frame freed without frame_freed): all of them */
+  for (u32 f = 0; f < vm.nframes; f++)
+    if (!vm.page_of[f]) {
+      vm.free_hint = f + 1;
+      vm.nfree--;
+      vm.page_of[f] = FRAME_TAKEN;
+      return (int)f;
+    }
   return -1;
 }
 
@@ -1784,6 +1804,8 @@ static void vacate(u32 fr, u32 lo, u32 hi) {
   s->flags[q] &= (u8)~PG_BUSY;
   vm.page_of[fr] = 0;
   vm.nfree++;
+  frame_freed(fr);
+  vm.moves++;
   if (to >= 0) {
     frame_give_s(s, q, (u32)to);
     map_s(s, q, 0);
@@ -1820,6 +1842,7 @@ static void gather(u32 a, u32 n, u32 f0) {
       vs->flags[pg] &= (u8)~PG_BUSY;
       vm.page_of[from] = 0;
       vm.nfree++;
+      frame_freed(from);
       frame_give(pg, fr);
       map(pg, 0);
       mx_irq_restore(was);
@@ -1939,6 +1962,7 @@ void mx_vm_overwrite_done(const void *p, u32 bytes, u32 done) {
         was = mx_di();
         vm.page_of[tf] = 0;
         vm.nfree++;
+        frame_freed(tf);
         mx_irq_restore(was);
         vm.st.restores++;
       } else
@@ -2158,6 +2182,7 @@ void mx__vm_frames_give(void *p, u32 bytes) {
     if (vm.page_of[f0 + i] == FRAME_PINNED) {
       vm.page_of[f0 + i] = 0;
       vm.nfree++;
+      frame_freed(f0 + i);
       vm.pinned_frames--;
     }
   mx_irq_restore(was);
@@ -2288,6 +2313,7 @@ void mx__vm_discard(const void *p, u32 bytes) {
     if (vs->frame_of[pg]) {
       vm.page_of[vs->frame_of[pg] - 1u] = 0;
       vm.nfree++;
+      frame_freed(vs->frame_of[pg] - 1u);
       vs->frame_of[pg] = 0;
     }
     vs->flags[pg] = 0;
@@ -2400,6 +2426,7 @@ void mx_vm_unmap_file(const void *p) {
     unmap(q);
     if (vs->frame_of[q]) {
       vm.page_of[vs->frame_of[q] - 1u] = 0;
+      frame_freed(vs->frame_of[q] - 1u);
       vs->frame_of[q] = 0;
       vm.nfree++;
     }
@@ -2486,6 +2513,11 @@ void mx_vm_stats(struct mx_vm_stats *s) {
    one of the nskip physical ranges skip[] (lo, hi: the cores, counted
    apart), and those that hold a page of its. */
 u32 mx__vm_space_id(const struct vm_space *s) { return s ? s->id : 0; }
+/* pages moved out of the way of a run of frames since the VM was made
+   (mx OS plan step 6, part 3: what taking single frames from the bottom
+   saves), for the kernel's log */
+u32 mx__vm_moves(void) { return vm.moves; }
+
 void mx__vm_frames_of(u32 space, const u32 *skip, u32 nskip, u32 *pinned, u32 *paged) {
   u32 np = 0, ng = 0;
   int was = mx_di();
@@ -2801,6 +2833,7 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   was = mx_di();
   if (vs->frame_of[0]) {
     vm.page_of[vs->frame_of[0] - 1u] = 0; /* free again */
+    frame_freed(vs->frame_of[0] - 1u);
     vs->frame_of[0] = 0;
     vm.nfree++;
   }

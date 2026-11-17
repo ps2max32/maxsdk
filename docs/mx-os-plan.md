@@ -980,9 +980,15 @@ through the one LRU when the game needs the frames. No call hands main memory ov
      - The fast part, from a 32 KiB border: what is in the core for its speed only, and the
        core heap. `MX_FAST_FN`, `MX_FAST_DATA`, `MX_FAST_BSS`, `MX_FAST_OBJS`,
        `MX_FAST_TEXT_OBJS` (the names `MX_CORE_*` go).
-  3. A frame allocator by page size (2, 8, 32, 128 frames; large blocks from the top, single
-     pages from the bottom) and the VM's refill for an address that has an entry with an
-     invalid half.
+  3. A frame allocator by page size (done, 2026-11-17): runs of frames (a core, pinned memory)
+     came from the top already (`pin_run`, aligned to the largest page); single frames now come
+     from the bottom (`frame_take`, a hint at the lowest free frame), so a run finds fewer
+     pages in its way. The kernel's "VM pool" line counts the pages moved out of a run's way
+     ("moved"). `tests/ps2/k71_framerun.c` (850 pages of a child that ended, then 700 pages
+     and 4 MiB pinned of another): 70 pages moved with frames taken round the pool, 0 from
+     the bottom (SCPH-70004). The VM's refill needs nothing for an entry with an invalid
+     half: such an entry is only a core's last one, whose invalid half is no VM page (a
+     touch there is a crash report), and the split fast part (part 5) is pairs of 32 KiB.
   4. Interrupts by one rule (decided 2026-11-17, user): only the process in front gets
      interrupts itself, and only those of drawing; all else comes through the kernel.
      - Drawing is a session (`<mx/draw.h>`, a working name): a program asks for the drawing

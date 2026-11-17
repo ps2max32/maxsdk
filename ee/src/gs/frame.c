@@ -37,6 +37,9 @@ static struct {
      must go out now: kick) */
   int chain;
   int paused; /* ring mode: mx_frame_sync stopped the MFIFO */
+  /* mx_frame_stop: nothing is sent until the next set-up (init_halves);
+     after beam racing the chain's queue is no longer the channel's */
+  int stopped;
   u64 *slot[MX_FRAME_SLOTS];
   mx_event ev[MX_FRAME_SLOTS];
   u8 used[MX_FRAME_SLOTS];
@@ -150,6 +153,7 @@ static u32 init_halves(void *spr, u32 spr_bytes, int chain) {
   f.half_qw = half / 16;
   f.cur = 0;
   f.chain = chain;
+  f.stopped = 0;
   f.pos = f.half[0];
   f.end = f.half[0] + 2 * (f.half_qw - (u32)chain);
   mx_frame_stats.pushes = mx_frame_stats.wait_ring = mx_frame_stats.wait_buffer = 0;
@@ -338,6 +342,7 @@ void mx_frame_stop(void) {
     mx_mfifo_stop();
   }
   f.paused = 0;
+  f.stopped = 1;
   mx_gs.counting = 0;
   /* no frame reads anything any more (the frame counters start again):
      what waited for one is unlocked now */
@@ -384,9 +389,11 @@ int mx_frame_sync(void) {
 
 /* Before this program lets another in front (proc.c: mx_proc_spawn,
    mx_proc_front): what it has sent is drawn, so that the other finds VIF1
-   and the GIF idle. Not in hires mode. */
+   and the GIF idle. Not in hires mode, nor after mx_frame_stop (all was
+   drawn then; after beam racing a sync would wait on a queue whose
+   channel interrupt is gone: a shell that left 1080i hung at a launch). */
 void mx__frame_yield(void) {
-  if (!f.half[0] || f.record || mx_frame_sync() < 0)
+  if (!f.half[0] || f.record || f.stopped || mx_frame_sync() < 0)
     return;
   u32 t0 = mx_count();
   while (mx_gs.frames_done != mx_gs.frames && mx_count() - t0 < MX_EE_HZ / 10)
