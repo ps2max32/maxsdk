@@ -952,6 +952,13 @@ CPU on read circuit 1 over the program's picture.
 
 ### Step 6: all of main memory for the program in front
 
+Decided 2026-11-17 (user): a program chooses itself what of it is resident and fast (core
+sections, pinned heaps, files mapped resident: kernel version 36, kernel.md) and what is paged;
+what it chose resident stays so while it is in front, and can leave like all else once it is
+not. So this step also covers core and pinned memory of a process that is not in front: its
+frames stay where they are while there is room, the LRU may take them, and they are put back
+in place when it is in front again.
+
 The plan is the address space plan's phase 4 (above, in step 2): 4c, the core gone, and 4d,
 the background shrinks. With both, a process that is not in front keeps only what must stay
 (its handlers' code and data, buffers in a transfer), and all else of it leaves through the

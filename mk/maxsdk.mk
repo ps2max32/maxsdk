@@ -76,16 +76,24 @@ MX_LD    = $(MX_LD_$(MX_MEMORY))
 MX_LOADER = $(abspath $(MAXSDK)/../../build/apps/mxos-emu/mxkernel.elf)
 MX_HDRS := $(wildcard $(MAXSDK)/ee/include/mx/*.h $(MAXSDK)/ee/include/mx/hw/*.h)
 # $(call link,out,objs)
-# With MX_MEMORY=vm, the objects of objs also in MX_CORE_OBJS (a library
-# linked as objects, e.g. libgl's) stay core: they are linked from an
-# archive of their own ($(out:.elf=.core.a)), and ee/ld/maxsdk-vm.ld keeps
-# archive members core.
-link_objs = $(filter-out $(MX_CORE_OBJS),$(2)) --whole-archive $(1:.elf=.core.a) --no-whole-archive
-link     = $(if $(filter vm,$(MX_MEMORY)),$(if $(MX_CORE_OBJS),rm -f $(1:.elf=.core.a) && \
-             $(LLVM)/llvm-ar rcs $(1:.elf=.core.a) $(filter $(MX_CORE_OBJS),$(2)) && )) \
+# With MX_MEMORY=vm a program chooses what of its own stays core (resident,
+# under large TLB entries: no TLB refills; the rest is paged, 32 KiB a page):
+#   MX_CORE_OBJS       objects of objs all of whose code and data stay core
+#                      (also a library linked as objects, e.g. libgl's);
+#   MX_CORE_TEXT_OBJS  objects whose code and constants stay core, their
+#                      data paged: the hot code of a large program.
+# They are linked from archives of their own ($(out:.elf=.core.a),
+# .coretext.a), whose members ee/ld/maxsdk-vm.ld keeps core. A function or
+# a variable alone: MX_CORE_FN, MX_CORE_DATA, MX_CORE_BSS (<mx/cpu.h>). All
+# code: MX_VM_TEXT=core. Core is memory the rest of the program cannot
+# page with: mx_vm_refill_hist (<mx/vm.h>) says which pages are worth it.
+link_ar   = $(if $(3),rm -f $(1:.elf=.$(2).a) && $(LLVM)/llvm-ar rcs $(1:.elf=.$(2).a) $(filter $(3),$(4)) && )
+link_objs = $(filter-out $(MX_CORE_OBJS) $(MX_CORE_TEXT_OBJS),$(2)) --whole-archive \
+            $(if $(MX_CORE_OBJS),$(1:.elf=.core.a)) $(if $(MX_CORE_TEXT_OBJS),$(1:.elf=.coretext.a)) --no-whole-archive
+link     = $(if $(filter vm,$(MX_MEMORY)),$(call link_ar,$(1),core,$(MX_CORE_OBJS),$(2))$(call link_ar,$(1),coretext,$(MX_CORE_TEXT_OBJS),$(2))) \
            $(LLVM)/ld.lld -m elf32ltsmipn32 -T$(MX_LD) -z max-page-size=128 \
            --gc-sections $(if $(MX_PIN_CHECK),--emit-relocs) -Map $(1:.elf=.map) -o $(1) \
-           $(if $(and $(filter vm,$(MX_MEMORY)),$(MX_CORE_OBJS)),$(call link_objs,$(1),$(2)),$(2)) \
+           $(if $(and $(filter vm,$(MX_MEMORY)),$(MX_CORE_OBJS)$(MX_CORE_TEXT_OBJS)),$(call link_objs,$(1),$(2)),$(2)) \
            $(if $(MX_BIOS_CHECK),&& { $(MX_BIOS_CHECK) $(1) || { rm -f $(1); exit 1; }; }) \
            $(if $(MX_PIN_CHECK),&& { $(MX_PIN_CHECK) $(1) || { rm -f $(1); exit 1; }; })
 

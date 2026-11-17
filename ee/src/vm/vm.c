@@ -879,6 +879,22 @@ static struct {
 } later[NLATER];
 static u32 nlater;
 
+/* <mx/vm.h>'s mx_vm_map_file_flags with MX_VM_MAP_RESIDENT: the whole file
+   read into a run of pinned frames of the caller's space (one physical
+   piece, reached through MX_PHYS_WIN: no TLB refills), there until it is
+   unmapped or the program ends. flags 0: mx_vm_map_file. */
+#define NRES 8
+static struct {
+  u8 *p;
+  u32 bytes;
+  u32 space;
+} res[NRES];
+static void res_forget(u32 space) {
+  for (int i = 0; i < NRES; i++)
+    if (res[i].p && res[i].space == space)
+      res[i].p = 0;
+}
+
 /* A space not current any more goes: its frames back to the pool (its
    pages are dropped, their swap slots unused from now), its tables freed. */
 void mx__vm_space_free(struct vm_space *n) {
@@ -893,6 +909,7 @@ void mx__vm_space_free(struct vm_space *n) {
   }
   if (wfor == n) /* its program asked for the writer: nothing ahead from now */
     wfor = 0, vm.clean_frames = 0;
+  res_forget(n->id); /* its resident files: their frames go below */
   int was = mx_di();
   for (u32 f = 0; f < vm.nframes; f++)
     if (page_in(f) >= 0 && space_in(f) == n) {
@@ -2322,7 +2339,47 @@ const void *mx_vm_map_file(const char *path, u32 *size) {
   return p;
 }
 
+const void *mx__vm_map_file_flags(const char *path, u32 *size, u32 flags) {
+  if (!(flags & MX_VM_MAP_RESIDENT))
+    return mx_vm_map_file(path, size);
+  if (!vm.active)
+    return 0;
+  int fd = mx_fio_open(path, MX_FIO_RDONLY);
+  if (fd < 0)
+    return 0;
+  int n = mx_fio_lseek(fd, 0, MX_FIO_SEEK_END), slot = -1;
+  for (int i = 0; i < NRES && slot < 0; i++)
+    if (!res[i].p)
+      slot = i;
+  u8 *p = n > 0 && slot >= 0 && mx_fio_lseek(fd, 0, MX_FIO_SEEK_SET) == 0 ? mx__vm_frames_take((u32)n) : 0;
+  /* in pieces: a read is one transfer of the file server's */
+  for (u32 at = 0; p && at < (u32)n;) {
+    u32 k = (u32)n - at < (256u << 10) ? (u32)n - at : 256u << 10;
+    if (mx_fio_read(fd, p + at, k) != (int)k) {
+      mx__vm_frames_give(p, (u32)n);
+      p = 0;
+    }
+    at += k;
+  }
+  mx_fio_close(fd);
+  if (!p) {
+    mx_printf("mx_vm_map_file: %s resident: %s\n", path,
+              n <= 0 ? "empty, or no size" : slot < 0 ? "8 files already" : "no run of frames, or not read");
+    return 0;
+  }
+  res[slot].p = p, res[slot].bytes = (u32)n, res[slot].space = vs->id;
+  if (size)
+    *size = (u32)n;
+  return p;
+}
+
 void mx_vm_unmap_file(const void *p) {
+  for (int i = 0; i < NRES; i++)
+    if (res[i].p && res[i].p == p && res[i].space == vs->id) {
+      mx__vm_frames_give(res[i].p, res[i].bytes);
+      res[i].p = 0;
+      return;
+    }
   u32 pg = first_page(p);
   if (pg == ~0u || !is_mapped(pg))
     return;

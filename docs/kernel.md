@@ -182,6 +182,28 @@ the region's 480i or 576i and confirm it. `mx_gs_init` in libmxk shows its w x h
 `mx_screen_pick` (exact size, the shape it has on the region's TV mode). On PCSX2 the screen is
 set up again after the settings are read. `tests/ps2/k59_video.c`.
 
+Version 36 (2026-11-17): a program chooses what of it is resident and fast, and what is paged
+(decided with the user: the program finds the balance itself, with `mx_vm_refill_hist`). What
+is paged has 32 TLB entries of 32 KiB to share, so a program that uses a few hundred pages a
+frame refills all the time (Quake 3: 1670 a frame, 1 ms of a field); core and pinned memory
+have entries of their own and no refills, and take their size out of the frames the rest pages
+with.
+
+| Memory | Chosen by | TLB |
+|---|---|---|
+| Core: code, constants and data of the program | `MX_CORE_FN`, `MX_CORE_DATA`, `MX_CORE_BSS` for one function or variable; `MX_CORE_OBJS` (the Makefile: whole objects), `MX_CORE_TEXT_OBJS` (new: their code and constants only, their data paged); `MX_VM_TEXT=core` (all code) | the core's own entries, 256 KiB to 4 MiB a page |
+| Pinned, allocated | `MX_MEM_PINNED`, `MX_MEM_STREAM` heaps, `mx_dma_alloc` | one entry for all of it (`MX_PHYS_WIN`) |
+| A file, resident | `mx_vm_map_file_flags(path, &size, MX_VM_MAP_RESIDENT)` (new, `<mx/vm.h>`): the whole file read into pinned frames at the call, one physical piece; `mx_vm_unmap_file` gives them back, the program's end too | the same entry |
+| Paged | the rest: code and statics, `malloc`, `MX_MEM_PAGED` and `MX_MEM_ASSET` heaps, `mx_vm_map_file` | 32 KiB a page, refills |
+
+Cached or not is chosen for each access, not for a section: `MX_UNCACHED(p)` and `MX_UCAB(p)`
+are the same memory through the uncached and the uncached accelerated view, for core and
+pinned memory (one TLB entry each for all of main memory); paged memory is always cached. A
+cache mode of its own for a section would take TLB entries of its own.
+
+Not yet: core and pinned memory stay resident while the program waits or is paused too (mx OS
+plan step 6: what is not in front can leave). `tests/ps2/k68_resmap.c`.
+
 Version 35 (2026-11-17): where a program's TLB refills fall (`<mx/vm.h>`: `mx_vm_refill_hist`;
 `src/vm/tlb.S`, `vm.c`'s `mx__vm_refill_hist`). The first call starts a count for each page of
 the caller's VM, file and heap windows (a word a page, in pinned frames of its space; the fast

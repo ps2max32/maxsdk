@@ -82,6 +82,16 @@ u32 mx_vm_size(void);
    the file's bytes), or 0. */
 const void *mx_vm_map_file(const char *path, u32 *size);
 void mx_vm_unmap_file(const void *p);
+/* The same with a choice (kernel version 36). MX_VM_MAP_RESIDENT: the whole
+   file is read at the call into pinned memory, in one physical piece: no
+   page faults and no TLB refills when it is read, the DMAC can read it
+   (mx_paddr_of, MX_UNCACHED and MX_UCAB work on it), and it takes its size
+   out of the frames the rest of the program pages with, until it is
+   unmapped. For data read all over every frame; the paged form is for
+   data read now and then. Up to 8 such files. 0: no run of frames that
+   long, or as mx_vm_map_file. flags 0: mx_vm_map_file. */
+#define MX_VM_MAP_RESIDENT 1u
+const void *mx_vm_map_file_flags(const char *path, u32 *size, u32 flags);
 
 /* ---- DMA and the IOP --------------------------------------------------------- */
 

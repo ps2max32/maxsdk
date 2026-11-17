@@ -21,7 +21,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 35
+#define MX_KERNEL_VERSION 36
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -313,6 +313,8 @@ struct mxk_services {
   u32 (*gfx_gen)(void);
   /* version 35: where the caller's TLB refills fall (<mx/vm.h>) */
   int (*vm_refill_hist)(struct mx_vm_hot *out, int max);
+  /* version 36: a file mapped resident (<mx/vm.h>: MX_VM_MAP_RESIDENT) */
+  const void *(*vm_map_file_flags)(const char *path, u32 *size, u32 flags);
 };
 int mx__iop_write_phys(u32 iop, u32 src, u32 size);
 /* the kernel's own writer of the CRTC timing, used by mx_video_set in it
