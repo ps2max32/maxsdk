@@ -2,6 +2,7 @@
 #include <mx/cpu.h>
 #include <mx/debug.h>
 #include <mx/hw/formats.h>
+#include <mx/kernel.h>
 #include <mx/irq.h>
 #include <mx/kernel.h>
 #include <mx/trace.h>
@@ -102,9 +103,25 @@ void mx__irq_tell_kernel(void) {
   mx__kernel->irq_tables(&t);
 }
 
+/* Under mx-kernel (version 39, <mx/draw.h>) a program's handlers are for
+   the drawing hardware only: the rest is the kernel's (SIF, its timers) */
+#define DRAW_INTC (1u << MX_INTC_GS | 1u << MX_INTC_VBON | 1u << MX_INTC_VBOF | 1u << MX_INTC_VIF0 | \
+                   1u << MX_INTC_VIF1 | 1u << MX_INTC_VU0 | 1u << MX_INTC_VU1 | 1u << MX_INTC_IPU |  \
+                   1u << MX_INTC_TIM0)
+#define DRAW_DMAC (1u << MX_DMAC_VIF0 | 1u << MX_DMAC_VIF1 | 1u << MX_DMAC_GIF | 1u << MX_DMAC_FROMIPU | \
+                   1u << MX_DMAC_TOIPU | 1u << MX_DMAC_FROMSPR | 1u << MX_DMAC_TOSPR)
+static int not_drawing(int dmac, int n, mx_irq_fn fn) {
+  if (!fn || !mx__kernel || mx__kernel->version < 39 || n < 0 || n > 15 ||
+      ((dmac ? DRAW_DMAC : DRAW_INTC) >> n & 1))
+    return 0;
+  mx_printf("maxsdk: mx_irq_%s(%d): not the drawing hardware's (<mx/draw.h>): refused\n",
+            dmac ? "dmac" : "intc", n);
+  return 1;
+}
+
 void mx_irq_dmac(int ch, mx_irq_fn fn, void *arg) {
   if (mx__need_core((const void *)fn, "mx_irq_dmac: the handler") ||
-      mx__need_core(arg, "mx_irq_dmac: the handler's argument"))
+      mx__need_core(arg, "mx_irq_dmac: the handler's argument") || not_drawing(1, ch, fn))
     return;
   struct slot *s = &dmac[ch];
   int was = mx_di();
@@ -121,7 +138,7 @@ void mx_irq_dmac(int ch, mx_irq_fn fn, void *arg) {
 
 void mx_irq_intc(int cause, mx_irq_fn fn, void *arg) {
   if (mx__need_core((const void *)fn, "mx_irq_intc: the handler") ||
-      mx__need_core(arg, "mx_irq_intc: the handler's argument"))
+      mx__need_core(arg, "mx_irq_intc: the handler's argument") || not_drawing(0, cause, fn))
     return;
   struct slot *s = &intc[cause];
   int was = mx_di();

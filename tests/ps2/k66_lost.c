@@ -20,6 +20,7 @@
 #include <mx/thread.h>
 #include <mx/video.h>
 #include "t.h"
+#include <mx/draw.h>
 
 MX_CORE_HEAP(512 << 10);
 
@@ -45,7 +46,11 @@ static void frames(u32 n, u32 r, u32 g, u32 b, u32 x, u32 rgb) {
 }
 
 static u32 lost_calls;
-static void lost(void) { lost_calls++; }
+static void lost(void *arg) {
+  (void)arg;
+  lost_calls++;
+}
+static const struct mx_draw_ops ops = {lost, 0};
 
 int main(int argc, char **argv) {
   int pal = mx_video_default() == &mx_video_pal;
@@ -57,7 +62,7 @@ int main(int argc, char **argv) {
     return 5;
   }
   CHECK(mx__kernel && mx__kernel->version >= 34);
-  mx_frame_on_lost(lost);
+  CHECK(mx_draw_open(&ops) >= 0);
   frames(30, 0x20, 0x40, 0x60, 100, 0xFFFFFF);
   CHECK_EQ(mx_frame_sync(), 0);
   struct mx_picture pa = {0}, pb = {0};

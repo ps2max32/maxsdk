@@ -21,7 +21,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 38
+#define MX_KERNEL_VERSION 39
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -313,8 +313,7 @@ struct mxk_services {
   void (*front_wait)(void);
   /* version 34: how often the graphics went to another process or were
      reset (mx OS plan step 5b). The frame code compares it at each frame
-     boundary and takes the graphics up again when it moved (<mx/frame.h>:
-     mx_frame_on_lost). */
+     boundary and takes the graphics up again when it moved (<mx/draw.h>). */
   u32 (*gfx_gen)(void);
   /* version 35: where the caller's TLB refills fall (<mx/vm.h>) */
   int (*vm_refill_hist)(struct mx_vm_hot *out, int max);

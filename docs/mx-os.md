@@ -248,7 +248,12 @@ shell started the program (and waits for it or runs beside it, `mx_proc_spawn`),
 brings the shell in front instead: the program is paused at its frame boundary and the shell gets
 `MX_EVENT_HOME`; it brings the program back with `mx_proc_front` or ends it with `mx_proc_kill`.
 With the shell in front the home button is the shell's: it does not end the shell. Each gets its
-own video mode back at these switches; what it drew in GS memory is not kept. The shell can
+own video mode back at these switches (since kernel version 39 also a parent when its child
+ends); what it drew in GS memory is not kept. The drawing hardware is the process in front's
+(kernel version 39, `<mx/draw.h>`): only it gets those interrupts, a program's handlers are
+for the drawing hardware only, and maxsdk takes the graphics up again when the program is in
+front again (beam racing too); `mx_draw_open`'s lost function is for what the program keeps in
+GS or VU memory over frames. The shell can
 read the paused program's last picture (`mx_home_picture`, `<mx/screen.h>`, kernel version 32:
 the frame pipeline reads it back before the switch; none from a program in hires mode). It is the system's: any pad's
 home button reaches whichever port a program reads. L3 + R3 toggles libgl's counters, off by

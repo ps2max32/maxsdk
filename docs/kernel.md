@@ -182,6 +182,24 @@ the region's 480i or 576i and confirm it. `mx_gs_init` in libmxk shows its w x h
 `mx_screen_pick` (exact size, the shape it has on the region's TV mode). On PCSX2 the screen is
 set up again after the settings are read. `tests/ps2/k59_video.c`.
 
+Version 39 (2026-11-17, mx OS plan step 6, part 4): the drawing hardware is the process in
+front's (`<mx/draw.h>`).
+- The kernel calls a program's interrupt handlers of the drawing hardware only while its
+  process is in front (`apps/mxos/ee/ksched.c`'s `draw_lines`: INTC GS, VBON, VBOF, VIF0/1,
+  VU0/1, IPU, TIM0; DMAC VIF0/1, GIF, from and to the IPU and the scratchpad). Before, every
+  process's handlers were called: the shell beside a game got the game's DMA ends.
+  `tests/ps2/k73_drawfront.c`: a vblank handler beside a child in front, 0 calls (70 before).
+- `mx_irq_intc` and `mx_irq_dmac` take only those sources under the kernel; the rest is the
+  kernel's (a message, refused).
+- A handover (`mx_proc_spawn`, `mx_proc_front`, the home button) pauses beam racing's
+  pipeline (`mx__hires_pause`: its passes sent, its timer and queue stopped); it starts
+  again at the next frame (`pipeline_start`). On a loss the DMA queues' segments count as
+  done (`mx__dmaq_lost`), the HUD's font is sent again at its next text, and the sessions'
+  lost functions are called (`mx_draw_open`; `mx_frame_on_lost` is gone).
+  `tests/ps2/k74_hireslost.c`.
+- When a child ends, its parent's video mode and display are set again (`exec_unpark`,
+  `home_video_again`), as at `mx_proc_front`: a parent in 1080i got its child's 480i back.
+
 Version 38 (2026-11-17, mx OS plan step 6, part 2): a core in two parts (`docs/vm.md`, "The
 core's two parts"): the interrupt part (what runs or is read with interrupts off, the main
 stack) and from a 32 KiB border the fast part (what is core only for speed, the core heap).
@@ -253,7 +271,7 @@ bring together or keep out of VM: a page touched in a frame refills at least onc
   at a time (`docs/vm.md`); the report's "VM lock waits" counts the faults' waits only.
 
 Version 34 (2026-11-16, mx OS plan step 5b): a program takes its graphics up again after
-another process had them (`<mx/frame.h>`: `mx_frame_on_lost`; `src/gs/frame.c`'s
+another process had them (`<mx/draw.h>` since version 39; `src/gs/frame.c`'s
 `mx__frame_lost`, `src/gs/home.c`, `apps/mxos/ee/end.c`'s `end_gfx_gen`).
 - The kernel counts how often the graphics went to another process or were reset
   (`gfx_gen`): a change of the process in front, and the reset of the GIF, the VIFs and the
@@ -264,7 +282,7 @@ another process had them (`<mx/frame.h>`: `mx_frame_on_lost`; `src/gs/frame.c`'s
   have gone to the other process), the GS's interrupt mask written again, VU0's and VU1's
   microprograms forgotten (`mx_frame_mpg` sends them again when next used), the texture
   buffers free and the texture cache empty (`mx_vcache_reset`, if the program has it), then
-  the program's own function (`mx_frame_on_lost`): for what it keeps in GS memory itself
+  the program's own function (version 39: a session's, `mx_draw_open`): for what it keeps in GS memory itself
   over frames, and state it thinks the GS or VU1 still has.
 - A program that lets another in front itself (`mx_proc_spawn`, `mx_proc_front`) first has
   its stream drawn (`mx__frame_yield`: `mx_frame_sync`, then up to 100 ms for the frames'

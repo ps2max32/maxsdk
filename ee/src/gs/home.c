@@ -101,6 +101,11 @@ void mx__home_poll(void) {
   u32 pages = mx__kernel->home_wanted();
   if (!pages)
     return;
+  /* what was sent drawn, in hires mode the passes' pipeline paused (it
+     starts again at the next frame): another process may have the
+     graphics now, and this one's interrupts of them stop meanwhile */
+  void mx__frame_yield(void);
+  mx__frame_yield();
   int synced = mx_frame_sync() >= 0;
   struct mx_picture p;
   void *pic = 0;

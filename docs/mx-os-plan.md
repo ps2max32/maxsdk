@@ -991,6 +991,13 @@ through the one LRU when the game needs the frames. No call hands main memory ov
      touch there is a crash report), and the split fast part (part 5) is pairs of 32 KiB.
   4. Interrupts by one rule (decided 2026-11-17, user): only the process in front gets
      interrupts itself, and only those of drawing; all else comes through the kernel.
+     Done (kernel version 39, kernel.md): the kernel's filter, the session's lost
+     functions (`mx_draw_open`), beam racing paused at a handover and started again after,
+     the DMA queues finished on a loss, the parent's video mode at a child's end. Left as it
+     is (user, 2026-11-17): a program that does not come to a frame boundary keeps the
+     graphics, and the home button ends it after 2 s; the kernel taking them by force would
+     pause its threads wherever they are, a kernel lock held among them. The timers are
+     left too.
      - Drawing is a session (`<mx/draw.h>`, a working name): a program asks for the drawing
        hardware, registers its handlers in the session, and names a function for "lost" and
        one for "back". In a session: the GS, GIF and VIF interrupts, the DMA channels'

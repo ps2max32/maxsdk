@@ -342,6 +342,12 @@ static u32 align_up(u32 v, u32 a) { return (v + a - 1) / a * a; }
 
 u64 mx_hires_frame(u32 mask) { return mx_gs_frame(h.rt.fbp, h.rt.fbw, h.rt.psm, mask); }
 
+/* mx_hires_init's memory, for the pipeline's restart after a pause */
+static void *cfg_mem, *cfg_spr;
+static u32 cfg_bytes, cfg_spr_bytes;
+static int paused; /* mx__hires_pause: the pipeline stopped until the next frame */
+static int pipeline_start(void);
+
 int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *mem, u32 bytes,
                   void *spr, u32 spr_bytes) {
   struct mx_video_mode mm = *m;
@@ -396,6 +402,19 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   for (u32 j = 1; j < h.npass; j++)
     h.line[j] += 8;
 
+  cfg_mem = mem, cfg_bytes = bytes, cfg_spr = spr, cfg_spr_bytes = spr_bytes;
+  mx_hires_stats = (struct mx_hires_stats){0};
+  paused = 0;
+  return pipeline_start();
+}
+
+/* The passes' pipeline: the records, the queue on VIF1, the timer at the
+   strips' lines, the vblank hook. Started by mx_hires_init, and again after
+   a pause (another process had the graphics: mx__hires_pause). The video
+   mode, the framebuffer and the display stay as they are. */
+static int pipeline_start(void) {
+  void *mem = cfg_mem, *spr = cfg_spr;
+  u32 bytes = cfg_bytes, spr_bytes = cfg_spr_bytes;
   /* a slot: its main record, then its once record (a quarter) */
   u32 slot_qw = bytes / MX_HIRES_SLOTS / 16;
   h.once_qw = slot_qw / 4;
@@ -421,7 +440,6 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   h.nqueue = 0;
   h.strip_qw = 0;
   h.nchain = 0;
-  mx_hires_stats = (struct mx_hires_stats){0};
 
   mx_dmaq_init(&h.q, MX_CH_VIF1);
   h.q.on_done = pass_done;
@@ -462,9 +480,14 @@ static int slot_free(void) {
   return r;
 }
 
-int mx__hires_ready(void) { return h.building >= 0 || slot_free() >= 0; }
+/* paused: the restart at the next frame frees every record */
+int mx__hires_ready(void) { return paused || h.building >= 0 || slot_free() >= 0; }
 
 u8 *mx__hires_begin(u32 *qw, u8 **once, u32 *once_qw) {
+  if (paused) {
+    paused = 0;
+    pipeline_start();
+  }
   if (h.building < 0) {
     u32 t0 = mx_count();
     int s;
@@ -573,6 +596,20 @@ void mx__hires_stop(void) {
      can be started again (another mode) */
   mx_dmaq_release(&h.q);
   mx_dma_wait(MX_CH_GIF);
+}
+
+/* Another process is to have the graphics (mx_proc_spawn, mx_proc_front,
+   the home button), or had them (mx__frame_lost): the pipeline stopped, the
+   passes queued sent first (mx__hires_stop), and started again at the next
+   frame (mx OS plan step 6, part 4: the drawing hardware's interrupts are
+   the process in front's only, so a pipeline left running beside would
+   wait for a pass's end that never comes). Frames being built are dropped:
+   the next frame draws all again. */
+void mx__hires_pause(void) {
+  if (paused || tmr < 0)
+    return;
+  mx__hires_stop();
+  paused = 1;
 }
 
 u32 mx_hires_slot(void) {

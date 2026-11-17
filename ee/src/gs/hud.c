@@ -26,6 +26,15 @@ static const u8 hud_glyphs[][7] = {
 
 static u32 hud_tex[256 * 8] MX_ALIGNED(64) MX_FAST_BSS; /* sent by DMA */
 static u32 hud_tbp, hud_lines = 224;
+/* the font is in GS memory (mx_hud_init); not after the graphics were
+   another process's (mx__hud_lost): sent again at the next text */
+static int hud_sent;
+
+void mx__hud_lost(void) { hud_sent = 0; }
+static void hud_send(void) {
+  mx_frame_texture(0, hud_tbp, 4, MX_GS_PSM_CT32, 256, 8, hud_tex);
+  hud_sent = 1;
+}
 
 void mx_hud_init(u32 tbp, u32 lines) {
   for (u32 i = 0; i < 256 * 8; i++)
@@ -38,11 +47,13 @@ void mx_hud_init(u32 tbp, u32 lines) {
   mx_dcache_writeback(hud_tex, sizeof hud_tex);
   hud_tbp = tbp;
   hud_lines = lines;
-  mx_frame_texture(0, tbp, 4, MX_GS_PSM_CT32, 256, 8, hud_tex);
+  hud_send();
   mx_frame_wait_path3();
 }
 
 void mx_hud_text(u32 x, u32 y, const char *s, u32 rgb, u32 scale) {
+  if (!hud_sent && hud_tbp)
+    hud_send();
   u32 n = 0;
   for (const char *p = s; *p; p++)
     n++;

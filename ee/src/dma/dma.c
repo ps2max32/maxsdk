@@ -277,7 +277,43 @@ static MX_IRQ_FN void q_irq(void *arg) {
   mx_trace(MX_TR_DMA_END, (u16)q->ch);
 }
 
+/* The queues in use (mx_dmaq_init, mx_dmaq_release), for mx__dmaq_lost */
+#define LIVE_QUEUES 8
+static struct mx_dmaq *live[LIVE_QUEUES];
+
+/* The graphics were another process's (frame.c's mx__frame_lost): the end
+   interrupts of what was queued went to no one (the drawing hardware's are
+   the process in front's only), and that process stopped or ran its own
+   transfers on the channels. Every queue's segments count as done, a
+   thread waiting for one woken. */
+void mx__dmaq_lost(void) {
+  int wake[LIVE_QUEUES], nwake = 0;
+  int was = mx_di();
+  for (int i = 0; i < LIVE_QUEUES; i++) {
+    struct mx_dmaq *q = live[i];
+    if (!q)
+      continue;
+    q->head = q->tail;
+    q->done = q->issued;
+    q->running = 0;
+    if (q->sleep_sema >= 0) {
+      wake[nwake++] = q->sleep_sema;
+      q->sleep_sema = -1;
+    }
+  }
+  mx_irq_restore(was);
+  for (int i = 0; i < nwake; i++)
+    mx_bios_signal_sema(wake[i]);
+}
+
 void mx_dmaq_init(struct mx_dmaq *q, int ch) {
+  int was = mx_di();
+  for (int i = 0, put = 0; i < LIVE_QUEUES; i++)
+    if (live[i] == q)
+      put = 1;
+    else if (!put && !live[i])
+      live[i] = q, put = 1;
+  mx_irq_restore(was);
   q->ch = ch;
   q->head = q->tail = 0;
   q->done = q->issued = 0;
@@ -294,6 +330,11 @@ void mx_dmaq_init(struct mx_dmaq *q, int ch) {
 void mx_dmaq_release(struct mx_dmaq *q) {
   mx_dmaq_drain(q);
   mx_irq_dmac(q->ch, 0, 0);
+  int was = mx_di();
+  for (int i = 0; i < LIVE_QUEUES; i++)
+    if (live[i] == q)
+      live[i] = 0;
+  mx_irq_restore(was);
 }
 
 /* Queue a segment; the queue has a free slot. */

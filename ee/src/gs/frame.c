@@ -1,6 +1,7 @@
 #include <mx/bios.h>
 #include <mx/debug.h>
 #include <mx/dma.h>
+#include <mx/draw.h>
 #include <mx/frame.h>
 #include <mx/irq.h>
 #include <mx/kernel.h>
@@ -389,10 +390,17 @@ int mx_frame_sync(void) {
 
 /* Before this program lets another in front (proc.c: mx_proc_spawn,
    mx_proc_front): what it has sent is drawn, so that the other finds VIF1
-   and the GIF idle. Not in hires mode, nor after mx_frame_stop (all was
-   drawn then; after beam racing a sync would wait on a queue whose
-   channel interrupt is gone: a shell that left 1080i hung at a launch). */
+   and the GIF idle. In hires mode the passes' pipeline is paused (sent
+   out, then stopped; started again at the next frame). Nothing after
+   mx_frame_stop (all was drawn then; after beam racing a sync would wait
+   on a queue whose channel interrupt is gone: a shell that left 1080i hung
+   at a launch). */
+void mx__hires_pause(void);
 void mx__frame_yield(void) {
+  if (f.half[0] && f.record && !f.stopped) {
+    mx__hires_pause();
+    return;
+  }
   if (!f.half[0] || f.record || f.stopped || mx_frame_sync() < 0)
     return;
   u32 t0 = mx_count();
@@ -405,20 +413,47 @@ void mx__frame_yield(void) {
    the GIF and the stream's DMA as at its start, the frames sent counted as
    shown, and what was in VU and GS memory forgotten: the microprograms are
    sent again when next used (mx_frame_mpg), the texture cache is empty, the
-   texture buffers free. Then the program's own function, for what it keeps
-   there itself. Not in hires mode: such a program sets its graphics up
-   again itself. */
-static void (*lost_fn)(void);
-void mx_frame_on_lost(void (*fn)(void)) { lost_fn = fn; }
+   texture buffers free, the DMA queues' segments counted as done (their end
+   interrupts went to no one: the drawing hardware's are the process in
+   front's only). In hires mode the passes' pipeline starts again at the
+   next frame. Then the program's own function, for what it keeps there
+   itself. Nothing after mx_frame_stop: the next set-up starts all anew. */
+/* <mx/draw.h>'s sessions: their lost functions, called by mx__frame_lost */
+#define DRAW_SESSIONS 4
+static const struct mx_draw_ops *draw_ops[DRAW_SESSIONS];
+int mx_draw_open(const struct mx_draw_ops *ops) {
+  for (int i = 0; i < DRAW_SESSIONS; i++)
+    if (!draw_ops[i]) {
+      draw_ops[i] = ops;
+      return i;
+    }
+  return -1;
+}
+void mx_draw_close(int id) {
+  if (id >= 0 && id < DRAW_SESSIONS)
+    draw_ops[id] = 0;
+}
+static void draw_lost(void) {
+  for (int i = 0; i < DRAW_SESSIONS; i++)
+    if (draw_ops[i] && draw_ops[i]->lost)
+      draw_ops[i]->lost(draw_ops[i]->arg);
+}
+extern void mx__hud_lost(void) __attribute__((weak));
 extern void mx_vcache_reset(void) __attribute__((weak));
 void mx__gs_lost(void);
+void mx__dmaq_lost(void);
 void mx__frame_lost(void) {
-  if (!f.half[0] || f.record)
+  if (!f.half[0] || f.stopped)
     return;
+  mx__dmaq_lost(); /* first: the pause below sends out what is queued */
+  if (f.record)
+    mx__hires_pause();
   mx_vif_reset(1);
   MX_R32(MX_GIF_CTRL) = 1; /* RST */
   mx__gs_lost();
-  if (!f.chain) {
+  if (f.record) {
+    /* nothing more: the pipeline starts again with the next record */
+  } else if (!f.chain) {
     mx_mfifo_restart();
     f.paused = 0;
   }
@@ -428,8 +463,9 @@ void mx__frame_lost(void) {
   mx__frame_tex_forget();
   if (mx_vcache_reset)
     mx_vcache_reset();
-  if (lost_fn)
-    lost_fn();
+  if (mx__hud_lost)
+    mx__hud_lost();
+  draw_lost();
 }
 
 u32 mx_frame_room(void) { return f.half_qw - (u32)f.chain; }
