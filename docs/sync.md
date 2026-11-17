@@ -205,3 +205,20 @@ it:
 * The `mx_vuq` prototype hung the PS2 in `tests/ps2/vu.c`; with prints and delays between the
   steps it passed. Suspected, not verified: VTS1 still reads set for a moment after the
   VU-only reset, and a wait straight after the release takes it for the next batch's stop.
+
+## A frame's begin sleeps while it waits (2026-11-17)
+
+`mx_frame_begin` waits until the buffers of the frame two back are free (shown, or drawn
+without vsync), in hires mode until a record is free. It spun there: a program faster than the
+field rate burnt the rest of every field in that loop (36 % of the EE's time in a profile of a
+Quake 3 timedemo in hires mode), and under mx OS no other thread or process of the same or a
+lower priority ran meanwhile. What it waits for changes only in an interrupt handler: a
+vblank, a FINISH, the end of a hires pass or the pass 0 that takes the next record. So the
+thread sleeps on a semaphore that those handlers signal (`gs.c`'s `mx__gs_event_wait`,
+`mx__gs_event`), and looks again after each. `mx_frame_idle`'s function still runs first, as
+before. The short waits for hardware (the ring's room, a slot's DMA, `mx_frame_sync`) still
+spin. On PCSX2 the frame tests pass as before (`fpresent` does not end there, also before this
+change). On the PS2 (a SCPH-90006, the Quake 3 timedemo in hires mode, 2026-11-17): no stall and
+no lost frames, the frame rate the same (59.2 fps, held by the field rate), and
+`mx_frame_begin_n` and `mx__hires_ready`, 5.1 % and 16.8 % of the profile's samples before, are
+gone from it: that time is now outside the program, for other threads and processes.

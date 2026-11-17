@@ -21,7 +21,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 34
+#define MX_KERNEL_VERSION 35
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -126,6 +126,7 @@ struct mx_pad_pairing;
 struct mx_pad_paired;
 struct mx_net_status;
 struct mx_picture;
+struct mx_vm_hot;
 struct mxk_services {
   u32 magic;   /* MX_KERNEL_MAGIC */
   u32 version; /* MX_KERNEL_VERSION of the kernel */
@@ -310,6 +311,8 @@ struct mxk_services {
      boundary and takes the graphics up again when it moved (<mx/frame.h>:
      mx_frame_on_lost). */
   u32 (*gfx_gen)(void);
+  /* version 35: where the caller's TLB refills fall (<mx/vm.h>) */
+  int (*vm_refill_hist)(struct mx_vm_hot *out, int max);
 };
 int mx__iop_write_phys(u32 iop, u32 src, u32 size);
 /* the kernel's own writer of the CRTC timing, used by mx_video_set in it

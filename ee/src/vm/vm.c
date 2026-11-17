@@ -99,6 +99,7 @@ struct vm_space {
   u32 nheap, heap_next; /* pages of the heap window, the next one not given out */
   u32 max_frames; /* 0, or the most frames it holds (its mx_vm_config.frames
                      beside another space): above, one of its own pages goes */
+  u32 *hist;      /* refills of each page since the last mx_vm_refill_hist, or 0 */
 };
 static struct vm_space space0;
 static struct vm_space *vs = &space0; /* the running thread's (mx__vm_space_switch) */
@@ -152,6 +153,8 @@ static struct {
 struct mx__vm_fast mx__vm_fast MX_ALIGNED(16);
 #define F mx__vm_fast
 _Static_assert(VMF_BASE_PAGE == MX_VM_BASE >> PAGE_SHIFT, "tlb.S");
+_Static_assert(VMF_MAP_PAGE == MX_VM_MAP_BASE >> PAGE_SHIFT, "tlb.S");
+_Static_assert(VMF_HEAP_PAGE == MX_VM_HEAP_BASE >> PAGE_SHIFT, "tlb.S");
 
 /* The tables' pages: VM's (0 .. npages), the file window's (.. + nmap),
    the heap window's (.. + nheap). */
@@ -656,7 +659,7 @@ void mx__vm_shutdown(void) {
   swap_left = vm.fd;
   int was = mx_di();
   vm.active = 0;
-  F.npages = 0;
+  F.npages = F.nmap = F.nheap = 0;
   for (u32 i = 0; i < TLB_N; i++) {
     F.slot_page[i] = 0;
     if (tlb_fixed[i] != 1)
@@ -762,7 +765,10 @@ void mx__vm_space_switch(struct vm_space *n) {
     F.lo = n->lo;
     F.page_slot = n->page_slot;
     F.stamp = n->stamp;
+    F.hist = n->hist;
     F.npages = vm.bpp == 1 ? n->npages : 0;
+    F.nmap = vm.bpp == 1 ? n->nmap : 0;
+    F.nheap = vm.bpp == 1 ? n->nheap : 0;
   }
   mx_irq_restore(was);
 }
@@ -1113,6 +1119,8 @@ int mx__vm_exception(struct mx__vm_x *x) {
   }
   F.refills++;
   vs->stamp[pg] = F.refills;
+  if (vs->hist)
+    vs->hist[pg]++;
   if (x->badvaddr == x->epc + (x->cause >> 31 ? 4u : 0u)) /* an instruction fetch */
     F.refills_i++;
   if (vs->lo[pg] & LO_V) { /* mapped, only not in the TLB */
@@ -1217,9 +1225,17 @@ static void io_end(struct io_mark m, u32 *us) {
    faulting thread may both use it (each call of the file server is one at
    a time, a seek and the transfer after it are not). */
 static void swap_io1(struct vm_space *s, u32 pg, u32 f, int out);
+/* The swap file's I/O is one at a time (one file server). A fault's page
+   that comes while the writer's write is under way waits for it: counted
+   (us_behind, the VM's report), as it is what the writer costs. */
+static int wthread;
+static u32 us_behind;
 static void swap_io_s(struct vm_space *s, u32 pg, u32 f, int out) {
   struct io_mark m = io_begin();
+  u32 t0 = mx_count();
   mx_bios_wait_sema(vm.swapsema);
+  if (wthread && mx_thread_self() != wthread)
+    us_behind += (mx_count() - t0) / (MX_EE_HZ / 1000000u);
   swap_io1(s, pg, f, out);
   mx_bios_signal_sema(vm.swapsema);
   io_end(m, out ? &vm.st.us_swap_out : &vm.st.us_swap_in);
@@ -1436,14 +1452,32 @@ static int dirty_candidate(void) {
 }
 
 static u8 wstack[8192] MX_ALIGNED(16);
-static int wthread;
+/* The writer writes in the quiet between faults only. Its write takes the
+   swap file for about 7 ms (a memory card or USB), and a fault that comes
+   meanwhile waits for all of it; under steady paging that made the faults
+   no shorter than without the writer (Quake 3 timedemos, 2026-11-17). So it
+   starts a write only when no fault came for WRITER_QUIET_US (longer than
+   the faults of one burst are apart, shorter than a frame), and looks
+   again after that long while they keep coming: then the faults write what
+   they take themselves, as without it. */
+#define WRITER_QUIET_US 3000u
+static u32 writer_yields; /* times it stopped for a fault (the VM's report) */
+static void wlock(void);
 
 static void writer(void *arg) {
   (void)arg;
   for (;;) {
     mx_bios_wait_sema(vm.wsema);
-    lock();
-    for (;;) {
+    for (u32 seen = ~0u; seen != vm.st.faults;) {
+      seen = vm.st.faults;
+      mx_sleep_us(WRITER_QUIET_US);
+    }
+    wlock();
+    for (u32 at = vm.st.faults;;) {
+      if (at != vm.st.faults) { /* a fault came: not in its way; woken again by it */
+        writer_yields++;
+        break;
+      }
       int q = dirty_candidate();
       if (q < 0)
         break;
@@ -1466,7 +1500,7 @@ static void writer(void *arg) {
       wspace = s;
       unlock();
       swap_io_s(s, pg, f, 1);
-      lock();
+      wlock();
       wspace = 0;
       was = mx_di();
       s->pins[pg]--;
@@ -1644,6 +1678,11 @@ static void lock(void) {
   mx_bios_wait_sema(vm.lock);
   lock_owner = mx_thread_self();
   vm.st.us_lock += (mx_count() - t0) / (MX_EE_HZ / 1000000u);
+}
+/* the writer's: its waits are not a fault's (us_lock) */
+static void wlock(void) {
+  mx_bios_wait_sema(vm.lock);
+  lock_owner = mx_thread_self();
 }
 static void unlock(void) {
   lock_owner = 0;
@@ -2170,13 +2209,19 @@ static void pager(void *arg) {
       pref_out++;
       if (!in_vm(p, bytes))
         continue;
-      lock();
-      for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b; pg++)
+      /* the lock a page at a time: a fault is under it for its whole read,
+         so a program's fault that came during a request of many pages
+         waited for all of them (Quake 3: 210-240 ms of lock waits in a
+         20 s timedemo with 80 pages asked for, 2026-11-17). Now it waits
+         for the page being read, at most */
+      for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b; pg++) {
+        lock();
         if (!vs->frame_of[pg]) {
           flog.src = MX_VM_FAULT_PAGER;
           fault_in(pg, 0);
         }
-      unlock();
+        unlock();
+      }
 
     }
   }
@@ -2349,9 +2394,9 @@ void mx__vm_report(void) {
             s.frames, s.faults, s.swap_ins, s.us_swap_in / 1000, s.swap_outs + s.writer_outs,
             s.us_swap_out / 1000, s.writer_outs, s.drops, s.file_ins, s.us_file_in / 1000,
             s.zero_fills);
-  mx_printf("maxsdk: VM lock waits %u ms; %u file server calls; %u TLB refills (%u of code; "
-            "about %u ms; %u entries); %u frames pinned\n",
-            s.us_lock / 1000, s.io_calls, s.refills, s.refills_i,
+  mx_printf("maxsdk: VM lock waits %u ms, %u ms behind the writer's writes (it gave way %u times); %u file "
+            "server calls; %u TLB refills (%u of code; about %u ms; %u entries); %u frames pinned\n",
+            s.us_lock / 1000, us_behind / 1000, writer_yields, s.io_calls, s.refills, s.refills_i,
             s.refills / (MX_EE_HZ / 1000 / MX_VM_REFILL_CYCLES), s.tlb_entries, s.pinned_frames);
   if (mx__vm_dbg_stale[0]) {
     const u32 *d = mx__vm_dbg_stale;
@@ -2376,6 +2421,38 @@ void mx_vm_stats(struct mx_vm_stats *s) {
   s->pinned_frames = vm.pinned_frames;
   s->tlb_entries = mx__vm_tlb_entries();
   s->dirty_tracking = (u32)vm.dbit;
+}
+
+/* <mx/vm.h>'s mx_vm_refill_hist: where the caller's TLB refills fall. The
+   first call starts the count (a table of a word a page, in pinned frames
+   of the caller's space: gone with it); each later call gives the pages
+   that had refills since the one before, their address and count, and
+   starts them at 0 again. With more than max such pages the rest stay
+   counted for the next call. */
+int mx__vm_refill_hist(struct mx_vm_hot *out, int max) {
+  if (!vm.active || vm.bpp != 1)
+    return -1;
+  if (!vs->hist) {
+    u32 bytes = npages_all() * 4;
+    u32 *h = mx__vm_frames_take(bytes);
+    if (!h)
+      return -1;
+    __builtin_memset(h, 0, bytes);
+    int was = mx_di();
+    vs->hist = F.hist = h;
+    mx_irq_restore(was);
+    return 0;
+  }
+  int n = 0;
+  for (u32 pg = 0, np = npages_all(); pg < np && n < max; pg++) {
+    int was = mx_di();
+    u32 c = vs->hist[pg];
+    vs->hist[pg] = 0;
+    mx_irq_restore(was);
+    if (c)
+      out[n].va = page_va(pg), out[n].count = c, n++;
+  }
+  return n;
 }
 
 /* Tests: are the tables and the TLB consistent? 0, or the first problem
@@ -2650,6 +2727,8 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   F.lo = vs->lo;
   F.page_slot = vs->page_slot;
   F.npages = vm.bpp == 1 ? vs->npages : 0;
+  F.nmap = vm.bpp == 1 ? vs->nmap : 0;
+  F.nheap = vm.bpp == 1 ? vs->nheap : 0;
   mx_irq_restore(was);
   if (cfg->trace) {
     was = mx_di();

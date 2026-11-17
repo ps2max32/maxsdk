@@ -117,6 +117,22 @@ static void spin(int (*wait)(u32), u32 arg, const char *what) {
     }
 }
 
+/* Sleep while wait(arg): for what only an interrupt changes (a vblank, a
+   FINISH, a hires pass's end: gs.c's mx__gs_event), so that other threads
+   and processes run meanwhile. A report after a second. */
+void mx__gs_event_wait(void);
+static void sleep_while(int (*wait)(u32), u32 arg, const char *what) {
+  u32 t0 = mx_count();
+  int reported = 0;
+  while (wait(arg)) {
+    mx__gs_event_wait();
+    if (!reported && mx_count() - t0 > MX_EE_HZ) {
+      mx__frame_stalled(what);
+      reported = 1;
+    }
+  }
+}
+
 static int ring_full(u32 qwc) { return mx_mfifo_used() + qwc >= f.ring_qw; }
 static int slot_busy(u32 k) { return f.used[k] && !mx_event_done(f.ev[k]); }
 static int not_ready(u32 arg) {
@@ -489,7 +505,7 @@ u32 mx_frame_begin_n(void) {
     kick();
     u32 t0 = mx_count(), busy = idle_while(not_ready, 0);
     mx_trace(MX_TR_WAIT_BEGIN, 0x100);
-    spin(not_ready, 0, "the frame's buffers not free");
+    sleep_while(not_ready, 0, "the frame's buffers not free");
     mx_trace(MX_TR_WAIT_END, 0x100);
     mx_frame_stats.wait_buffer += mx_count() - t0 - busy;
   }

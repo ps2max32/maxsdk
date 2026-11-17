@@ -28,7 +28,10 @@
    there, with three registers saved, before the full save and C. */
 #define VMF_LO 0         /* u32 *: EntryLo0 of each page (vm.c's lo) */
 #define VMF_PAGE_SLOT 4  /* u8 *: TLB entry of each page, 0: none */
-#define VMF_NPAGES 8     /* pages the fast refill takes (0: none: a trace) */
+#define VMF_NPAGES 8     /* pages of the VM window the fast refill takes (0: none: a trace) */
+#define VMF_NMAP 28      /* pages of the file window after them in the tables */
+#define VMF_NHEAP 224    /* and of the heap window after those */
+#define VMF_HIST 228     /* u32 *: refills of each page (mx_vm_refill_hist), or 0 */
 #define VMF_NEXT 12      /* the TLB entry to take next */
 #define VMF_REFILLS 16   /* all refills */
 #define VMF_REFILLS_I 20 /* of them, instruction fetches */
@@ -37,8 +40,10 @@
 #define VMF_SLOT_PAGE 32 /* u16[48]: each TLB entry's page + 1, 0: none */
 #define VMF_SAVE 128     /* three GPRs, 128 bits each */
 #define VMF_NEXT_OF 176  /* u8[48]: the VM's entries in a ring (the BIOS's kept ones left out) */
-#define VMF_SIZE 224
+#define VMF_SIZE 232
 #define VMF_BASE_PAGE 0x1000 /* MX_VM_BASE >> 15 */
+#define VMF_MAP_PAGE 0x8000  /* MX_VM_MAP_BASE >> 15 */
+#define VMF_HEAP_PAGE 0x9000 /* MX_VM_HEAP_BASE >> 15 */
 #define VMF_TLB_FIRST 24     /* the first entry the VM may take (others below it: next_of) */
 
 /* The syscall that resumes a slow fault (a negative one: its handler runs
@@ -67,11 +72,16 @@ struct mx__vm_fast {
   u8 *page_slot;
   u32 npages, next_slot, refills, refills_i;
   u32 *stamp;
-  u32 pad;
+  u32 nmap;
   u16 slot_page[48];
   u64 save[6];
   u8 next_of[48]; /* the TLB entry the VM takes after each of its own */
+  u32 nheap;
+  u32 *hist;
 };
+_Static_assert(__builtin_offsetof(struct mx__vm_fast, hist) == VMF_HIST, "tlb.S offsets");
+_Static_assert(__builtin_offsetof(struct mx__vm_fast, nmap) == VMF_NMAP, "tlb.S offsets");
+_Static_assert(__builtin_offsetof(struct mx__vm_fast, nheap) == VMF_NHEAP, "tlb.S offsets");
 _Static_assert(__builtin_offsetof(struct mx__vm_fast, next_slot) == VMF_NEXT, "tlb.S offsets");
 _Static_assert(__builtin_offsetof(struct mx__vm_fast, refills_i) == VMF_REFILLS_I, "tlb.S offsets");
 _Static_assert(__builtin_offsetof(struct mx__vm_fast, stamp) == VMF_STAMP, "tlb.S offsets");

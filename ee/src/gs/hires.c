@@ -201,6 +201,7 @@ static void start_next(void) {
   }
 }
 
+void mx__gs_event(void); /* gs.c: a thread that waits for a record looks again */
 /* A pass's DMA has ended (the queue's end interrupt): its time, from its
    start; then the next one. */
 static MX_CORE_FN void pass_done(void *arg) {
@@ -214,6 +215,7 @@ static MX_CORE_FN void pass_done(void *arg) {
   mx_hires_stats.pass_sum_us[h.prev_k] += t;
   h.busy = 0;
   start_next();
+  mx__gs_event();
 }
 
 /* Pass k may run from now: the beam has left strip k + 1, which the pass
@@ -241,6 +243,7 @@ static void may_run(u32 k) {
       if (old >= 0)
         h.slot[old].state = RETIRING;
       retire();
+      mx__gs_event();
     }
     /* drawn during this field for the next */
     h.parity = (u32)MX_GET(GS_CSR_FIELD, MX_R64(MX_GS_CSR)) ^ 1;
@@ -406,6 +409,8 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   return 0;
 }
 
+void mx__gs_event_wait(void);
+void mx__gs_event(void);
 static int slot_free(void) {
   int was = mx_di();
   retire();
@@ -424,12 +429,16 @@ u8 *mx__hires_begin(u32 *qw, u8 **once, u32 *once_qw) {
     u32 t0 = mx_count();
     int s;
     int reported = 0;
-    while ((s = slot_free()) < 0)
+    while ((s = slot_free()) < 0) {
+      /* asleep until a pass ends or a field begins (a record is free once
+         the pass 0 that replaced it is past and its last pass's DMA done) */
+      mx__gs_event_wait();
       if (!reported && mx_count() - t0 > MX_EE_HZ) {
         mx_printf("mx_hires: no free record for 1 s (played %d, waiting %u, fields %u)\n",
                   h.played, h.nwait, mx_hires_stats.fields);
         reported = 1;
       }
+    }
     h.slot[s].state = BUILDING;
     h.slot[s].rgb = h.rgb;
     h.building = s;

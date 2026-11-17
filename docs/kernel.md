@@ -182,6 +182,19 @@ the region's 480i or 576i and confirm it. `mx_gs_init` in libmxk shows its w x h
 `mx_screen_pick` (exact size, the shape it has on the region's TV mode). On PCSX2 the screen is
 set up again after the settings are read. `tests/ps2/k59_video.c`.
 
+Version 35 (2026-11-17): where a program's TLB refills fall (`<mx/vm.h>`: `mx_vm_refill_hist`;
+`src/vm/tlb.S`, `vm.c`'s `mx__vm_refill_hist`). The first call starts a count for each page of
+the caller's VM, file and heap windows (a word a page, in pinned frames of its space; the fast
+refill adds one where the table is there); each later call gives the pages that had refills
+since the one before, by address, and starts them at 0. For finding the pages a program should
+bring together or keep out of VM: a page touched in a frame refills at least once a frame.
+`tests/ps2/k67_hist.c` (PCSX2). With it, in the same kernel:
+- the fast refill takes the file window's and the heap window's pages too (before, only the
+  VM window's: a refill of a mapped file's or a paged heap's page went the full way, 470
+  cycles against 176, `docs/vm.md`);
+- the VM's writer writes in the quiet between faults, and the pager takes the VM lock a page
+  at a time (`docs/vm.md`); the report's "VM lock waits" counts the faults' waits only.
+
 Version 34 (2026-11-16, mx OS plan step 5b): a program takes its graphics up again after
 another process had them (`<mx/frame.h>`: `mx_frame_on_lost`; `src/gs/frame.c`'s
 `mx__frame_lost`, `src/gs/home.c`, `apps/mxos/ee/end.c`'s `end_gfx_gen`).

@@ -38,9 +38,9 @@ mx__vm_vector:
 	addiu $26, $26, -VMF_BASE_PAGE	# k0 = the page (if VM)
 	lw $1, VMF_NPAGES($27)
 	sltu $1, $26, $1
-	beqz $1, slow
+	beqz $1, other
 	lw $2, VMF_PAGE_SLOT($27)
-	addu $2, $2, $26	# $2 = &page_slot[page]
+have:	addu $2, $2, $26	# $2 = &page_slot[page]
 	lbu $1, 0($2)
 	bnez $1, slow		# it has an entry: C
 	lw $1, VMF_LO($27)
@@ -83,7 +83,14 @@ mx__vm_vector:
 	sll $3, $26, 2		# k0 = page + 1
 	addu $2, $2, $3
 	sw $1, -4($2)
-	mfc0 $1, $14		# an instruction fetch: BadVAddr = EPC (+ 4 in a delay slot)
+	lw $2, VMF_HIST($27)	# hist[page]++, when a program asked (mx_vm_refill_hist)
+	beqz $2, 5f
+	nop
+	addu $2, $2, $3
+	lw $3, -4($2)
+	addiu $3, $3, 1
+	sw $3, -4($2)
+5:	mfc0 $1, $14		# an instruction fetch: BadVAddr = EPC (+ 4 in a delay slot)
 	mfc0 $2, $13
 	bgez $2, 6f
 	nop
@@ -100,6 +107,25 @@ mx__vm_vector:
 	sync.p
 	eret
 	nop
+	# Not the VM window: the file window's pages follow the VM's in the
+	# tables, the heap window's follow those (vm.c's va_page). Before
+	# 2026-11-17 these went the full way, with every register saved: the
+	# paged heaps and the mapped files of a program are there.
+other:	lw $1, VMF_NPAGES($27)
+	addiu $26, $26, VMF_BASE_PAGE - VMF_MAP_PAGE	# k0 = the page of the file window
+	lw $3, VMF_NMAP($27)
+	sltu $2, $26, $3
+	bnez $2, 1f
+	addu $2, $1, $26	# npages + it
+	addiu $26, $26, VMF_MAP_PAGE - VMF_HEAP_PAGE	# k0 = the page of the heap window
+	addu $1, $1, $3		# npages + nmap
+	lw $3, VMF_NHEAP($27)
+	sltu $3, $26, $3
+	beqz $3, slow
+	addu $2, $1, $26	# npages + nmap + it
+1:	move $26, $2		# k0 = the page in the tables
+	b have
+	lw $2, VMF_PAGE_SLOT($27)
 slow:
 	lq $1, VMF_SAVE($27)
 	lq $2, VMF_SAVE + 16($27)

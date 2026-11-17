@@ -158,6 +158,22 @@ struct mx_vm_stats {
                                      mapped page counts as written (PCSX2) */
 };
 void mx_vm_stats(struct mx_vm_stats *s);
+
+/* Where the program's TLB refills fall (kernel version 35): a count for each
+   32 KiB page of its VM, file and heap windows. The first call starts the
+   counting and returns 0. Each later call writes up to max pages that had
+   refills since the call before (their address and count, by address) and
+   starts those at 0 again; it returns how many it wrote (as many as max:
+   call again for the rest). -1: no VM, a trace is on, no memory for the
+   table (a word a page), or a kernel before version 35. For measuring: a
+   page touched in a frame refills at least once a frame (the VM's entries
+   leave the TLB at each vblank), so the pages with the highest counts are
+   the ones to bring together or to keep out of VM. */
+struct mx_vm_hot {
+  u32 va;
+  u32 count;
+};
+int mx_vm_refill_hist(struct mx_vm_hot *out, int max);
 /* What a TLB refill of a resident page costs (the PS2, tlb.S's fast
    refill, probe/p22_refill.c; docs/vm.md "Costs") */
 #define MX_VM_REFILL_CYCLES 176

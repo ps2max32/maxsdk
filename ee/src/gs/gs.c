@@ -7,6 +7,7 @@
 #include <mx/screen.h>
 #include <mx/sif.h>
 #include <mx/tex.h>
+#include <mx/thread.h>
 #include <mx/timer.h>
 #include <mx/trace.h>
 #include <mx/vif.h>
@@ -144,6 +145,25 @@ void mx_vram_free(u32 page, u32 pages) {
 
 /* VIF1 stops at the I-bit MARK of a frame's present until the frame is
    drawn (its FINISH: mx_gs.frames_done reaches the MARK); let it go on. */
+/* What a frame's begin waits for (frame.c, hires.c: buffers or a record
+   free) changes only in an interrupt handler: a vblank, a FINISH, the end of
+   a hires pass. The thread sleeps on this semaphore meanwhile, so that other
+   threads and processes run; the handlers signal it (mx__gs_event). Made at
+   the first wait; without it (no semaphore left) the wait returns at once,
+   as the spin it replaces. A signal with no one waiting is kept (once): the
+   next wait returns at once and its caller looks again. */
+static int ev_sema = -1;
+void mx__gs_event_wait(void) {
+  if (ev_sema < 0)
+    ev_sema = mx_sema_create(0, 1);
+  if (ev_sema >= 0)
+    mx_sema_wait(ev_sema);
+}
+MX_CORE_FN void mx__gs_event(void) {
+  if (ev_sema >= 0)
+    mx_isema_signal(ev_sema);
+}
+
 static int present_release(void) {
   u32 code = MX_R32(MX_VIF_VIF1_CODE);
   /* bit 15: the PATH3 stream's marks (frame3.c) */
@@ -184,6 +204,7 @@ static MX_CORE_FN void gs_irq(void *arg) {
       show(mx_gs.shown - 1);
     }
     mx_trace(MX_TR_GS_FINISH, (u16)mx_gs.finish);
+    mx__gs_event();
   }
   /* acknowledge what we saw (writing 1 clears) */
   CSR = csr & (MX_BIT(GS_CSR_SIGNAL) | MX_BIT(GS_CSR_FINISH));
@@ -214,6 +235,7 @@ static MX_CORE_FN void vsync_irq(void *arg) {
     else
       mx_gs.starved++;
   }
+  mx__gs_event();
 }
 
 void mx_gs_init(u32 w, u32 h) { mx_gs_init_mode(w, h, 0); }
