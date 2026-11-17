@@ -33,6 +33,21 @@ struct mx_proc_info {
   char name[48]; /* the path it was started from, cut to fit */
 };
 
+/* Who holds main memory (kernel version 37): for the kernel (id 0, the
+   first) and each process, in frames of 32 KiB. core: its core (the
+   kernel's: its own MiB, which is not in the pool). pinned: what else it
+   holds resident (pinned heaps, files mapped resident, its VM's tables;
+   the kernel's: all pinned frames that are no process's). paged: frames
+   that hold pages of its now, which the pager may take. A process that is
+   not in front keeps core and pinned (mx OS plan step 6: they are to leave
+   too). */
+struct mx_proc_mem {
+  u8 id, state; /* as mx_proc_info */
+  u16 flags;
+  u32 core, pinned, paged;
+};
+int mx_proc_memory(struct mx_proc_mem *m, int max);
+
 /* this program's process (1-255); -1 without a kernel that knows */
 int mx_proc_self(void);
 /* the processes, at most max of them in p: how many there are */

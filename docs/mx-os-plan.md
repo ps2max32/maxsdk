@@ -966,6 +966,11 @@ one LRU when the game needs the frames. No call hands main memory over (user, 20
 
 - Today, beside a game: the waiting shell keeps a core of 2 MiB, the host link's service 1
   MiB, the kernel 478 KiB below 1 MiB.
+- The count is there (kernel version 37, `mx_proc_memory`, `k69_procmem`; also in the kernel's
+  log at each program's start). Measured 2026-11-17 on a SCPH-90006, a test program beside
+  its child, of 991 frames: the kernel 5 frames in the pool (and its own MiB), the host
+  link's service 32 of core and 8 pinned, the waiting program 32 of core: 72 frames (2.3
+  MiB) held by what is not in front. The shell beside a game is to be read from the log.
 - A test that says, with a game in front, how many frames each other process and the kernel
   keep pinned. The number is written down with each step; the aim is the kernel's memory and
   a few pages for each process.

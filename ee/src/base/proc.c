@@ -24,6 +24,7 @@
 
 int mx_proc_self(void) { return CALL(proc_self, ()); }
 int mx_proc_list(struct mx_proc_info *p, int max) { return CALL(proc_list, (p, max)); }
+int mx_proc_memory(struct mx_proc_mem *m, int max) { return CALLV(37, proc_memory, (m, max)); }
 int mx_port_create(const char *name) { return CALL(port_create, (name)); }
 int mx_port_find(const char *name) { return CALL(port_find, (name)); }
 int mx_port_delete(int port) { return CALL(port_delete, (port)); }

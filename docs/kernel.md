@@ -182,6 +182,19 @@ the region's 480i or 576i and confirm it. `mx_gs_init` in libmxk shows its w x h
 `mx_screen_pick` (exact size, the shape it has on the region's TV mode). On PCSX2 the screen is
 set up again after the settings are read. `tests/ps2/k59_video.c`.
 
+Version 37 (2026-11-17, mx OS plan step 6, the count): who holds main memory (`<mx/proc.h>`:
+`mx_proc_memory`; `apps/mxos/ee/ptab.c`'s `ptab_memory`, `vm.c`'s `mx__vm_frames_of`). For the
+kernel and each process, in frames of 32 KiB: its core, what else it holds pinned (pinned
+heaps, files mapped resident, its VM's tables), and the frames that hold pages of its now. The
+kernel writes the same table to its log at each program's start, under "VM pool". A process's
+address space is known to the process table from the call in which it gets one.
+`tests/ps2/k69_procmem.c` (a parent beside a child with 512 KiB pinned and 1 MiB of VM).
+
+Found with it: a core's frames were the starting program's (taken in its call of
+`mx_proc_spawn`, so with its space as their owner), and went back to the pool when that
+program's space ended, while the program started still ran in them. They are the kernel's
+now (`mx__vm_frames_owner`), given back at that program's own end.
+
 Version 36 (2026-11-17): a program chooses what of it is resident and fast, and what is paged
 (decided with the user: the program finds the balance itself, with `mx_vm_refill_hist`). What
 is paged has 32 TLB entries of 32 KiB to share, so a program that uses a few hundred pages a

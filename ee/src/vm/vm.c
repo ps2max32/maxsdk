@@ -2480,6 +2480,43 @@ void mx_vm_stats(struct mx_vm_stats *s) {
   s->dirty_tracking = (u32)vm.dbit;
 }
 
+/* For a kernel's count of who holds main memory (mx OS plan step 6): a
+   space's number, and the frames that are its: pinned ones (taken while it
+   was the space in use: its heaps, files mapped resident), but those in
+   one of the nskip physical ranges skip[] (lo, hi: the cores, counted
+   apart), and those that hold a page of its. */
+u32 mx__vm_space_id(const struct vm_space *s) { return s ? s->id : 0; }
+void mx__vm_frames_of(u32 space, const u32 *skip, u32 nskip, u32 *pinned, u32 *paged) {
+  u32 np = 0, ng = 0;
+  int was = mx_di();
+  for (u32 f = 0; vm.active && f < vm.nframes; f++) {
+    u32 phys = (u32)(uintptr_t)frame_ptr(f) - MX_PHYS_WIN;
+    if (vm.page_of[f] == FRAME_PINNED) {
+      int core = 0;
+      for (u32 k = 0; k < nskip; k++)
+        core |= phys >= skip[2 * k] && phys < skip[2 * k + 1];
+      np += !core && vm.frame_space[f] == space;
+    } else if (page_in(f) >= 0)
+      ng += space_in(f)->id == space;
+  }
+  mx_irq_restore(was);
+  *pinned = np, *paged = ng;
+}
+
+/* Pinned frames of another owner than the space that took them: a
+   kernel's, for the core of a program it starts in another program's call
+   (mx_proc_spawn). With the caller's space as their owner they went back
+   to the pool when that space ended (mx__vm_space_free), while the program
+   started still ran in them. Space 0 is the first one, which stays. */
+void mx__vm_frames_owner(void *p, u32 bytes, u32 space) {
+  u32 n = (bytes + PAGE - 1) / PAGE, f0 = (u32)((u8 *)p - vm.frames) / PAGE;
+  int was = mx_di();
+  for (u32 i = 0; i < n && f0 + i < vm.nframes; i++)
+    if (vm.page_of[f0 + i] == FRAME_PINNED)
+      vm.frame_space[f0 + i] = (u8)space;
+  mx_irq_restore(was);
+}
+
 /* <mx/vm.h>'s mx_vm_refill_hist: where the caller's TLB refills fall. The
    first call starts the count (a table of a word a page, in pinned frames
    of the caller's space: gone with it); each later call gives the pages
