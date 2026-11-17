@@ -10,6 +10,7 @@
 #include <mx/hw/regs.h>
 #include <mx/iop.h>
 #include <mx/sif.h>
+#include <mx/string.h>
 #include <mx/thread.h>
 #include <mx/timer.h>
 #include <mx/string.h>
@@ -1383,37 +1384,162 @@ static struct {
   char path[256];
 } op_arg MX_DMA_LINES;
 
-/* Where a path without a device is: the directory of the program's ELF, so
-   one ELF finds its files on host: as on usb0:. Under the fio lock. */
-static char fio_base[128];
-void mx__fio_base(const char *argv0) {
+/* The working directory (kernel version 40): a path without a device is in
+   it, as a Linux process's relative paths are in its current directory. A
+   program starts in the directory of its ELF, or under the kernel in the
+   one its starter gave it (mx_proc_spawn_in) or its parent's, so one ELF
+   finds its files on host: as on usb0:. The kernel keeps one for each
+   process (mx__fio_cwd, mx__fio_cwd_set); without the kernel it is
+   fio_base. Under the fio lock. */
+static char fio_base[MX_FIO_CWD_MAX];
+const char *mx__fio_cwd(void) __attribute__((weak));
+void mx__fio_cwd_set(const char *dir) __attribute__((weak));
+static const char *fio_cwd(void) { return mx__fio_cwd ? mx__fio_cwd() : fio_base; }
+
+/* The directory of the ELF at path ("" for a path without a device), in
+   out (MX_FIO_CWD_MAX bytes). */
+void mx__fio_dir_of(const char *path, char *out) {
   u32 end = 0, colon = 0;
-  for (u32 i = 0; argv0[i] && i < sizeof fio_base - 1; i++) {
-    if (argv0[i] == ':')
+  for (u32 i = 0; path[i] && i < MX_FIO_CWD_MAX - 1; i++) {
+    if (path[i] == ':')
       colon = 1;
-    if (argv0[i] == ':' || argv0[i] == '/')
+    if (path[i] == ':' || path[i] == '/')
       end = i + 1;
   }
   if (!colon)
     end = 0;
   for (u32 i = 0; i < end; i++)
-    fio_base[i] = argv0[i];
-  fio_base[end] = 0;
+    out[i] = path[i];
+  out[end] = 0;
 }
+void mx__fio_base(const char *argv0) { mx__fio_dir_of(argv0, fio_base); }
+
+/* path in the directory dir ("": none), in out (room bytes): a path with a
+   device as it is, one starting with '/' at the root of dir's device,
+   another after dir; then without "." names and with each ".." taking the
+   name before it (never past the root; a leading ".." of a path without
+   device and directory stays, for the file server). -1 when it does not
+   fit. */
+int mx__fio_join(const char *dir, const char *path, char *out, u32 room) {
+  char tmp[2 * MX_FIO_CWD_MAX];
+  u32 n = 0;
+  for (const char *p = path; *p && *p != '/'; p++)
+    if (*p == ':') {
+      dir = "";
+      break;
+    }
+  for (; dir[n]; n++) {
+    if (n >= sizeof tmp - 2)
+      return -1;
+    tmp[n] = dir[n];
+  }
+  if (n && path[0] == '/') { /* dir's device's root */
+    u32 d = 0;
+    while (d < n && tmp[d] != ':')
+      d++;
+    n = d < n ? d + 1 : 0;
+  } else if (n && tmp[n - 1] != '/' && tmp[n - 1] != ':')
+    tmp[n++] = '/';
+  for (const char *p = path; *p; p++) {
+    if (n >= sizeof tmp - 1)
+      return -1;
+    tmp[n++] = *p;
+  }
+  tmp[n] = 0;
+  u32 dev = 0; /* the device: up to its ':' when one comes before a '/' */
+  while (tmp[dev] && tmp[dev] != ':' && tmp[dev] != '/')
+    dev++;
+  dev = tmp[dev] == ':' ? dev + 1 : 0;
+  int slash_end = n > dev && tmp[n - 1] == '/';
+  u32 o = 0;
+  if (dev >= room)
+    return -1;
+  for (; o < dev; o++)
+    out[o] = tmp[o];
+  const char *p = tmp + dev;
+  int abs = *p == '/';
+  if (abs) {
+    if (o + 1 >= room)
+      return -1;
+    out[o++] = '/';
+  }
+  u32 root = o, names = 0, ups = 0; /* names after the leading ".."s */
+  while (*p) {
+    while (*p == '/')
+      p++;
+    const char *e = p;
+    while (*e && *e != '/')
+      e++;
+    u32 len = (u32)(e - p);
+    p = e;
+    if (len == 0 || (len == 1 && e[-1] == '.'))
+      continue;
+    if (len == 2 && e[-1] == '.' && e[-2] == '.') {
+      if (names) {
+        names--;
+        o--; /* the '/' after the name, then the name */
+        while (o > root && out[o - 1] != '/')
+          o--;
+        continue;
+      }
+      if (abs || dev)
+        continue; /* the root's ".." is the root */
+      ups++;
+    } else
+      names++;
+    if (o + len + 1 >= room)
+      return -1;
+    for (u32 i = 0; i < len; i++)
+      out[o++] = e[i - len];
+    out[o++] = '/';
+  }
+  (void)ups;
+  if (o > root && !slash_end)
+    o--; /* its last '/' */
+  out[o] = 0;
+  return 0;
+}
+
 static const char *fio_resolve(const char *path) {
   static char full[256];
-  if (!fio_base[0])
+  if (mx__fio_join(fio_cwd(), path, full, sizeof full) < 0)
     return path;
-  for (const char *p = path; *p; p++)
-    if (*p == ':')
-      return path;
-  u32 n = 0;
-  for (; fio_base[n]; n++)
-    full[n] = fio_base[n];
-  for (; *path && n < sizeof full - 1; path++)
-    full[n++] = *path;
-  full[n] = 0;
   return full;
+}
+
+/* the caller's working directory: path (in the one it has now), a directory
+   that opens; it keeps a '/' at its end */
+int mx_fio_chdir(const char *path) {
+  char dir[MX_FIO_CWD_MAX];
+  fio_lock();
+  int r = mx__fio_join(fio_cwd(), path, dir, sizeof dir - 1);
+  fio_unlock();
+  u32 n = r < 0 ? 0 : (u32)strlen(dir);
+  if (!n)
+    return -1;
+  int fd = mx_fio_dopen(dir);
+  if (fd < 0)
+    return -1;
+  mx_fio_dclose(fd);
+  if (dir[n - 1] != '/' && dir[n - 1] != ':')
+    dir[n++] = '/', dir[n] = 0;
+  fio_lock();
+  if (mx__fio_cwd_set)
+    mx__fio_cwd_set(dir);
+  else
+    memcpy(fio_base, dir, n + 1);
+  fio_unlock();
+  return 0;
+}
+int mx_fio_getcwd(char *buf, u32 room) {
+  fio_lock();
+  const char *d = fio_cwd();
+  u32 n = (u32)strlen(d);
+  int r = -1;
+  if (n < room)
+    memcpy(buf, d, n + 1), r = (int)n;
+  fio_unlock();
+  return r;
 }
 
 static int fio_open_unlocked(const char *path, int flags) {

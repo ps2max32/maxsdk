@@ -10,6 +10,7 @@
 #include <mx/msg.h>
 #include <mx/proc.h>
 #include <mx/setting.h>
+#include <mx/sif.h>
 
 #ifdef MX_KERNEL
 #define HAS(v, f)                                                                          \
@@ -45,6 +46,18 @@ int mx_proc_spawn(int argc, const char *args, u32 args_len, const char *swap) {
     mx__frame_yield();
   return CALLV(14, proc_spawn, (argc, args, args_len, swap));
 }
+int mx_proc_spawn_in(const char *dir, int argc, const char *args, u32 args_len, const char *swap) {
+  mx_debug_flush();
+  if (mx__frame_yield)
+    mx__frame_yield();
+  return CALLV(40, proc_spawn_in, (dir, argc, args, args_len, swap));
+}
+#ifdef MX_KERNEL
+/* kernel version 40: the working directory is the kernel's, for each process
+   (libmx's own: src/base/sif.c) */
+int mx_fio_chdir(const char *path) { return CALLV(40, fio_chdir, (path)); }
+int mx_fio_getcwd(char *buf, u32 room) { return CALLV(40, fio_getcwd, (buf, room)); }
+#endif
 int mx_proc_wait(int id, int *status, int nohang) {
   return CALLV(14, proc_wait, (id, status, nohang));
 }

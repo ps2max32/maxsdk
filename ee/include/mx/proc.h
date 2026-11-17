@@ -62,6 +62,11 @@ int mx_proc_list(struct mx_proc_info *p, int max);
    front again then). This program goes on beside it, and may start the next
    once this one ended. */
 int mx_proc_spawn(int argc, const char *args, u32 args_len, const char *swap);
+/* Kernel version 40: as mx_proc_spawn, the program's working directory dir
+   (<mx/sif.h>: in the caller's, as mx_fio_chdir takes it); mx_proc_spawn
+   gives it the caller's, as Linux's fork and exec. A shell starts a game in
+   the game's directory. */
+int mx_proc_spawn_in(const char *dir, int argc, const char *args, u32 args_len, const char *swap);
 /* The end of a program this one started: 1 and its exit status in *status
    (0: not wanted) when it ended (the last one only), 0 while it runs (only
    with nohang; without, the thread waits for its end), -1 not such one. */

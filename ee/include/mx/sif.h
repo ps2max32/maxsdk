@@ -68,8 +68,8 @@ int mx_tty_write(const char *s, u32 n);
 
 /* Files of the IOP file server, e.g. "host:shot.tga" (ps2link: the directory
    of ps2client; PCSX2: its host root). A path without a device is in the
-   directory of the program's ELF: "id1/pak0.pak" of usb0:/games/q.elf is
-   usb0:/games/id1/pak0.pak. Return < 0 on failure. */
+   working directory (below), at the start the directory of the program's
+   ELF: "id1/pak0.pak" of usb0:/games/q.elf is usb0:/games/id1/pak0.pak. Return < 0 on failure. */
 #define MX_FIO_RDONLY 0x0001
 #define MX_FIO_WRONLY 0x0002
 #define MX_FIO_CREAT 0x0200
@@ -97,5 +97,20 @@ int mx_fio_dclose(int fd);
 int mx_fio_remove(const char *path);
 int mx_fio_mkdir(const char *path, int mode);
 int mx_fio_rmdir(const char *path);
+
+/* The working directory (kernel version 40; the kernel keeps one for each
+   process): a path without a device is in it, one starting with '/' at the
+   root of its device, and "." and ".." in paths are taken out as on Linux.
+   A program starts in the directory of its ELF ("usb0:/PS2MAX/quake3/"),
+   or in the one its starter gave (mx_proc_spawn_in), or, started by another
+   program without one (mx_proc_spawn, mx_loader_launch), in that program's.
+   argv[0] is always the path of the ELF that runs.
+   mx_fio_chdir: path (in the directory now) is the new one, if it opens as a
+   directory; 0, or -1. mx_fio_getcwd: the directory, with its '/' at the
+   end (or the device's ':'; "" before a start with a device), in buf: its
+   length, or -1 when room is too small. */
+#define MX_FIO_CWD_MAX 128
+int mx_fio_chdir(const char *path);
+int mx_fio_getcwd(char *buf, u32 room);
 
 #endif

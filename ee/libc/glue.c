@@ -111,3 +111,34 @@ void _exit(int status) {
 /* start.c calls this instead of mx_exit when libc is linked: atexit
    handlers and C++ static destructors run, stdio is flushed. */
 void mx__libc_exit(int status) { exit(status); }
+
+/* The working directory (<mx/sif.h>: the kernel's, for each process). Weak:
+   a program's own file layer (a port's POSIX files) has its own. */
+#include <string.h>
+#include <mx/sif.h>
+__attribute__((weak)) int chdir(const char *path) {
+  if (mx_fio_chdir(path) < 0) {
+    errno = ENOENT;
+    return -1;
+  }
+  return 0;
+}
+__attribute__((weak)) char *getcwd(char *buf, size_t size) {
+  char d[MX_FIO_CWD_MAX];
+  int n = mx_fio_getcwd(d, sizeof d);
+  if (n < 0) {
+    errno = ERANGE;
+    return NULL;
+  }
+  if (!buf) {
+    size = size > (size_t)n + 1 ? size : (size_t)n + 1;
+    if (!(buf = malloc(size)))
+      return NULL;
+  }
+  if (size < (size_t)n + 1) {
+    errno = ERANGE;
+    return NULL;
+  }
+  memcpy(buf, d, (size_t)n + 1);
+  return buf;
+}

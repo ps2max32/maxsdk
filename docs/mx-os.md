@@ -159,9 +159,12 @@ Retail PS2s have 32 MiB; never count on more.
    core only to be fast, or only read by the DMAC and the VUs while the program draws, goes in
    the fast part, which is to leave when the program is not in front. `mxos-core` (all in core) went with phase 3d; all in physical
    memory is a standalone ELF.
-2. **Paths are relative.** A path without a device is in the directory of the ELF, so one ELF runs
-   from `host:` and `usb0:`. Never write `host:` or a device name in a game; make engine base
-   directories `.`.
+2. **Paths are relative.** A path without a device is in the program's working directory, which
+   is the directory of its ELF when the shell or the host starts it (each process has its own,
+   kernel version 40: `<mx/sif.h>`), so one ELF runs from `host:` and `usb0:`. Never write
+   `host:` or a device name in a game; make engine base directories `.` (`./baseq3` works: `.`
+   and `..` are taken out). A program that starts another (`mx_proc_spawn`,
+   `mx_loader_launch`) gives it its own directory, or the one it names (`mx_proc_spawn_in`).
 3. **No IOP work.** No IOP reset, no module loading, no `rom0:` drivers: `mx_pad_init` and
    `mx_snd_init` bind to what runs (the kernel boots mxsnd: `kernel.md`, Sound). Loading a
    module forces a full IOP reset at return.

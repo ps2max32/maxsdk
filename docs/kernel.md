@@ -182,6 +182,20 @@ the region's 480i or 576i and confirm it. `mx_gs_init` in libmxk shows its w x h
 `mx_screen_pick` (exact size, the shape it has on the region's TV mode). On PCSX2 the screen is
 set up again after the settings are read. `tests/ps2/k59_video.c`.
 
+Version 40 (2026-11-17): each process has a working directory, as on Linux (`<mx/sif.h>`).
+- A path without a device is in it, one starting with `/` at the root of its device; `.` and
+  `..` in paths are taken out (`mx__fio_join`, `src/base/sif.c`). Before, one directory for all,
+  the last started ELF's: the shell beside a game had the game's.
+- The kernel keeps it in its process table (`apps/mxos/ee/ptab.c`; `mx__fio_cwd` gives the
+  calling thread's process's to the file server client). `mx_fio_chdir` and `mx_fio_getcwd`
+  change and read it (libc's `chdir` and `getcwd` are weak ones on them).
+- A start by a program (`mx_proc_spawn`, `mx_loader_launch`, `mx_loader_launch_beside`) gets
+  the caller's directory, as Linux's fork and exec, and the ELF's path is in it (argv[0] is the
+  resolved path); `mx_proc_spawn_in` names the directory. The kernel's own starts (the shell,
+  the service, a host's run) and a service's starts are in the ELF's directory. MXSHELL starts a
+  game in its directory, Files an ELF in that ELF's.
+- `tests/ps2/k75_cwd.c`.
+
 Version 39 (2026-11-17, mx OS plan step 6, part 4): the drawing hardware is the process in
 front's (`<mx/draw.h>`).
 - The kernel calls a program's interrupt handlers of the drawing hardware only while its
