@@ -74,8 +74,27 @@ struct mx_hires_stats {
   u32 pass_sum_us[MX_HIRES_PASSES];
   u32 strip_max;  /* the largest record of a strip's own, bytes */
   u32 over;       /* passes still being sent when the beam came to their strip (shown half drawn) */
+  u32 logged;     /* passes written into the log (mx_hires_log), since it was given */
 };
 extern struct mx_hires_stats mx_hires_stats;
+
+/* A pass in the log: what it played, when it started and how long it took. */
+struct mx_hires_pass {
+  u32 frame;   /* the frame of the record it played (mx_frame_number() while that was built) */
+  u32 wait_us; /* from the moment it might run (the beam had left its Z strip) to its start: the
+                  passes before it */
+  u32 run_us;  /* its start to the end of its DMA; 0: left out */
+  u8 strip;
+  u8 over;     /* the beam came to its strip while it was being sent */
+  u8 out;      /* left out: not started when the beam came */
+  u8 pad;
+};
+/* The passes from now on into log, n of them and then round again (pass i
+   at log[i % n], mx_hires_stats.logged the number written): which passes are
+   late, of which frames, and whether by themselves or behind the one before.
+   The interrupt handlers write it: memory that is always there (mx_dma_alloc,
+   MX_IRQ_BSS). log 0: no more. */
+void mx_hires_log(struct mx_hires_pass *log, u32 n);
 
 /* DMAC, the GS and mode m (interlaced: FRAME mode), the framebuffer of
    w x h pixels of psm (CT32 with Z32; CT24 with Z24, which leaves the top

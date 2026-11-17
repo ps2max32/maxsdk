@@ -28,6 +28,7 @@ static struct {
   struct mx_rt rt;
   struct mx_display disp[2];
   u32 strip_h, strip_pages, page_h;
+  u32 pages; /* the framebuffer's */
   u32 npass; /* strips */
   u32 zpsm;
   u32 line[MX_HIRES_PASSES]; /* the H-blank count at which the beam starts strip j */
@@ -58,6 +59,9 @@ static struct {
   volatile u32 parity;    /* the field the passes of this field are drawn for */
   int shift_field;
   u32 prev_at, prev_k;
+  u32 may_at[MX_HIRES_PASSES]; /* when each strip's pass might run, this field */
+  struct mx_hires_pass *log, *log_cur; /* mx_hires_log; the entry of the pass being sent */
+  u32 log_n;
   u64 *chains;
   u32 nchain;
 } h;
@@ -171,6 +175,25 @@ static u64 *pass_chain(int s, u32 k, int shifted, int finish, int once) {
   return c0;
 }
 
+void mx_hires_log(struct mx_hires_pass *log, u32 n) {
+  int was = mx_di();
+  h.log = n ? log : 0, h.log_n = n, h.log_cur = 0;
+  mx_hires_stats.logged = 0;
+  mx_irq_restore(was);
+}
+
+/* The log's next entry for a pass of strip k (0: no log). */
+static struct mx_hires_pass *log_pass(u32 k) {
+  if (!h.log)
+    return 0;
+  struct mx_hires_pass *e = &h.log[mx_hires_stats.logged++ % h.log_n];
+  e->frame = h.played >= 0 ? h.slot[h.played].frame : 0;
+  e->wait_us = (mx_count() - h.may_at[k]) / (MX_EE_HZ / 1000000);
+  e->run_us = 0;
+  e->strip = (u8)k, e->over = 0, e->out = 0, e->pad = 0;
+  return e;
+}
+
 /* Pass k of the slot played into the VIF1 queue (in an interrupt handler,
    or with interrupts off). Returns 0, or -1: not sent. */
 static int send(u32 k) {
@@ -181,6 +204,7 @@ static int send(u32 k) {
   mx_event e;
   if (mx_dmaq_try_chain(&h.q, c0, 1, &e) < 0)
     return -1;
+  h.log_cur = log_pass(k);
   h.prev_at = mx_count(), h.prev_k = k;
   h.busy = 1;
   h.slot[s].last = e, h.slot[s].kicked = 1;
@@ -196,8 +220,12 @@ static void start_next(void) {
     for (u32 i = 1; i < h.nqueue; i++)
       h.queue[i - 1] = h.queue[i];
     h.nqueue--;
-    if (send(k) < 0)
+    if (send(k) < 0) {
+      struct mx_hires_pass *e = log_pass(k);
+      if (e)
+        e->out = 1;
       mx_hires_stats.late++;
+    }
   }
 }
 
@@ -213,6 +241,8 @@ static MX_IRQ_FN void pass_done(void *arg) {
     mx_hires_stats.pass_us[h.prev_k] = t;
   mx_hires_stats.pass_n[h.prev_k]++;
   mx_hires_stats.pass_sum_us[h.prev_k] += t;
+  if (h.log_cur)
+    h.log_cur->run_us = t ? t : 1, h.log_cur = 0;
   h.busy = 0;
   start_next();
   mx__gs_event();
@@ -250,6 +280,7 @@ static void may_run(u32 k) {
   }
   if (h.played < 0)
     return;
+  h.may_at[k] = mx_count();
   if (h.nqueue < MX_HIRES_PASSES)
     h.queue[h.nqueue++] = (u8)k;
   start_next();
@@ -259,13 +290,19 @@ static void may_run(u32 k) {
    out (its strip shows what was there; the passes after it keep their
    time). */
 static void too_late(u32 k) {
-  if (h.busy && h.prev_k == k)
+  if (h.busy && h.prev_k == k) {
     mx_hires_stats.over++;
+    if (h.log_cur)
+      h.log_cur->over = 1;
+  }
   for (u32 i = 0; i < h.nqueue; i++)
     if (h.queue[i] == k) {
       for (u32 j = i + 1; j < h.nqueue; j++)
         h.queue[j - 1] = h.queue[j];
       h.nqueue--;
+      struct mx_hires_pass *e = log_pass(k);
+      if (e)
+        e->out = 1;
       mx_hires_stats.late++;
       return;
     }
@@ -330,8 +367,11 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   u32 fbw = (w + 63) / 64;
   h.strip_pages = fbw * h.strip_h / h.page_h;
   /* the last strip's ZBP is n - 1 strips below the buffer (pass_chain): the buffer
-     that high; the pages below it stay free for textures */
-  u32 fbp = mx_vram_alloc_at((h.npass - 1) * h.strip_pages, h.npass * h.strip_pages);
+     that high; the pages below it stay free for textures. The last strip has the
+     pages of its lines only (540 lines in strips of 128: 28, a row of pages) */
+  u32 last_rows = (hgt - (h.npass - 1) * h.strip_h + h.page_h - 1) / h.page_h;
+  h.pages = (h.npass - 1) * h.strip_pages + last_rows * fbw;
+  u32 fbp = mx_vram_alloc_at((h.npass - 1) * h.strip_pages, h.pages);
   if (fbp == ~0u)
     return -1;
   mx_rt_init(&h.rt, fbp, w, hgt, psm, MX_RT_NOZ, MX_RT_NOZ);
@@ -547,7 +587,7 @@ u32 mx_hires_slot(void) {
 u32 mx_hires_passes(void) { return h.npass; }
 u32 mx_hires_hbyte(u32 *page) {
   *page = h.rt.fbp;
-  return h.rt.psm == MX_GS_PSM_CT24 ? h.npass * h.strip_pages : 0;
+  return h.rt.psm == MX_GS_PSM_CT24 ? h.pages : 0;
 }
 
 void mx_hires_clear(u32 r, u32 g, u32 b) { h.rgb = (r & 0xFF) | (g & 0xFF) << 8 | (b & 0xFF) << 16; }
