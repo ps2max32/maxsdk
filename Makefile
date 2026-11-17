@@ -127,7 +127,7 @@ $(VM_TESTS:%=$(OUT)/tests/%.elf): $(LIBK) $(HERE)/ee/ld/maxsdk-vm.ld
 # (frame.c, fpresent.c under the kernel) as well: the frame pipeline without VM is the
 # standalone frame and fpresent's
 K_TESTS = k37_iopchan k43_phys k44_read k45_alldir k40_frame k41_present
-K_STAY_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k38_service k42_timers k46_spawnloop k47_sideend k48_turns k49_three k50_home k51_notify k52_settings k53_pads k54_isshell k55_homeshell k56_time k57_net k58_faults k59_video k60_mclog k61_mcwrite k62_bios k63_frames k64_homepic k65_frontwait k66_lost k67_hist k68_resmap k69_procmem k70_tlbhalf k71_framerun k72_hiresyield k73_drawfront k74_hireslost k75_cwd
+K_STAY_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k38_service k42_timers k46_spawnloop k47_sideend k48_turns k49_three k50_home k51_notify k52_settings k53_pads k54_isshell k55_homeshell k56_time k57_net k58_faults k59_video k60_mclog k61_mcwrite k62_bios k63_frames k64_homepic k65_frontwait k66_lost k67_hist k68_resmap k69_procmem k70_tlbhalf k71_framerun k72_hiresyield k73_drawfront k74_hireslost k75_cwd k76_sndfront k77_killpaused
 $(K_TESTS:%=$(OUT)/tests/%.elf): MX_TARGET = mxos
 $(K_TESTS:%=$(OUT)/tests/%.elf): MX_VM_TEXT = core
 $(K_TESTS:%=$(OUT)/tests/%.elf): $(LIBK) $(HERE)/ee/ld/maxsdk-vm-coretext.ld

@@ -104,6 +104,7 @@ static struct mxsnd_cmd *cmd(int op, int voice) {
 }
 
 static void voices_reset(void);
+static void voices_off(void);
 
 int mx_snd_init(void) {
   if (ready)
@@ -204,12 +205,14 @@ void mx_snd_stream_stop(void) {
   send();
 }
 
-/* the home menu (ee/src/gs/home.c): the stream and the voices silenced while
-   the program waits */
+/* a handover (src/base/proc.c, ee/src/gs/home.c: the sound is the process
+   in front's): the stream and the voices silenced while another is in front;
+   the voices count as stopped (a loop is played again when wanted) */
 void mx__snd_quiet(void) {
   if (!ready)
     return;
   cmd(MXSND_C_SILENCE, 0);
+  voices_off();
   mx_snd_stream_stop();
 }
 
@@ -364,6 +367,11 @@ static struct {
 
 /* mxsnd silenced them (INIT): none on, all into the reverb */
 static void voices_reset(void) { memset(vs, 0, sizeof vs); }
+/* mxsnd silenced them (mx__snd_quiet): each counts as stopped */
+static void voices_off(void) {
+  for (int v = 0; v < MXSND_VOICES; v++)
+    vs[v].on = 0;
+}
 
 /* the voice still sounds: on, and (a loop-less sample) not past its end */
 static int sounding(int v, const struct mxsnd_status *st) {

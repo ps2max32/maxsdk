@@ -40,16 +40,23 @@ int mx_msg_reply(int msg, const void *reply, u32 len) { return CALL(msg_reply, (
 /* the frame pipeline's, if the program has it: its stream drawn before
    another process is in front (src/gs/frame.c) */
 extern void mx__frame_yield(void) __attribute__((weak));
-int mx_proc_spawn(int argc, const char *args, u32 args_len, const char *swap) {
-  mx_debug_flush();
+/* the sound is the process in front's too (mx OS plan step 5): its voices
+   and stream silenced at a handover (src/base/snd.c, with sound) */
+extern void mx__snd_quiet(void) __attribute__((weak));
+static void yield(void) {
   if (mx__frame_yield)
     mx__frame_yield();
+  if (mx__snd_quiet)
+    mx__snd_quiet();
+}
+int mx_proc_spawn(int argc, const char *args, u32 args_len, const char *swap) {
+  mx_debug_flush();
+  yield();
   return CALLV(14, proc_spawn, (argc, args, args_len, swap));
 }
 int mx_proc_spawn_in(const char *dir, int argc, const char *args, u32 args_len, const char *swap) {
   mx_debug_flush();
-  if (mx__frame_yield)
-    mx__frame_yield();
+  yield();
   return CALLV(40, proc_spawn_in, (dir, argc, args, args_len, swap));
 }
 #ifdef MX_KERNEL
@@ -63,8 +70,7 @@ int mx_proc_wait(int id, int *status, int nohang) {
 }
 int mx_proc_kill(int id, int status) { return CALLV(14, proc_kill, (id, status)); }
 int mx_proc_front(int id) {
-  if (mx__frame_yield)
-    mx__frame_yield();
+  yield();
   return CALLV(24, proc_front, (id));
 }
 int mx_proc_events(int port) { return CALLV(15, proc_events, (port)); }

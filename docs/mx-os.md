@@ -252,7 +252,9 @@ brings the shell in front instead: the program is paused at its frame boundary a
 `MX_EVENT_HOME`; it brings the program back with `mx_proc_front` or ends it with `mx_proc_kill`.
 With the shell in front the home button is the shell's: it does not end the shell. Each gets its
 own video mode back at these switches (since kernel version 39 also a parent when its child
-ends); what it drew in GS memory is not kept. The drawing hardware is the process in front's
+ends); what it drew in GS memory is not kept. So is the sound: at each handover (the home button,
+`mx_proc_spawn`, `mx_proc_front`) its voices and stream are silenced (`mx__snd_quiet`); a loop it
+wants plays again when it asks (`mx_snd_ch_playing` says 0). The drawing hardware is the process in front's
 (kernel version 39, `<mx/draw.h>`): only it gets those interrupts, a program's handlers are
 for the drawing hardware only, and maxsdk takes the graphics up again when the program is in
 front again (beam racing too); `mx_draw_open`'s lost function is for what the program keeps in

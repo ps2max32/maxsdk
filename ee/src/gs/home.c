@@ -102,10 +102,13 @@ void mx__home_poll(void) {
   if (!pages)
     return;
   /* what was sent drawn, in hires mode the passes' pipeline paused (it
-     starts again at the next frame): another process may have the
-     graphics now, and this one's interrupts of them stop meanwhile */
+     starts again at the next frame), the sound silenced: another process
+     may have the graphics and the sound now, and this one's interrupts of
+     them stop meanwhile */
   void mx__frame_yield(void);
   mx__frame_yield();
+  if (mx__snd_quiet)
+    mx__snd_quiet();
   int synced = mx_frame_sync() >= 0;
   struct mx_picture p;
   void *pic = 0;
@@ -114,8 +117,6 @@ void mx__home_poll(void) {
       (pic = mx__home_capture(&p)) != 0)
     mx__kernel->home_picture_set(&p, mx_paddr_of(pic).v);
   u32 page = synced ? lend(pages) : ~0u;
-  if (page != ~0u && mx__snd_quiet)
-    mx__snd_quiet();
   int end = mx__kernel->home_run(page, pages);
   if (pic) {
     mx__kernel->home_picture_set(0, 0);
