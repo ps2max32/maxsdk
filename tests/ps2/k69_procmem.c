@@ -65,14 +65,14 @@ int main(int argc, char **argv) {
     if (m[i].id == id) {
       seen |= 1;
       CHECK_EQ(m[i].state, MX_PROC_FRONT);
-      CHECK(m[i].core >= 32);
+      CHECK(m[i].core >= 8);
       CHECK(m[i].pinned >= 16);
       CHECK(m[i].paged >= 32);
     }
     if (m[i].id == self) {
       seen |= 2;
       CHECK(m[i].state != MX_PROC_FRONT);
-      CHECK(m[i].core >= 32);
+      CHECK(m[i].core >= 8);
     }
   }
   CHECK_EQ(m[0].id, 0);

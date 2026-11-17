@@ -182,6 +182,18 @@ the region's 480i or 576i and confirm it. `mx_gs_init` in libmxk shows its w x h
 `mx_screen_pick` (exact size, the shape it has on the region's TV mode). On PCSX2 the screen is
 set up again after the settings are read. `tests/ps2/k59_video.c`.
 
+Also version 37: a core is no longer whole MiBs (2026-11-17, mx OS plan step 6;
+`apps/mxos/ee/tlb.c`'s `tlb_core_plan`, `core_cover`). A program's core is covered by pairs of
+the largest pages that fit, 4 MiB down to 16 KiB, and its end by an entry with only its even
+half (the odd one invalid: `tests/ps2/k70_tlbhalf.c`); nothing else is mapped where an
+invalid half is, so only the last entry is such a one. Its size is rounded up to 32 KiB, 64
+KiB, 256 KiB or 1 MiB, whichever costs least in memory no one uses and in TLB entries (one
+counted as 96 KiB), and its physical run is at a multiple of the largest page used. Before,
+pairs of 256 KiB were the smallest: the host link's service had 1 MiB for 350 KiB (now 512
+KiB, one entry in place of two), the shell 2 MiB for 1.25 (now 1.25 MiB, three entries in
+place of four). A program's core heap ends where its core does: what it gets beyond
+`MX_CORE_HEAP` is at most that rounding.
+
 Version 37 (2026-11-17, mx OS plan step 6, the count): who holds main memory (`<mx/proc.h>`:
 `mx_proc_memory`; `apps/mxos/ee/ptab.c`'s `ptab_memory`, `vm.c`'s `mx__vm_frames_of`). For the
 kernel and each process, in frames of 32 KiB: its core, what else it holds pinned (pinned

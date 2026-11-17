@@ -966,6 +966,21 @@ one LRU when the game needs the frames. No call hands main memory over (user, 20
 
 - Today, beside a game: the waiting shell keeps a core of 2 MiB, the host link's service 1
   MiB, the kernel 478 KiB below 1 MiB.
+- Decided 2026-11-17 (user): the core of a process that is not in front becomes ordinary
+  pages the pager may take, and is joined into large pages again when it is in front; with
+  page sizes chosen as they fit. The parts, in order:
+  1. A core at its true size, covered by the largest pages that fit and an entry with one
+     half at its end (done, kernel.md: "a core is no longer whole MiBs").
+  2. The core as a region with two states: joined (its frames in place, large entries, while
+     in front) and split (the same frames as 32 KiB pages of its address space, for the
+     pager). What must stay also when split: what its interrupt handlers run and read, and
+     buffers the IOP or the DMAC writes. A frame allocator by page size (2, 8, 32, 128
+     frames; large blocks from the top, single pages from the bottom) and the VM's refill for
+     an address that has an entry with an invalid half.
+  3. Regions a program names beside its core (sections at a page size's multiple, a heap, a
+     mapped file), through the same.
+  4. Only if a program then still refills much in spread data: joining what the refill count
+     calls hot.
 - The count is there (kernel version 37, `mx_proc_memory`, `k69_procmem`; also in the kernel's
   log at each program's start). Measured 2026-11-17 on a SCPH-90006, a test program beside
   its child, of 991 frames: the kernel 5 frames in the pool (and its own MiB), the host
