@@ -51,6 +51,12 @@ static struct {
   volatile u32 nqueue;
   volatile int busy;        /* a pass is being sent */
   volatile int played;   /* the slot played, -1: none yet */
+  /* the display is off from mx_hires_init until a record was played a whole
+     field (the framebuffer holds what was there before: another program's
+     picture, or data read as pixels); the circuits' on flags meanwhile */
+  volatile u32 first_field; /* the field the first record was played from, 0: none yet */
+  int hidden;
+  u8 disp_on[2][2];
   volatile u32 wait[MX_HIRES_SLOTS]; /* the waiting slots, oldest first */
   volatile u32 nwait;
   int building;          /* the slot of the frame being built, -1: none */
@@ -264,6 +270,8 @@ static void may_run(u32 k) {
     if (h.nwait && !h.slot[s0].once_pending) {
       int old = h.played;
       h.played = (int)h.wait[0];
+      if (!h.first_field)
+        h.first_field = mx_hires_stats.fields;
       for (u32 i = 1; i < h.nwait; i++)
         h.wait[i - 1] = h.wait[i];
       h.nwait--;
@@ -385,8 +393,12 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   mx_gs.fbp[0] = mx_gs.fbp[1] = fbp;
   for (int i = 0; i < 2; i++)
     mx_display_init(&h.disp[i], &h.rt);
+  for (int i = 0; i < 2; i++)
+    for (int c = 0; c < 2; c++)
+      h.disp_on[i][c] = h.disp[i].c[c].on, h.disp[i].c[c].on = 0;
+  h.hidden = 1, h.first_field = 0;
   mx_gs_displays(h.disp, 2);
-  mx_display_apply(&h.disp[0]);
+  mx_display_apply(&h.disp[0]); /* off: PMODE's circuits */
 
   /* the beam's line of each strip: DISPLAY2's DY (frame lines when
      interlaced) and MAGV; + 4, as gsKit_hires_flip found */
@@ -487,6 +499,14 @@ u8 *mx__hires_begin(u32 *qw, u8 **once, u32 *once_qw) {
   if (paused) {
     paused = 0;
     pipeline_start();
+  }
+  /* the display on once a record was played a whole field */
+  if (h.hidden && h.first_field && mx_hires_stats.fields > h.first_field) {
+    for (int i = 0; i < 2; i++)
+      for (int c = 0; c < 2; c++)
+        h.disp[i].c[c].on = h.disp_on[i][c];
+    h.hidden = 0;
+    mx_display_apply(&h.disp[0]);
   }
   if (h.building < 0) {
     u32 t0 = mx_count();

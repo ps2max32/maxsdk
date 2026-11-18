@@ -182,6 +182,15 @@ the region's 480i or 576i and confirm it. `mx_gs_init` in libmxk shows its w x h
 `mx_screen_pick` (exact size, the shape it has on the region's TV mode). On PCSX2 the screen is
 set up again after the settings are read. `tests/ps2/k59_video.c`.
 
+Version 41 (2026-11-18): the display is off while a started program loads. When a program
+starts another in front (the shell a game), the kernel turns PMODE's circuits off at the start
+(`exec_elf`); the new program's first `mx_display_apply` (through `gs_display`) turns them on.
+Before, the TV showed the starter's last picture, and with beam racing its strips, while the
+game loaded and wrote into those pages. A host's run through the service keeps the kernel's text
+screen. maxsdk's beam racing does the same for its own start: after `mx_hires_init` the display
+is off until a record was played a whole field (`src/gs/hires.c`; before, the undrawn framebuffer
+showed for a field or two). `tests/ps2/k78_hiresdisp.c`.
+
 Version 40 (2026-11-17): each process has a working directory, as on Linux (`<mx/sif.h>`).
 - A path without a device is in it, one starting with `/` at the root of its device; `.` and
   `..` in paths are taken out (`mx__fio_join`, `src/base/sif.c`). Before, one directory for all,
