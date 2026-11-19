@@ -26,25 +26,32 @@
 /* What tlb.S's fast refill reads and writes (vm.c keeps the rest): a
    refill of a VM page that is mapped and has no TLB entry is handled
    there, with three registers saved, before the full save and C. */
-#define VMF_LO 0         /* u32 *: EntryLo0 of each page (vm.c's lo) */
-#define VMF_PAGE_SLOT 4  /* u8 *: TLB entry of each page, 0: none */
+#define VMF_DIR 0        /* struct vm_leaf **: the leaf of each 64 pages (vm.c's dir) */
+#define VMF_PAGE 4       /* the page being refilled (kept over the TLB write) */
 #define VMF_NPAGES 8     /* pages of the VM window the fast refill takes (0: none: a trace) */
-#define VMF_NMAP 28      /* pages of the file window after them in the tables */
-#define VMF_NHEAP 224    /* and of the heap window after those */
-#define VMF_HIST 228     /* u32 *: refills of each page (mx_vm_refill_hist), or 0 */
+#define VMF_NREG 28      /* pages of the region it takes, after VMF_VM_PAGES in the tables */
 #define VMF_NEXT 12      /* the TLB entry to take next */
 #define VMF_REFILLS 16   /* all refills */
 #define VMF_REFILLS_I 20 /* of them, instruction fetches */
-#define VMF_STAMP 24     /* u32 *: each page's last refill (refills then), for eviction */
 
 #define VMF_SLOT_PAGE 32 /* u16[48]: each TLB entry's page + 1, 0: none */
 #define VMF_SAVE 128     /* three GPRs, 128 bits each */
 #define VMF_NEXT_OF 176  /* u8[48]: the VM's entries in a ring (the BIOS's kept ones left out) */
-#define VMF_SIZE 232
+#define VMF_SIZE 224
 #define VMF_BASE_PAGE 0x1000 /* MX_VM_BASE >> 15 */
-#define VMF_MAP_PAGE 0x8000  /* MX_VM_MAP_BASE >> 15 */
-#define VMF_HEAP_PAGE 0x9000 /* MX_VM_HEAP_BASE >> 15 */
+#define VMF_REG_PAGE 0x8000  /* MX_VM_REGION_BASE >> 15 */
+#define VMF_VM_PAGES 0x1000  /* pages of the whole VM window: the region's follow in the tables */
 #define VMF_TLB_FIRST 24     /* the first entry the VM may take (others below it: next_of) */
+
+/* A leaf of the page tables (vm.c): what the VM keeps of 64 pages (2 MiB of
+   addresses), made when the first of them is touched. The fast refill reads
+   lo and page_slot and writes page_slot, stamp and, where there, hist. */
+#define VML_SHIFT 6
+#define VML_LO 0          /* u32[64]: EntryLo0 of each page when mapped */
+#define VML_STAMP 256     /* u32[64]: each page's last refill (refills then), for eviction */
+#define VML_PAGE_SLOT 896 /* u8[64]: TLB entry of each page, 0: none */
+#define VML_HIST 960      /* u32 *: refills of each page (mx_vm_refill_hist), or 0 */
+#define VML_SIZE 1024
 
 /* The syscall that resumes a slow fault (a negative one: its handler runs
    at EXL = 1 on the caller's stack). */
@@ -67,24 +74,40 @@ _Static_assert(__builtin_offsetof(struct mx__vm_x, badvaddr) == VMX_BADVADDR, "t
 _Static_assert(__builtin_offsetof(struct mx__vm_x, frame) == VMX_FRAME, "tlb.S offsets");
 _Static_assert(sizeof(struct mx__vm_x) == VMX_SIZE, "tlb.S offsets");
 
+struct vm_leaf {
+  u32 lo[64];
+  u32 stamp[64];
+  u16 frame_of[64]; /* each page's frame + 1, 0: not resident */
+  u16 slot_of[64];  /* its slot in the swap file + 1, 0: none */
+  u8 flags[64];
+  u8 pins[64];
+  u8 page_slot[64];
+  u32 *hist;
+  /* with a trace (a TLB entry maps a block, 4 a page): each block's entry
+     and what the trace saw of it this interval; 256 bytes each */
+  u8 *bslot, *seen;
+  u32 pad[13];
+};
+_Static_assert(__builtin_offsetof(struct vm_leaf, stamp) == VML_STAMP, "tlb.S offsets");
+_Static_assert(__builtin_offsetof(struct vm_leaf, page_slot) == VML_PAGE_SLOT, "tlb.S offsets");
+_Static_assert(__builtin_offsetof(struct vm_leaf, hist) == VML_HIST, "tlb.S offsets");
+_Static_assert(sizeof(struct vm_leaf) == VML_SIZE, "tlb.S offsets");
+
 struct mx__vm_fast {
-  u32 *lo;
-  u8 *page_slot;
+  struct vm_leaf **dir;
+  u32 page;
   u32 npages, next_slot, refills, refills_i;
-  u32 *stamp;
-  u32 nmap;
+  u32 pad;
+  u32 nreg;
   u16 slot_page[48];
   u64 save[6];
   u8 next_of[48]; /* the TLB entry the VM takes after each of its own */
-  u32 nheap;
-  u32 *hist;
 };
-_Static_assert(__builtin_offsetof(struct mx__vm_fast, hist) == VMF_HIST, "tlb.S offsets");
-_Static_assert(__builtin_offsetof(struct mx__vm_fast, nmap) == VMF_NMAP, "tlb.S offsets");
-_Static_assert(__builtin_offsetof(struct mx__vm_fast, nheap) == VMF_NHEAP, "tlb.S offsets");
+_Static_assert(__builtin_offsetof(struct mx__vm_fast, page) == VMF_PAGE, "tlb.S offsets");
+_Static_assert(__builtin_offsetof(struct mx__vm_fast, nreg) == VMF_NREG, "tlb.S offsets");
 _Static_assert(__builtin_offsetof(struct mx__vm_fast, next_slot) == VMF_NEXT, "tlb.S offsets");
 _Static_assert(__builtin_offsetof(struct mx__vm_fast, refills_i) == VMF_REFILLS_I, "tlb.S offsets");
-_Static_assert(__builtin_offsetof(struct mx__vm_fast, stamp) == VMF_STAMP, "tlb.S offsets");
+
 _Static_assert(__builtin_offsetof(struct mx__vm_fast, slot_page) == VMF_SLOT_PAGE, "tlb.S offsets");
 _Static_assert(__builtin_offsetof(struct mx__vm_fast, save) == VMF_SAVE, "tlb.S offsets");
 _Static_assert(__builtin_offsetof(struct mx__vm_fast, next_of) == VMF_NEXT_OF, "tlb.S offsets");

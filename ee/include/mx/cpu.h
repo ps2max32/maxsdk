@@ -25,8 +25,8 @@ extern u32 mx__core_off;
 #define MX_KERNEL_HI 0x02000000u
 #define MX_CORE_LO 0x00100000u
 #define MX_CORE_HI MX_KERNEL_LO
-/* A VM address (0x0800_0000 - 0x0FFF_FFFF, the file and heap windows
-   0x4000_0000 - 0x5FFF_FFFF): its frame's physical address, when it is
+/* A VM address (0x0800_0000 - 0x0FFF_FFFF, the region 0x4000_0000 -
+   0x5FFF_FFFF): its frame's physical address, when it is
    pinned in one piece; otherwise the program ends with a report (since mx
    OS plan 4b, so that MX_UNCACHED or MX_UCAB of library data now in VM
    never reaches other memory). src/base/core.c. */
@@ -58,13 +58,14 @@ MX_INLINE int mx_is_spr(const void *p) { return ((uintptr_t)p & 0xF0000000u) == 
    uncached alias (MX_UNCACHED) is not mapped. */
 #define MX_VM_BASE 0x08000000u
 #define MX_VM_LIMIT 0x10000000u
-/* the file window (mx_vm_map_file): unmapped by the BIOS */
-#define MX_VM_MAP_BASE 0x40000000u
-#define MX_VM_MAP_LIMIT 0x48000000u
-/* the heap window: VM of the heaps of pages (<mx/mem.h>: MX_MEM_PAGED,
-   MX_MEM_ASSET), apart from the program's VM and malloc */
-#define MX_VM_HEAP_BASE 0x48000000u
-#define MX_VM_HEAP_LIMIT 0x60000000u
+/* The region (unmapped by the BIOS): VM apart from the program's and
+   malloc's, given out in pieces of whole 2 MiB wherever one is free: a
+   mapped file (mx_vm_map_file), which gives its piece back when unmapped,
+   and a heap of pages (<mx/mem.h>: MX_MEM_PAGED, MX_MEM_ASSET). A piece
+   costs memory only for the pages touched (kernel version 42; before, a
+   file window of 64 MiB here and a heap window of 64 MiB after it). */
+#define MX_VM_REGION_BASE 0x40000000u
+#define MX_VM_REGION_LIMIT 0x60000000u
 /* With VM on, all of main memory cached at 0x6000_0000 (one TLB entry, 16
    MiB halves): the frames, and pinned memory (<mx/mem.h>), which is frames
    taken out of the VM's pool. Not VM: resident, at one physical address
@@ -73,10 +74,10 @@ MX_INLINE int mx_is_spr(const void *p) { return ((uintptr_t)p & 0xF0000000u) == 
    its stack and the BIOS's area below 1 MiB. */
 #define MX_PHYS_WIN 0x60000000u
 #define MX_PHYS_WIN_LIMIT 0x62000000u
-/* VM or the file window: paged, not at one physical address */
+/* VM or the region: paged, not at one physical address */
 MX_INLINE int mx_is_vm(const void *p) {
   uintptr_t a = (uintptr_t)p;
-  return (a >> 27) == 1 || a - MX_VM_MAP_BASE < MX_VM_HEAP_LIMIT - MX_VM_MAP_BASE;
+  return (a >> 27) == 1 || a - MX_VM_REGION_BASE < MX_VM_REGION_LIMIT - MX_VM_REGION_BASE;
 }
 
 /* An address as the DMAC sees it (MADR, TADR, a tag's ADDR): physical, or

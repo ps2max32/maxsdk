@@ -182,6 +182,18 @@ the region's 480i or 576i and confirm it. `mx_gs_init` in libmxk shows its w x h
 `mx_screen_pick` (exact size, the shape it has on the region's TV mode). On PCSX2 the screen is
 set up again after the settings are read. `tests/ps2/k59_video.c`.
 
+Version 42 (2026-11-19): the VM's addresses by use (`docs/vm.md`: Region, Tables). The file
+window (64 MiB) and the heap window (64 MiB) are one region, 0x4000_0000 - 0x5FFF_FFFF
+(`MX_VM_REGION_BASE`): a mapped file or a heap of pages gets a free run of 2 MiB pieces, and
+`mx_vm_unmap_file` gives a file's back. So a program maps what fits in 512 MiB (a 62 MiB file
+beside 28 and 3 MiB ones did not fit the window), up to 60 files (8 before), and
+`mx_vm_config`'s `map_size` and `heap_size` are gone (the kernel never took a program's;
+`reserved0`, `reserved1`: the struct keeps its layout). The VM's tables are in two levels
+(leaves of 64 pages, made when a page of theirs is first touched): an address space is a struct in
+the kernel's memory and costs frames only for the addresses its program touches (flat tables for
+all of the windows before: 123 KiB of pinned frames a program with a swap file). No new call;
+programs built for version 41 run unchanged. `tests/ps2/k80_region.c`.
+
 Version 41 (2026-11-18): the display is off while a started program loads. When a program
 starts another in front (the shell a game), the kernel turns PMODE's circuits off at the start
 (`exec_elf`); the new program's first `mx_display_apply` (through `gs_display`) turns them on.

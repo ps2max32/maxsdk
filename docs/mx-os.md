@@ -128,7 +128,19 @@ memory: [vm.md](vm.md). Where it goes (a game OS): [mx-os-plan.md](mx-os-plan.md
 | `0x100000-0x1EFFFFF` | VM frames: a program's core (virtual from `0x100000`) and its pages |
 | `0x1F00000-0x1F7FFFF` | kernel code, read-only for programs |
 | `0x1F80000-0x1FFFFFF` | kernel data, stack and the VM's tables |
-| `0x08000000-` | VM window, `MX_MEMORY=vm` |
+
+A program's addresses (virtual; kernel version 42):
+
+| Range | Use |
+|---|---|
+| `0x00100000-0x01EFFFFF` | its core: what must be resident (interrupt code, stacks), under its ASID |
+| `0x01F00000-0x01FFFFFF` | the kernel |
+| `0x08000000-0x0FFFFFFF` | the VM window: the program (`MX_MEMORY=vm`) and `malloc`, up to 128 MiB |
+| `0x10000000-0x1FFFFFFF` | the hardware's registers, VU and GS memory, ROM |
+| `0x20000000`, `0x30000000` | main memory uncached and uncached accelerated (`MX_UNCACHED`, `MX_UCAB`) |
+| `0x40000000-0x5FFFFFFF` | the region: mapped files and heaps of pages, each a free run of 2 MiB pieces; no sizes to set, and only the pages touched cost memory (`vm.md`) |
+| `0x60000000-0x61FFFFFF` | main memory cached (`MX_PHYS_WIN`): pinned memory |
+| `0x70000000-0x70003FFF` | the scratchpad |
 
 Retail PS2s have 32 MiB; never count on more.
 

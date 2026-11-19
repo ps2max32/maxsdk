@@ -1,4 +1,4 @@
-/* VM step 14: files mapped read-only into the file window (mx_vm_map_file,
+/* VM step 14: files mapped read-only into the region (mx_vm_map_file,
    0x4000_0000), paged from the file, sharing 8 frames (256 KiB) with VM,
    no swap file. Under a minute; at the end the screen is bright green with
    900D0000 in slot 0, or bright red with BAD000nn.
@@ -7,7 +7,7 @@
    value checked. Slots 4-7: pages read from files, drops, swap outs,
    faults. Heartbeat in slots 30 and 31.
      1 host:vm14a.bin written (300 KiB: 9 pages and a part), VM on
-     2 mapped: in the file window; every word right, twice (more than the
+     2 mapped: in the region; every word right, twice (more than the
        frames: read from the file again, dropped, never written out)
      3 200 random reads
      4 a pin for DMA (MX_VM_PIN_DMA) and a VIF1 transfer of mapped data; a
@@ -96,7 +96,7 @@ int main(int argc, char **argv) {
   if (!m)
     return t_done("vm14");
   mx_printf("vm14: mapped at %p, %u bytes\n", (const void *)m, size);
-  CHECK_EQ((uintptr_t)m, MX_VM_MAP_BASE);
+  CHECK_EQ((uintptr_t)m, MX_VM_REGION_BASE);
   CHECK_EQ(size, BYTES);
   if (store) {
     mx_printf("vm14: a store into the mapping (ends the program)\n");
@@ -167,7 +167,7 @@ int main(int argc, char **argv) {
   const u8 *m2 = mx_vm_map_file("host:vm14b.bin", &size2);
   CHECK(m2 != 0);
   CHECK_EQ(size2, 50000);
-  CHECK_EQ((uintptr_t)m2, MX_VM_MAP_BASE + 10 * PAGE);
+  CHECK_EQ((uintptr_t)m2, MX_VM_REGION_BASE + (2u << 20)); /* the next piece of 2 MiB */
   if (m2) {
     CHECK_EQ(memcmp(m2, back, sizeof back), 0);
     mx_vm_unmap_file(m2);
@@ -179,7 +179,7 @@ int main(int argc, char **argv) {
   mx_vm_unmap_file(m);
   mx_vm_unmap_file(m3);
   const u32 *m4 = mx_vm_map_file("host:vm14a.bin", 0);
-  CHECK_EQ((uintptr_t)m4, MX_VM_MAP_BASE);
+  CHECK_EQ((uintptr_t)m4, MX_VM_REGION_BASE);
   if (m4)
     CHECK_EQ(m4[NW - 1], E(NW - 1));
   mx_vm_unmap_file(m4);

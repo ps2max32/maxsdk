@@ -1,8 +1,15 @@
 /* Virtual memory (<mx/vm.h>, docs/vm.md).
 
-   VM is MX_VM_BASE + npages 32 KiB pages, and the file window
-   MX_VM_MAP_BASE + nmap pages (mx_vm_map_file): pages npages.. of the
-   tables, read from their files and never written (va_page, page_va). A page is one TLB entry, both of
+   VM is MX_VM_BASE + npages 32 KiB pages (the VM window: the program and
+   malloc), and pieces of the region MX_VM_REGION_BASE..LIMIT, given out in
+   whole 2 MiB: mapped files (mx_vm_map_file: read from their files and
+   never written) and heaps of pages (mx__vm_va_take). The tables are in two
+   levels: a directory for each address space (dir, an entry for each 2 MiB
+   of the VM window and then of the region: va_page, page_va) and leaves of
+   64 pages, made when the first page of theirs is touched (leaf_need) and
+   kept in blocks of 1 KiB cut from frames (blk_take). An entry without a
+   leaf names zero_leaf: no page of it resident, mapped or pinned, so
+   reading the tables needs no test; nothing writes there. A page is one TLB entry, both of
    its 16 KiB halves (PageMask 16 KiB) valid: an entry with a V = 0 half
    hangs the PS2 (the TLB invalid exception, probe/p19_tlb.c), so a page is
    either in the TLB whole or not at all, and every miss is a refill. The
@@ -14,9 +21,10 @@
    8 of UCAB (31..38) become one each (22, 23: 16 MiB halves), so the VM
    has 24..47 (tlb_init).
 
-   Per page: lo[] is its EntryLo0 when mapped (V set; EntryLo1 is the next
-   16 KiB), frame_of[] its frame, slot_of[] its slot in the swap file,
-   flags[] and pins[]. Per frame: page_of[]. A page is
+   Per page (struct vm_leaf, through LO(), FRAME_OF(), ...): lo is its
+   EntryLo0 when mapped (V set; EntryLo1 is the next 16 KiB), frame_of its
+   frame, slot_of its slot in the swap file, flags and pins. Per frame:
+   page_of[]. A page is
    - not resident: no frame; zero (never written out) or in its slot;
    - resident and mapped: may be in the TLB, REF set; writable once written
      (D), or always when dirty tracking is off;
@@ -70,23 +78,31 @@ void mx__thread_keep(int id); /* thread.c: mx_exit leaves it */
 #define PG_BUSY 4  /* in transit to or from the swap file */
 #define PG_SWAP 8  /* its slot holds it */
 #define PG_FILE 16 /* a file holds it (the program's ELF until PG_SWAP, a mapped file) */
-#define NSEG 12    /* 4 segments of the program's ELF, 8 mapped files */
+#define NSEG 64    /* 4 segments of the program's ELF, 60 mapped files */
 #define PG_RAW 32  /* pinned to be overwritten whole: its frame not filled */
 #define PG_LOST 64 /* it was in a swap file whose device went (mx__vm_swap_gone) */
 
+/* The tables' pages: the whole VM window's first (VM_PAGES, of which a
+   space uses npages), then the region's (REG_PAGES). A leaf is LEAF_PAGES
+   of them, 2 MiB of addresses, and the region is given out in pieces of
+   that size (piece[]), so a leaf of the region is one mapped file's or one
+   heap's. */
+#define LEAF_PAGES 64u
+#define VM_PAGES ((MX_VM_LIMIT - MX_VM_BASE) / MX_VM_PAGE)
+#define REG_PAGES ((MX_VM_REGION_LIMIT - MX_VM_REGION_BASE) / MX_VM_PAGE)
+#define NDIR ((VM_PAGES + REG_PAGES) / LEAF_PAGES)
+#define NPIECE (REG_PAGES / LEAF_PAGES)
+#define PIECE_HEAP 0xFFu /* piece[]: a heap's (mx__vm_va_take) */
+
 /* What the VM has of one address space (mx OS plan, the address space
-   plan's phase 3a): its pages' tables, the files its pages come from, its
-   windows. One for now (space0); the frames, the swap file and the
-   threads are the VM's, below. */
+   plan's phase 3a): its pages' tables, the files its pages come from, what
+   it has of the region. The frames, the swap file and the threads are the
+   VM's, below. */
 struct vm_space {
   u32 id;    /* its index in spaces */
-  u32 bytes; /* the frames it and its tables take (0: space0's, from table()) */
-  u32 npages;
-  u32 *lo;
-  u32 *stamp; /* each page's last refill (F.refills then), for the LRU */
-  u16 *frame_of, *slot_of;
-  u8 *flags, *pins;
-  u8 *page_slot; /* TLB entry of each page (with a trace: of each block), 0: none */
+  u32 npages; /* pages of the VM window it uses */
+  u32 nreg;   /* pages of the region it may use (0: none: the kernel's own space) */
+  struct vm_leaf *dir[NDIR]; /* each 64 pages' leaf, or &zero_leaf */
   int code; /* the program runs code from VM (ee/src/vm/image.c) */
   /* pages read from files (PG_FILE): the segments of a program linked
      into VM (its ELF) and the mapped files; fd -1: a free entry */
@@ -95,14 +111,34 @@ struct vm_space {
     u32 pg, npg, filesz, offset;
     int fd;
   } seg[NSEG];
-  u32 nmap, map_next; /* pages of the file window, the next one not given out */
-  u32 nheap, heap_next; /* pages of the heap window, the next one not given out */
+  /* each 2 MiB of the region: 0 free, a mapped file's (its seg + 1), or a
+     heap's (PIECE_HEAP) */
+  u8 piece[NPIECE];
   u32 max_frames; /* 0, or the most frames it holds (its mx_vm_config.frames
                      beside another space): above, one of its own pages goes */
-  u32 *hist;      /* refills of each page since the last mx_vm_refill_hist, or 0 */
+  int hist;       /* its refills are counted for each page (mx_vm_refill_hist) */
 };
-static struct vm_space space0;
+#define MAX_SPACES 6
+/* In the VM's own memory (a kernel's: every process's threads read them),
+   not in frames: a space costs no memory until its pages are touched. */
+static struct vm_space space_mem[MAX_SPACES];
+#define space0 space_mem[0]
 static struct vm_space *vs = &space0; /* the running thread's (mx__vm_space_switch) */
+/* What a directory entry without a leaf names. Never written (zero_check). */
+static struct vm_leaf zero_leaf MX_ALIGNED(16);
+static u8 zero_blk[512]; /* its bslot and seen (a trace) */
+#define LEAF(s, pg) ((s)->dir[(pg) / LEAF_PAGES])
+#define LO(s, pg) (LEAF(s, pg)->lo[(pg) % LEAF_PAGES])
+#define STAMP(s, pg) (LEAF(s, pg)->stamp[(pg) % LEAF_PAGES])
+#define FRAME_OF(s, pg) (LEAF(s, pg)->frame_of[(pg) % LEAF_PAGES])
+#define SLOT_OF(s, pg) (LEAF(s, pg)->slot_of[(pg) % LEAF_PAGES])
+#define FLAGS(s, pg) (LEAF(s, pg)->flags[(pg) % LEAF_PAGES])
+#define PINS(s, pg) (LEAF(s, pg)->pins[(pg) % LEAF_PAGES])
+/* every page that has a leaf */
+#define FOR_PAGES(s, pg)                                                                   \
+  for (u32 li_ = 0; li_ < NDIR; li_++)                                                     \
+    if ((s)->dir[li_] != &zero_leaf)                                                       \
+      for (u32 pg = li_ * LEAF_PAGES, e_ = pg + LEAF_PAGES; pg < e_; pg++)
 /* the space whose page the writer writes now (0: none): it does not go
    meanwhile (mx__vm_space_free waits) */
 static struct vm_space *volatile wspace;
@@ -111,14 +147,12 @@ static struct vm_space *volatile wspace;
 static struct vm_space *wfor;
 /* every space; a frame's page is of spaces[frame_space[f]] (one LRU over
    all of them: oldest, evict, the writer) */
-#define MAX_SPACES 6
 static struct vm_space *spaces[MAX_SPACES] = {&space0};
 /* The kernel's VM, made at its boot (mx OS plan 4e, mx__vm_boot): space0 is
-   the kernel's, of one page and no windows; the spaces of programs
-   (mx__vm_space_new) get the windows it would have had, and without a size
-   of their own 128 MiB with a swap file, the frames without */
+   the kernel's, of one page and nothing of the region; the spaces of
+   programs (mx__vm_space_new) have the region, and without a size of their
+   own 128 MiB with a swap file, the frames without */
 static int boot0;
-static u32 new_nmap, new_nheap;
 /* the swap file's slots, taken (slot_take, below) */
 #define MAX_SLOTS 8192u /* 256 MiB */
 static u32 slot_bits[MAX_SLOTS / 32];
@@ -158,33 +192,50 @@ static struct {
 struct mx__vm_fast mx__vm_fast MX_ALIGNED(16);
 #define F mx__vm_fast
 _Static_assert(VMF_BASE_PAGE == MX_VM_BASE >> PAGE_SHIFT, "tlb.S");
-_Static_assert(VMF_MAP_PAGE == MX_VM_MAP_BASE >> PAGE_SHIFT, "tlb.S");
-_Static_assert(VMF_HEAP_PAGE == MX_VM_HEAP_BASE >> PAGE_SHIFT, "tlb.S");
 
-/* The tables' pages: VM's (0 .. npages), the file window's (.. + nmap),
-   the heap window's (.. + nheap). */
+
+_Static_assert(VMF_REG_PAGE == MX_VM_REGION_BASE >> PAGE_SHIFT, "tlb.S");
+_Static_assert(VMF_VM_PAGES == VM_PAGES && (1u << VML_SHIFT) == LEAF_PAGES, "tlb.S");
+_Static_assert(NSEG < PIECE_HEAP, "piece[]");
+
 static u32 page_va(u32 pg) {
-  if (pg < vs->npages)
-    return MX_VM_BASE + pg * PAGE;
-  if (pg < vs->npages + vs->nmap)
-    return MX_VM_MAP_BASE + (pg - vs->npages) * PAGE;
-  return MX_VM_HEAP_BASE + (pg - vs->npages - vs->nmap) * PAGE;
+  return pg < VM_PAGES ? MX_VM_BASE + pg * PAGE : MX_VM_REGION_BASE + (pg - VM_PAGES) * PAGE;
 }
 
-/* The page of va, or ~0 (outside the windows in use). */
+/* What piece[] says of a page of the region: 0 not in use, PIECE_HEAP a
+   heap's, else the mapped file's seg + 1 (the pages of its last 2 MiB after
+   the file's end are not in use) */
+static u32 piece_of(const struct vm_space *s, u32 pg) {
+  if (pg < VM_PAGES || pg - VM_PAGES >= s->nreg)
+    return 0;
+  u32 k = s->piece[(pg - VM_PAGES) / LEAF_PAGES];
+  if (k && k != PIECE_HEAP && pg - s->seg[k - 1].pg >= s->seg[k - 1].npg)
+    return 0;
+  return k;
+}
+
+/* The page of va, or ~0 (outside the VM window in use and the region's
+   pieces in use). */
 static u32 va_page(u32 va) {
   if (va - MX_VM_BASE < vs->npages * PAGE)
     return (va - MX_VM_BASE) >> PAGE_SHIFT;
-  if (va - MX_VM_MAP_BASE < vs->nmap * PAGE)
-    return vs->npages + ((va - MX_VM_MAP_BASE) >> PAGE_SHIFT);
-  if (va - MX_VM_HEAP_BASE < vs->nheap * PAGE)
-    return vs->npages + vs->nmap + ((va - MX_VM_HEAP_BASE) >> PAGE_SHIFT);
-  return ~0u;
+  u32 pg = VM_PAGES + ((va - MX_VM_REGION_BASE) >> PAGE_SHIFT);
+  return va >= MX_VM_REGION_BASE && piece_of(vs, pg) ? pg : ~0u;
 }
 
-/* a page of the file window: read-only */
-static int is_mapped(u32 pg) { return pg - vs->npages < vs->nmap; }
-static u32 npages_all(void) { return vs->npages + vs->nmap + vs->nheap; }
+/* a page of a mapped file: read-only */
+static int is_mapped_s(const struct vm_space *s, u32 pg) {
+  u32 k = piece_of(s, pg);
+  return k && k != PIECE_HEAP;
+}
+static int is_mapped(u32 pg) { return is_mapped_s(vs, pg); }
+
+/* The TLB entry of a page (with a trace: of each of its blocks, bi = page *
+   BPP + block), 0: none; and what the trace saw of a block. */
+static u8 *pslot(struct vm_space *s, u32 bi);
+#define PSLOT(s, bi) (*pslot(s, bi))
+static u8 *seen_at(u32 bi);
+#define SEEN(bi) (*seen_at(bi))
 
 void mx__vm_code(void) { vs->code = 1; }
 
@@ -218,6 +269,141 @@ static u8 *frame_ptr(u32 f) { return vm.frames + f * PAGE; }
 static inline void frame_freed(u32 f) {
   if (f < vm.free_hint)
     vm.free_hint = f;
+}
+
+/* ---- the tables' leaves ------------------------------------------------------ */
+
+static u8 *pslot(struct vm_space *s, u32 bi) {
+  if (vm.bpp == 1)
+    return &LEAF(s, bi)->page_slot[bi % LEAF_PAGES];
+  return &LEAF(s, bi / BPP)->bslot[bi % (LEAF_PAGES * BPP)];
+}
+static u8 *seen_at(u32 bi) { return &LEAF(vs, bi / BPP)->seen[bi % (LEAF_PAGES * BPP)]; }
+
+/* Blocks of BLK_BYTES for the leaves: cut from the VM's first table memory
+   (slab[0], mx_vm_init) and then from frames, taken out of the pool one at
+   a time (pinned, no space's) and given back when all of a frame's blocks
+   are free again. */
+#define BLK_BYTES VML_SIZE
+#define NSLAB 96
+static struct {
+  u8 *mem;  /* PAGE bytes, 0: not there */
+  u32 used; /* a bit a block */
+} slab[NSLAB];
+static int frame_take(void);
+static u32 evict(void);
+static void vm_fatal(const char *what, u32 pg) __attribute__((noreturn));
+
+/* A block, zeroed, or 0 (every slab full). Thread code with the lock held
+   (a frame for it may be another page's: evict), or the VM starting. */
+static void *blk_take(void) {
+  for (;;) {
+    int was = mx_di(), room = -1;
+    for (int i = 0; i < NSLAB; i++) {
+      if (!slab[i].mem)
+        room = room < 0 ? i : room;
+      else if (slab[i].used != ~0u) {
+        u32 b = (u32)__builtin_ctz(~slab[i].used);
+        slab[i].used |= 1u << b;
+        mx_irq_restore(was);
+        void *p = slab[i].mem + b * BLK_BYTES;
+        __builtin_memset(p, 0, BLK_BYTES);
+        return p;
+      }
+    }
+    int f = room < 0 ? -1 : frame_take();
+    mx_irq_restore(was);
+    if (room < 0)
+      return 0;
+    u32 fr = f >= 0 ? (u32)f : evict();
+    was = mx_di();
+    vm.page_of[fr] = FRAME_PINNED;
+    vm.frame_space[fr] = 0; /* the VM's: not back to the pool with a program's space */
+    vm.pinned_frames++;
+    slab[room].mem = frame_ptr(fr);
+    slab[room].used = 0;
+    mx_irq_restore(was);
+  }
+}
+
+/* Interrupts off. */
+static void blk_give(void *p) {
+  for (int i = 0; i < NSLAB; i++)
+    if (slab[i].mem && (u32)((u8 *)p - slab[i].mem) < PAGE) {
+      slab[i].used &= ~(1u << ((u32)((u8 *)p - slab[i].mem) / BLK_BYTES));
+      if (!slab[i].used && i) { /* its frame back to the pool */
+        u32 f = (u32)(slab[i].mem - vm.frames) / PAGE;
+        slab[i].mem = 0;
+        vm.page_of[f] = 0;
+        vm.nfree++;
+        frame_freed(f);
+        vm.pinned_frames--;
+      }
+      return;
+    }
+}
+
+/* Page pg of space s has a leaf from now: before anything is written of a
+   page that may have none (a page not resident; reading needs none). Its
+   pages that come from a file are marked. Thread code with the lock held,
+   or the VM starting. */
+static void leaf_need(struct vm_space *s, u32 pg) {
+  u32 li = pg / LEAF_PAGES;
+  if (s->dir[li] != &zero_leaf)
+    return;
+  struct vm_leaf *l = blk_take();
+  u8 *x = l && vm.bpp > 1 ? blk_take() : 0;
+  u32 *h = l && s->hist ? blk_take() : 0;
+  if (!l || (vm.bpp > 1 && !x) || (s->hist && !h))
+    vm_fatal("out of memory for the page tables", pg);
+  l->bslot = x ? x : zero_blk, l->seen = x ? x + 256 : zero_blk + 256;
+  l->hist = h;
+  for (u32 i = 0; i < s->nseg; i++)
+    if (s->seg[i].fd >= 0)
+      for (u32 q = li * LEAF_PAGES; q < (li + 1) * LEAF_PAGES; q++)
+        if (q - s->seg[i].pg < s->seg[i].npg)
+          l->flags[q % LEAF_PAGES] = PG_FILE;
+  int was = mx_di();
+  s->dir[li] = l;
+  mx_irq_restore(was);
+}
+
+/* Leaf li of space s goes: none of its pages resident, pinned or in the
+   TLB, their swap slots given back. Interrupts off. */
+static void leaf_drop(struct vm_space *s, u32 li) {
+  struct vm_leaf *l = s->dir[li];
+  if (l == &zero_leaf)
+    return;
+  s->dir[li] = &zero_leaf;
+  if (l->bslot != zero_blk)
+    blk_give(l->bslot);
+  if (l->hist)
+    blk_give(l->hist);
+  blk_give(l);
+}
+
+u32 mx__vm_dbg_zero; /* times zero_check found it written */
+/* zero_leaf is what it was made as: a write through a directory entry
+   without a leaf (a missing leaf_need) is found at the next vblank, not
+   as another page's wrong state much later. Interrupts off. */
+static void zero_check(void) {
+  const u32 *w = (const u32 *)(const void *)&zero_leaf;
+  u32 any = 0;
+  for (u32 i = 0; i < VML_HIST / 4; i++)
+    any |= w[i];
+  for (u32 i = 0; i < sizeof zero_blk; i++)
+    any |= zero_blk[i];
+  if (any || zero_leaf.hist) {
+    __builtin_memset(&zero_leaf, 0, VML_HIST + 4);
+    __builtin_memset(zero_blk, 0, sizeof zero_blk);
+    mx__vm_dbg_zero++;
+  }
+}
+
+static void space_clear(struct vm_space *s) {
+  __builtin_memset(s, 0, sizeof *s);
+  for (u32 i = 0; i < NDIR; i++)
+    s->dir[i] = &zero_leaf;
 }
 
 
@@ -257,7 +443,7 @@ static u32 tlb_take(void) {
   F.next_slot = F.next_of[s];
   u32 old = F.slot_page[s];
   if (old)
-    vs->page_slot[old - 1] = 0;
+    PSLOT(vs, old - 1) = 0;
   F.slot_page[s] = 0;
   return s;
 }
@@ -272,11 +458,11 @@ static void tlb_clear(u32 s) { tlb_write(s, 0, 0xE0000000u + ((48 + s) << 13), 0
    only once a store to it was seen in this interval, so the first one is
    seen in each (TLB modified). */
 static u32 tr_seen(u32 bi) {
-  u32 v = vm.tr.seen[bi];
+  u32 v = SEEN(bi);
   return (v >> 2) == (vm.tr.epoch & 63) ? v & 3 : 0;
 }
 static void blk_write(u32 s, u32 pg, u32 b) {
-  u32 lo = vs->lo[pg] + (b * BLK >> 12 << 6);
+  u32 lo = LO(vs, pg) + (b * BLK >> 12 << 6);
   if (vm.dbit && !(tr_seen(pg * BPP + b) & 2))
     lo &= ~LO_D;
   tlb_write(s, PM4K, (page_va(pg) + b * BLK) | mx__asid, lo, lo + (4096 >> 12 << 6));
@@ -297,7 +483,7 @@ static void stale(u32 kind, u32 bi, u32 s) {
     u32 *d = mx__vm_dbg_stale + 1 + n * 6;
     d[0] = kind, d[1] = bi, d[2] = s, d[3] = s < TLB_N ? F.slot_page[s] : ~0u, d[4] = vs->id, d[5] = F.refills;
   }
-  vs->page_slot[bi] = 0;
+  PSLOT(vs, bi) = 0;
 }
 
 /* Page pg's entry as lo[] says: written (a new one if it has none) when
@@ -309,12 +495,12 @@ static void tlb_sync_s(struct vm_space *s, u32 pg) {
     /* another space's: none of its pages is in the TLB (cleared at the
        switch, mx__vm_space_switch) */
     for (u32 b = 0; b < vm.bpp; b++)
-      s->page_slot[pg * vm.bpp + b] = 0;
+      PSLOT(s, pg * vm.bpp + b) = 0;
     return;
   }
-  u32 lo = vs->lo[pg];
+  u32 lo = LO(vs, pg);
   for (u32 b = 0; b < vm.bpp; b++) {
-    u32 bi = pg * vm.bpp + b, s = vs->page_slot[bi];
+    u32 bi = pg * vm.bpp + b, s = PSLOT(vs, bi);
     if (s && F.slot_page[s] != bi + 1) {
       stale(1, bi, s);
       s = 0;
@@ -323,7 +509,7 @@ static void tlb_sync_s(struct vm_space *s, u32 pg) {
       if (s) {
         tlb_clear(s);
         F.slot_page[s] = 0;
-        vs->page_slot[bi] = 0;
+        PSLOT(vs, bi) = 0;
       }
     } else if (vm.bpp > 1) {
       if (s)
@@ -331,7 +517,7 @@ static void tlb_sync_s(struct vm_space *s, u32 pg) {
     } else {
       if (!s) {
         s = tlb_take();
-        vs->page_slot[bi] = (u8)s;
+        PSLOT(vs, bi) = (u8)s;
         F.slot_page[s] = (u16)(bi + 1);
       }
       tlb_write(s, PM16K, page_va(pg) | mx__asid, lo, lo + (HALF >> 12 << 6));
@@ -402,7 +588,7 @@ static void tr_push(u32 e) {
 static void tr_note(u32 bi, int write) {
   u32 had = tr_seen(bi), bit = write ? 2u : 1u;
   if (!(had & bit)) {
-    vm.tr.seen[bi] = (u8)((vm.tr.epoch & 63) << 2 | had | bit | 1);
+    SEEN(bi) = (u8)((vm.tr.epoch & 63) << 2 | had | bit | 1);
     tr_push((write ? (u32)MX_VM_TR_WRITE : (u32)MX_VM_TR_READ) << 30 | bi);
   }
 }
@@ -412,10 +598,10 @@ static void tr_note(u32 bi, int write) {
 static void blk_fill(u32 pg, u32 va, int write) {
   u32 b = (va - page_va(pg)) / BLK, bi = pg * BPP + b;
   tr_note(bi, write);
-  u32 s = vs->page_slot[bi];
+  u32 s = PSLOT(vs, bi);
   if (!s) {
     s = tlb_take();
-    vs->page_slot[bi] = (u8)s;
+    PSLOT(vs, bi) = (u8)s;
     F.slot_page[s] = (u16)(bi + 1);
   }
   blk_write(s, pg, b);
@@ -442,12 +628,14 @@ static void tr_tick(void) {
     u32 q = F.slot_page[i];
     if (q) {
       tlb_clear(i);
-      vs->page_slot[q - 1] = 0;
+      PSLOT(vs, q - 1) = 0;
       F.slot_page[i] = 0;
     }
   }
   if (!(++vm.tr.epoch & 63))
-    __builtin_memset(vm.tr.seen, 0, npages_all() * BPP);
+    for (u32 li = 0; li < NDIR; li++)
+      if (vs->dir[li] != &zero_leaf)
+        __builtin_memset(vs->dir[li]->seen, 0, LEAF_PAGES * BPP);
   tr_push((u32)MX_VM_TR_TICK << 30 | (ms & 0x3FFFFFFFu));
 }
 
@@ -469,17 +657,22 @@ static void vblank(void) {
     u32 q = F.slot_page[i];
     if (q) {
       tlb_clear(i);
-      vs->page_slot[q - 1] = 0;
+      PSLOT(vs, q - 1) = 0;
       F.slot_page[i] = 0;
     }
   }
   /* no page has an entry now */
-  const u32 *w = (const u32 *)(const void *)vs->page_slot;
-  for (u32 i = 0, n = npages_all() / 4; i < n; i++)
-    if (w[i])
-      for (u32 k = 0; k < 4; k++)
-        if (vs->page_slot[i * 4 + k])
-          stale(2, i * 4 + k, vs->page_slot[i * 4 + k]);
+  for (u32 li = 0; li < NDIR; li++) {
+    if (vs->dir[li] == &zero_leaf)
+      continue;
+    const u32 *w = (const u32 *)(const void *)vs->dir[li]->page_slot;
+    for (u32 i = 0; i < LEAF_PAGES / 4; i++)
+      if (w[i])
+        for (u32 k = 0; k < 4; k++)
+          if (PSLOT(vs, li * LEAF_PAGES + i * 4 + k))
+            stale(2, li * LEAF_PAGES + i * 4 + k, PSLOT(vs, li * LEAF_PAGES + i * 4 + k));
+  }
+  zero_check();
 }
 
 void mx_vm_trace_mark(u32 tag) {
@@ -526,7 +719,7 @@ int mx_vm_trace_save(const char *path) {
     int was = mx_di();
     u32 n = flog.n, lost = flog.lost;
     mx_irq_restore(was);
-    struct mx_vm_trace_head h = {MX_VM_TRACE_MAGIC, 2, PAGE, 0, vs->npages, vs->nmap,
+    struct mx_vm_trace_head h = {MX_VM_TRACE_MAGIC, 2, PAGE, 0, VM_PAGES, vs->nreg,
                                  vm.nframes, 0, n, lost};
     int fd = mx_fio_open(path, MX_FIO_WRONLY | MX_FIO_CREAT | MX_FIO_TRUNC);
     if (fd < 0)
@@ -540,7 +733,7 @@ int mx_vm_trace_save(const char *path) {
   int was = mx_di();
   u32 n = vm.tr.n, lost = vm.tr.lost;
   mx_irq_restore(was);
-  struct mx_vm_trace_head h = {MX_VM_TRACE_MAGIC, 1, PAGE, BLK, vs->npages, vs->nmap,
+  struct mx_vm_trace_head h = {MX_VM_TRACE_MAGIC, 1, PAGE, BLK, VM_PAGES, vs->nreg,
                                vm.nframes, vm.tr.every_ms, n, lost};
   int fd = mx_fio_open(path, MX_FIO_WRONLY | MX_FIO_CREAT | MX_FIO_TRUNC);
   if (fd < 0)
@@ -671,7 +864,7 @@ void mx__vm_shutdown(void) {
   swap_left = vm.fd;
   int was = mx_di();
   vm.active = 0;
-  F.npages = F.nmap = F.nheap = 0;
+  F.npages = F.nreg = 0;
   for (u32 i = 0; i < TLB_N; i++) {
     F.slot_page[i] = 0;
     if (tlb_fixed[i] != 1)
@@ -700,62 +893,41 @@ static int page_in(u32 f);
 static struct vm_space *space_in(u32 f);
 static void slot_give(u32 slot);
 
-/* Another address space: the same windows as the first (VM, the file
-   window, the heap window), every page new (zero) and none from a file,
-   sharing the frames (one LRU over all spaces) and the swap file. Returns
-   it, or 0 (VM off, a trace, no frames for its tables). Thread code. */
+/* Another address space: the VM window and the region, every page new
+   (zero) and none from a file, sharing the frames (one LRU over all
+   spaces) and the swap file. It takes no memory until its pages are
+   touched (the leaves). Returns it, or 0 (VM off, a trace, MAX_SPACES of
+   them). Thread code. */
 struct vm_space *mx__vm_space_new(u32 size) {
   if (!vm.active || vm.bpp != 1)
     return 0;
   /* its VM: size bytes, or the first space's (which is no more than the
      frames when the VM came on without a swap file: a program that brings
      one, or uses MXOS's, asks for its own size) */
-  u32 np = space0.npages, nmap = space0.nmap, nheap = space0.nheap;
-  if (boot0) {
-    nmap = new_nmap, nheap = new_nheap;
-    if (!size)
-      size = vm.fd >= 0 ? 128u << 20 : vm.nframes * PAGE;
-  }
+  u32 np = space0.npages;
+  if (boot0 && !size)
+    size = vm.fd >= 0 ? 128u << 20 : vm.nframes * PAGE;
   if (size) {
     if (size > MX_VM_LIMIT - MX_VM_BASE)
       size = MX_VM_LIMIT - MX_VM_BASE;
     np = size / PAGE;
-    if (np + nmap + nheap > 0xFFFE)
-      np = 0xFFFE - nmap - nheap;
   }
+  lock();
   u32 id = 1;
   while (id < MAX_SPACES && spaces[id])
     id++;
-  if (id == MAX_SPACES)
+  if (id == MAX_SPACES) {
+    unlock();
     return 0;
-  /* the struct and its tables in pinned frames of the pool, reached through
-     MX_PHYS_WIN (a global entry): every process's threads may read them
-     (the LRU takes any space's pages), not only this program's (its core
-     heap is mapped under its ASID) */
-  u32 nt = np + nmap + nheap;
-  u32 head = (sizeof(struct vm_space) + 15) & ~15u;
-  u32 bytes = head + nt * (4 + 2 + 2 + 1 + 1 + 1 + 4) + 16 * 7;
-  u8 *m = mx__vm_frames_take(bytes);
-  if (!m)
-    return 0;
-  __builtin_memset(m, 0, (bytes + PAGE - 1) & ~(PAGE - 1));
-  struct vm_space *n = (struct vm_space *)m;
-  u8 *t = m + head;
-#define TAKE(field, size) (n->field = (void *)t, t += ((size) + 15) & ~15u)
-  TAKE(lo, nt * 4);
-  TAKE(stamp, nt * 4);
-  TAKE(frame_of, nt * 2);
-  TAKE(slot_of, nt * 2);
-  TAKE(flags, nt);
-  TAKE(pins, nt);
-  TAKE(page_slot, nt);
-#undef TAKE
+  }
+  struct vm_space *n = &space_mem[id];
+  space_clear(n);
   n->id = id;
-  n->npages = np, n->nmap = nmap, n->nheap = nheap;
-  n->bytes = bytes;
+  n->npages = np, n->nreg = REG_PAGES;
   int was = mx_di();
   spaces[id] = n;
   mx_irq_restore(was);
+  unlock();
   return n;
 }
 
@@ -769,18 +941,14 @@ void mx__vm_space_switch(struct vm_space *n) {
       u32 q = F.slot_page[i];
       if (q) {
         tlb_clear(i);
-        vs->page_slot[q - 1] = 0;
+        PSLOT(vs, q - 1) = 0;
         F.slot_page[i] = 0;
       }
     }
     vs = n;
-    F.lo = n->lo;
-    F.page_slot = n->page_slot;
-    F.stamp = n->stamp;
-    F.hist = n->hist;
+    F.dir = n->dir;
     F.npages = vm.bpp == 1 ? n->npages : 0;
-    F.nmap = vm.bpp == 1 ? n->nmap : 0;
-    F.nheap = vm.bpp == 1 ? n->nheap : 0;
+    F.nreg = vm.bpp == 1 ? n->nreg : 0;
   }
   mx_irq_restore(was);
 }
@@ -826,8 +994,8 @@ void mx__vm_tlb_again(void) {
     return;
   int was = mx_di();
   tlb_init(tlb_flo, tlb_fhi);
-  for (u32 pg = 0; pg < npages_all(); pg++)
-    vs->page_slot[pg] = 0;
+  FOR_PAGES(vs, pg)
+    PSLOT(vs, pg) = 0;
   mx_irq_restore(was);
 }
 
@@ -849,7 +1017,7 @@ void mx__vm_tlb_fix(void) {
       continue;
     u32 q = F.slot_page[i];
     if (q) {
-      vs->page_slot[q - 1] = 0;
+      PSLOT(vs, q - 1) = 0;
       F.slot_page[i] = 0;
     }
     tlb_fixed[i] = 1;
@@ -938,11 +1106,13 @@ void mx__vm_space_free(struct vm_space *n) {
       frame_freed(f);
       vm.pinned_frames--;
     }
-  for (u32 pg = 0; pg < n->npages + n->nmap + n->nheap; pg++) {
-    slot_give(n->slot_of[pg]);
-    if (n->pins[pg]) /* its program pinned it and ended: not counted any more */
+  FOR_PAGES(n, pg) {
+    slot_give(SLOT_OF(n, pg));
+    if (PINS(n, pg)) /* its program pinned it and ended: not counted any more */
       vm.st.pinned--;
   }
+  for (u32 li = 0; li < NDIR; li++)
+    leaf_drop(n, li);
   /* its pins still to drop after a transfer: gone with it */
   for (u32 i = 0; i < nlater;)
     if (later[i].s == n)
@@ -980,7 +1150,6 @@ void mx__vm_space_free(struct vm_space *n) {
       if (!mx__vm_uses_fd(fd))
         mx_fio_close(fd);
     }
-  mx__vm_frames_give(n, n->bytes);
 }
 
 /* fd is the VM's: its swap file, or a file of a space's pages (its ELF, a
@@ -1013,24 +1182,24 @@ void mx__vm_swap_close(void) {
 
 /* Map resident page pg; write: the access is a store. Interrupts off. */
 static void map_s(struct vm_space *s, u32 pg, int write) {
-  if ((write || !vm.dbit) && pg - s->npages >= s->nmap) /* mapped files: never D */
-    s->flags[pg] |= PG_DIRTY;
-  u32 f = s->frame_of[pg] - 1u;
+  if ((write || !vm.dbit) && !is_mapped_s(s, pg)) /* mapped files: never D */
+    FLAGS(s, pg) |= PG_DIRTY;
+  u32 f = FRAME_OF(s, pg) - 1u;
   /* not global (no LO_G): the process's, under its ASID */
-  s->lo[pg] = mx_paddr_of(frame_ptr(f)).v >> 12 << 6 | LO_CACHED | LO_V |
-              (s->flags[pg] & PG_DIRTY ? LO_D : 0);
-  s->flags[pg] |= PG_REF;
-  s->stamp[pg] = F.refills;
+  LO(s, pg) = mx_paddr_of(frame_ptr(f)).v >> 12 << 6 | LO_CACHED | LO_V |
+              (FLAGS(s, pg) & PG_DIRTY ? LO_D : 0);
+  FLAGS(s, pg) |= PG_REF;
+  STAMP(s, pg) = F.refills;
   tlb_sync_s(s, pg);
 }
 static void map(u32 pg, int write) { map_s(vs, pg, write); }
 
 static void unmap_s(struct vm_space *s, u32 pg) {
-  s->lo[pg] = 0;
+  LO(s, pg) = 0;
   tlb_sync_s(s, pg);
-  if (vm.tr.seen && s == vs) /* the trace: touched again, recorded again */
+  if (vm.bpp > 1 && s == vs && LEAF(s, pg) != &zero_leaf) /* the trace: touched again, recorded again */
     for (u32 b = 0; b < BPP; b++)
-      vm.tr.seen[pg * BPP + b] = 0;
+      SEEN(pg * BPP + b) = 0;
 }
 static void unmap(u32 pg) { unmap_s(vs, pg); }
 
@@ -1063,7 +1232,7 @@ static int page_in(u32 f) {
 }
 
 static void frame_give_s(struct vm_space *s, u32 pg, u32 f) {
-  s->frame_of[pg] = (u16)(f + 1);
+  FRAME_OF(s, pg) = (u16)(f + 1);
   vm.page_of[f] = (u16)(pg + 1);
   vm.frame_space[f] = (u8)s->id;
 }
@@ -1121,18 +1290,17 @@ int mx__vm_exception(struct mx__vm_x *x) {
     u32 *d = mx__vm_dbg_last;
     d[3] = d[0] == va && d[1] == x->epc ? d[3] + 1 : 1;
     d[0] = va, d[1] = x->epc, d[2] = x->cause, d[4] = pg;
-    d[5] = pg != ~0u ? vs->lo[pg] : 0;
-    d[6] = pg != ~0u ? (u32)vs->flags[pg] | (u32)vs->frame_of[pg] << 8 | (u32)vs->pins[pg] << 24 : 0;
-    d[7] = pg != ~0u ? vs->page_slot[pg * vm.bpp] : 0;
+    d[5] = pg != ~0u ? LO(vs, pg) : 0;
+    d[6] = pg != ~0u ? (u32)FLAGS(vs, pg) | (u32)FRAME_OF(vs, pg) << 8 | (u32)PINS(vs, pg) << 24 : 0;
+    d[7] = pg != ~0u ? PSLOT(vs, pg * vm.bpp) | (u32)(LEAF(vs, pg) != &zero_leaf) << 8 : 0;
     d[8] = vs->id, d[9] = mx__asid, d[10] = x->status, d[11] = vs->npages;
   }
   if (code < 1 || code > 3 || pg == ~0u) {
       mx__exception_note = va - MX_VM_BASE < MX_VM_LIMIT - MX_VM_BASE
                              ? "VM: outside the VM in use (mx_vm_size)"
-                         : va - MX_VM_MAP_BASE < MX_VM_MAP_LIMIT - MX_VM_MAP_BASE
-                             ? "VM: in the file window, but not in a mapped file"
-                         : va - MX_VM_HEAP_BASE < MX_VM_HEAP_LIMIT - MX_VM_HEAP_BASE
-                             ? "VM: in the heap window, but not in a heap (mx_heap_create)"
+                         : va - MX_VM_REGION_BASE < MX_VM_REGION_LIMIT - MX_VM_REGION_BASE
+                             ? "VM: not in a mapped file (mx_vm_map_file) or a heap of pages "
+                               "(mx_heap_create)"
                              : 0;
     return VMX_FATAL;
   }
@@ -1142,32 +1310,34 @@ int mx__vm_exception(struct mx__vm_x *x) {
       mx__exception_note = "VM: a store to a mapped file (mx_vm_map_file: read-only)";
       return VMX_FATAL;
     }
-    if (!vs->frame_of[pg] || (vs->flags[pg] & PG_BUSY)) {
+    if (!FRAME_OF(vs, pg) || (FLAGS(vs, pg) & PG_BUSY)) {
       mx__exception_note = "VM: TLB modified on a page that is not resident";
       return VMX_FATAL;
     }
     if (vm.bpp > 1)
       blk_fill(pg, va, 1);
-    vs->flags[pg] |= PG_DIRTY;
-    vs->lo[pg] |= LO_D;
-    vs->stamp[pg] = F.refills;
+    FLAGS(vs, pg) |= PG_DIRTY;
+    LO(vs, pg) |= LO_D;
+    STAMP(vs, pg) = F.refills;
     tlb_sync(pg);
     return VMX_RETURN;
   }
   F.refills++;
-  vs->stamp[pg] = F.refills;
-  if (vs->hist)
-    vs->hist[pg]++;
+  if (LEAF(vs, pg) != &zero_leaf) { /* else a page never touched: the thread makes its leaf */
+    STAMP(vs, pg) = F.refills;
+    if (LEAF(vs, pg)->hist)
+      LEAF(vs, pg)->hist[pg % LEAF_PAGES]++;
+  }
   if (x->badvaddr == x->epc + (x->cause >> 31 ? 4u : 0u)) /* an instruction fetch */
     F.refills_i++;
-  if (vs->lo[pg] & LO_V) { /* mapped, only not in the TLB */
+  if (LO(vs, pg) & LO_V) { /* mapped, only not in the TLB */
     if (vm.bpp > 1)
       blk_fill(pg, va, code == 3);
     else
       tlb_sync(pg);
     return VMX_RETURN;
   }
-  if (vs->frame_of[pg] && !(vs->flags[pg] & PG_BUSY)) { /* the clock took V away */
+  if (FRAME_OF(vs, pg) && !(FLAGS(vs, pg) & PG_BUSY)) { /* the clock took V away */
     map(pg, code == 3);
     if (vm.bpp > 1)
       blk_fill(pg, va, code == 3);
@@ -1282,7 +1452,7 @@ static void swap_io(u32 pg, u32 f, int out) { swap_io_s(vs, pg, f, out); }
 
 static void swap_io1(struct vm_space *s, u32 pg, u32 f, int out) {
   irq_check(0x10);
-  u32 slot = s->slot_of[pg] - 1u;
+  u32 slot = SLOT_OF(s, pg) - 1u;
   volatile u32 *lg = &mx__vm_swaplog[mx__vm_swapn++ & 7];
   *lg = (u32)out << 31 | slot << 16 | f << 4;
   /* again if the file server does not answer (it can drop what it sends
@@ -1362,9 +1532,11 @@ static int file_pages(int fd, u32 pg, u32 filesz, u32 offset) {
   vs->seg[i].fd = fd;
   if (i == vs->nseg)
     vs->nseg++;
+  /* the pages that have a leaf; the others when theirs is made (leaf_need) */
   int was = mx_di();
   for (u32 p = pg; p < pg + npg; p++)
-    vs->flags[p] |= PG_FILE;
+    if (LEAF(vs, p) != &zero_leaf)
+      FLAGS(vs, p) |= PG_FILE;
   mx_irq_restore(was);
   return (int)i;
 }
@@ -1398,6 +1570,7 @@ static u16 slot_take(u32 pg) {
     }
   vm_fatal("the swap file is full (its size: mc0:/MXOS/SWAP.CFG)", pg);
 }
+/* Interrupts off, or the lock held. */
 static void slot_give(u32 slot) {
   if (slot && slot <= MAX_SLOTS)
     slot_bits[(slot - 1) / 32] &= ~(1u << ((slot - 1) % 32));
@@ -1405,17 +1578,17 @@ static void slot_give(u32 slot) {
 
 /* Write page pg (busy, unmapped) out of frame f if it is dirty. */
 static void write_out_s(struct vm_space *s, u32 pg, u32 f) {
-  if (!(s->flags[pg] & PG_DIRTY)) {
+  if (!(FLAGS(s, pg) & PG_DIRTY)) {
     vm.st.drops++;
     return;
   }
   if (vm.fd < 0)
     vm_fatal("out of memory: all frames in use and no swap file", pg);
-  if (!s->slot_of[pg])
-    s->slot_of[pg] = slot_take(pg);
+  if (!SLOT_OF(s, pg))
+    SLOT_OF(s, pg) = slot_take(pg);
   swap_io_s(s, pg, f, 1);
   vm.st.swap_outs++;
-  s->flags[pg] |= PG_SWAP;
+  FLAGS(s, pg) |= PG_SWAP;
 }
 
 /* ---- the writer thread (mx_vm_config.clean_frames) ------------------------ */
@@ -1441,19 +1614,19 @@ static u32 oldest_of(u32 k, u32 *out, struct vm_space *only) {
     if (q < 0)
       continue;
     struct vm_space *s = space_in(f);
-    if ((only && s != only) || s->pins[q] || (s->flags[q] & PG_BUSY))
+    if ((only && s != only) || PINS(s, q) || (FLAGS(s, q) & PG_BUSY))
       continue;
     /* a swap file a program brought holds only its own pages: it goes with
        that program (a host: file goes with the host's run); another
        space's written page stays (a clean one may still go) */
-    if (swap_owner && s != swap_owner && (s->flags[q] & PG_DIRTY))
+    if (swap_owner && s != swap_owner && (FLAGS(s, q) & PG_DIRTY))
       continue;
     /* without a swap file only a clean page can go (dropped: from its
        file, or zero again); before, the oldest one was taken, and a
        written one ended the program though clean ones were there */
-    if (vm.fd < 0 && (s->flags[q] & PG_DIRTY))
+    if (vm.fd < 0 && (FLAGS(s, q) & PG_DIRTY))
       continue;
-    u32 a = F.refills - s->stamp[q], i = n < k ? n++ : k;
+    u32 a = F.refills - STAMP(s, q), i = n < k ? n++ : k;
     if (i == k && a <= age[k - 1])
       continue;
     if (i == k)
@@ -1482,7 +1655,7 @@ static int dirty_candidate(void) {
   u32 n = oldest_of(k, pg, own);
   int q = -1;
   for (u32 i = 0; i < n && q < 0; i++)
-    if (OUT_SPACE(pg[i])->flags[OUT_PAGE(pg[i])] & PG_DIRTY)
+    if (FLAGS(OUT_SPACE(pg[i]), OUT_PAGE(pg[i])) & PG_DIRTY)
       q = (int)pg[i];
   mx_irq_restore(was);
   return q;
@@ -1519,29 +1692,29 @@ static void writer(void *arg) {
       if (q < 0)
         break;
       struct vm_space *s = OUT_SPACE((u32)q);
-      u32 pg = OUT_PAGE((u32)q), f = s->frame_of[pg] - 1u;
+      u32 pg = OUT_PAGE((u32)q), f = FRAME_OF(s, pg) - 1u;
       /* pinned for the write (not evicted, not moved); clean from now: a
          store meanwhile makes it dirty again (TLB modified; on PCSX2, which
          ignores D, it is unmapped and dirty when mapped again) */
       int was = mx_di();
-      s->pins[pg]++;
-      s->flags[pg] &= (u8)~PG_DIRTY;
+      PINS(s, pg)++;
+      FLAGS(s, pg) &= (u8)~PG_DIRTY;
       if (vm.dbit) {
-        s->lo[pg] &= ~LO_D;
+        LO(s, pg) &= ~LO_D;
         tlb_sync_s(s, pg);
       } else
         unmap_s(s, pg);
       mx_irq_restore(was);
-      if (!s->slot_of[pg])
-        s->slot_of[pg] = slot_take(pg);
+      if (!SLOT_OF(s, pg))
+        SLOT_OF(s, pg) = slot_take(pg);
       wspace = s;
       unlock();
       swap_io_s(s, pg, f, 1);
       wlock();
       wspace = 0;
       was = mx_di();
-      s->pins[pg]--;
-      s->flags[pg] |= PG_SWAP;
+      PINS(s, pg)--;
+      FLAGS(s, pg) |= PG_SWAP;
       mx_irq_restore(was);
       vm.st.writer_outs++;
     }
@@ -1629,14 +1802,14 @@ static u32 evict_of(struct vm_space *only) {
   }
   struct vm_space *s = OUT_SPACE(o);
   u32 pg = OUT_PAGE(o);
-  u32 fr = s->frame_of[pg] - 1u;
+  u32 fr = FRAME_OF(s, pg) - 1u;
   unmap_s(s, pg);
-  s->flags[pg] |= PG_BUSY;
+  FLAGS(s, pg) |= PG_BUSY;
   mx_irq_restore(was);
   write_out_s(s, pg, fr);
   was = mx_di();
-  s->flags[pg] &= (u8)~(PG_BUSY | PG_DIRTY | PG_REF);
-  s->frame_of[pg] = 0;
+  FLAGS(s, pg) &= (u8)~(PG_BUSY | PG_DIRTY | PG_REF);
+  FRAME_OF(s, pg) = 0;
   vm.page_of[fr] = FRAME_TAKEN;
   mx_irq_restore(was);
   return fr;
@@ -1664,16 +1837,17 @@ static u32 frame_for_vs(void) {
 /* Make page pg resident at frame f (a free frame, taken), then map it. The
    lock is held. */
 static void place(u32 pg, u32 f, int write) {
+  leaf_need(vs, pg);
   int was = mx_di();
-  vs->flags[pg] |= PG_BUSY; /* another thread's fault waits */
+  FLAGS(vs, pg) |= PG_BUSY; /* another thread's fault waits */
   mx_irq_restore(was);
-  if (vs->flags[pg] & PG_LOST)
+  if (FLAGS(vs, pg) & PG_LOST)
     vm_fatal("its page was in the swap file of a device that was removed", pg);
-  if (vs->flags[pg] & PG_SWAP) {
+  if (FLAGS(vs, pg) & PG_SWAP) {
     swap_io(pg, f, 0);
     code_sync();
     vm.st.swap_ins++;
-  } else if (vs->flags[pg] & PG_FILE) {
+  } else if (FLAGS(vs, pg) & PG_FILE) {
     file_in(pg, f);
     code_sync();
     vm.st.file_ins++;
@@ -1682,7 +1856,7 @@ static void place(u32 pg, u32 f, int write) {
     vm.st.zero_fills++;
   }
   was = mx_di();
-  vs->flags[pg] &= (u8)~PG_BUSY;
+  FLAGS(vs, pg) &= (u8)~PG_BUSY;
   frame_give(pg, f);
   map(pg, write);
   mx_irq_restore(was);
@@ -1690,8 +1864,9 @@ static void place(u32 pg, u32 f, int write) {
 
 /* Page pg resident and mapped. The lock is held. */
 static void fault_in(u32 pg, int write) {
+  leaf_need(vs, pg);
   int was = mx_di();
-  if (vs->frame_of[pg]) {
+  if (FRAME_OF(vs, pg)) {
     map(pg, write);
     mx_irq_restore(was);
     return;
@@ -1701,7 +1876,7 @@ static void fault_in(u32 pg, int write) {
     place(pg, frame_for_vs(), write);
     return;
   }
-  u32 c0 = mx_count(), outs = vm.st.swap_outs, fl = vs->flags[pg];
+  u32 c0 = mx_count(), outs = vm.st.swap_outs, fl = FLAGS(vs, pg);
   place(pg, frame_for_vs(), write);
   u32 kind = fl & PG_SWAP ? MX_VM_FAULT_SWAP : fl & PG_FILE ? MX_VM_FAULT_FILE : MX_VM_FAULT_ZERO;
   flog_push(page_va(pg) | kind | flog.src | (write ? MX_VM_FAULT_WRITE : 0) |
@@ -1739,12 +1914,18 @@ void mx__vm_slow(struct mx__vm_x *f) {
     break_fn(insn >> 6 & 0xFFFFF);
     mx__vm_resume(f);
   }
-  u32 pg = va_page(f->badvaddr);
   mx__vm_fault_epc = f->epc, mx__vm_fault_va = f->badvaddr;
   mx__vm_where = 1;
   irq_check(0x30);
   lock();
   mx__vm_where = 2;
+  /* under the lock: another thread may have unmapped the file meanwhile */
+  u32 pg = va_page(f->badvaddr);
+  if (pg == ~0u) {
+    mx_printf("\nVM: a page fault at %p, in a file that was unmapped meanwhile\n",
+              (void *)(uintptr_t)f->badvaddr);
+    vm_fatal("a mapped file used after mx_vm_unmap_file", 0);
+  }
   vm.st.faults++;
   flog.epc = f->epc, flog.src = 0;
   fault_in(pg, (f->cause >> 2 & 31) == 3);
@@ -1770,9 +1951,9 @@ static int in_vm(const void *p, u32 bytes) {
 
 /* Frames [f0, f0 + n) hold pages a.. in order? */
 static int contiguous(u32 a, u32 n) {
-  u32 f0 = vs->frame_of[a];
+  u32 f0 = FRAME_OF(vs, a);
   for (u32 i = 0; i < n; i++)
-    if (!f0 || vs->frame_of[a + i] != f0 + i)
+    if (!f0 || FRAME_OF(vs, a + i) != f0 + i)
       return 0;
   return 1;
 }
@@ -1789,7 +1970,7 @@ static void vacate(u32 fr, u32 lo, u32 hi) {
     if (!vm.page_of[f] && (f < lo || f >= hi))
       to = (int)f;
   unmap_s(s, q);
-  s->flags[q] |= PG_BUSY;
+  FLAGS(s, q) |= PG_BUSY;
   if (to >= 0) {
     vm.nfree--;
     vm.page_of[to] = FRAME_TAKEN;
@@ -1801,7 +1982,7 @@ static void vacate(u32 fr, u32 lo, u32 hi) {
     write_out_s(s, q, fr);
   irq_check(0x20);
   was = mx_di();
-  s->flags[q] &= (u8)~PG_BUSY;
+  FLAGS(s, q) &= (u8)~PG_BUSY;
   vm.page_of[fr] = 0;
   vm.nfree++;
   frame_freed(fr);
@@ -1810,8 +1991,8 @@ static void vacate(u32 fr, u32 lo, u32 hi) {
     frame_give_s(s, q, (u32)to);
     map_s(s, q, 0);
   } else {
-    s->flags[q] &= (u8)~(PG_DIRTY | PG_REF);
-    s->frame_of[q] = 0;
+    FLAGS(s, q) &= (u8)~(PG_DIRTY | PG_REF);
+    FRAME_OF(s, q) = 0;
   }
   mx_irq_restore(was);
 }
@@ -1823,7 +2004,7 @@ static void vacate(u32 fr, u32 lo, u32 hi) {
 static void gather(u32 a, u32 n, u32 f0) {
   for (u32 i = 0; i < n; i++) {
     u32 fr = f0 + i, pg = a + i;
-    if (vs->frame_of[pg] == fr + 1 && space_in(fr) == vs)
+    if (FRAME_OF(vs, pg) == fr + 1 && space_in(fr) == vs)
       continue;
     if (page_in(fr) >= 0)
       vacate(fr, f0, f0 + n);
@@ -1831,15 +2012,15 @@ static void gather(u32 a, u32 n, u32 f0) {
     int was = mx_di();
     vm.page_of[fr] = FRAME_TAKEN;
     vm.nfree--;
-    if (vs->frame_of[pg]) { /* resident elsewhere: copy it here */
-      u32 from = vs->frame_of[pg] - 1u;
+    if (FRAME_OF(vs, pg)) { /* resident elsewhere: copy it here */
+      u32 from = FRAME_OF(vs, pg) - 1u;
       unmap(pg);
-      vs->flags[pg] |= PG_BUSY;
+      FLAGS(vs, pg) |= PG_BUSY;
       mx_irq_restore(was);
       copy_frame(fr, (int)from);
       irq_check(0x22);
       was = mx_di();
-      vs->flags[pg] &= (u8)~PG_BUSY;
+      FLAGS(vs, pg) &= (u8)~PG_BUSY;
       vm.page_of[from] = 0;
       vm.nfree++;
       frame_freed(from);
@@ -1861,7 +2042,7 @@ static int find_run(u32 a, u32 n) {
       int q = page_in(f0 + i);
       struct vm_space *s = q >= 0 ? space_in(f0 + i) : vs;
       if (vm.page_of[f0 + i] >= FRAME_PINNED ||
-          (q >= 0 && s->pins[q] && (s != vs || (u32)q < a || (u32)q >= a + n)))
+          (q >= 0 && PINS(s, q) && (s != vs || (u32)q < a || (u32)q >= a + n)))
         break;
     }
     if (i == n)
@@ -1885,7 +2066,7 @@ int mx_vm_pin(const void *p, u32 bytes, u32 flags) {
     int f0 = -1;
     /* pinned pages may be in use by a transfer: they are not moved */
     for (u32 pg = a; pg <= b && f0 == -1; pg++)
-      if (vs->pins[pg])
+      if (PINS(vs, pg))
         f0 = -2;
     if (f0 == -1)
       f0 = find_run(a, n);
@@ -1899,15 +2080,16 @@ int mx_vm_pin(const void *p, u32 bytes, u32 flags) {
   u32 lo = (u32)(uintptr_t)p, hi = lo + bytes;
   for (u32 pg = a; pg <= b; pg++) {
     u32 va = page_va(pg);
-    if ((flags & MX_VM_PIN_OVERWRITE) && va >= lo && va + PAGE <= hi && !vs->frame_of[pg]) {
+    if ((flags & MX_VM_PIN_OVERWRITE) && va >= lo && va + PAGE <= hi && !FRAME_OF(vs, pg)) {
       /* overwritten whole: a frame, nothing read into it */
+      leaf_need(vs, pg);
       int was = mx_di();
       int f = frame_take();
       mx_irq_restore(was);
       f = f >= 0 ? f : (int)evict();
       was = mx_di();
       frame_give(pg, (u32)f);
-      vs->flags[pg] |= PG_RAW;
+      FLAGS(vs, pg) |= PG_RAW;
       map(pg, 1);
       mx_irq_restore(was);
       vm.st.overwrites++;
@@ -1915,16 +2097,16 @@ int mx_vm_pin(const void *p, u32 bytes, u32 flags) {
       flog.src = MX_VM_FAULT_PIN;
       fault_in(pg, (flags & MX_VM_PIN_WRITE) != 0);
     }
-    if (vs->pins[pg] == 255)
+    if (PINS(vs, pg) == 255)
       vm_fatal("mx_vm_pin: pinned 255 times", pg);
     int was = mx_di();
-    if (!vs->pins[pg]++)
+    if (!PINS(vs, pg)++)
       vm.st.pinned++;
     if (flags & MX_VM_PIN_WRITE) {
-      vs->flags[pg] |= PG_DIRTY;
+      FLAGS(vs, pg) |= PG_DIRTY;
       map(pg, 1);
     }
-    if (vm.tr.seen) /* the trace: the blocks the DMAC or the IOP touches */
+    if (vm.bpp > 1) /* the trace: the blocks the DMAC or the IOP touches */
       for (u32 b = 0; b < BPP; b++)
         if (va + (b + 1) * BLK > lo && va + b * BLK < hi)
           tr_note(pg * BPP + b, (flags & MX_VM_PIN_WRITE) != 0);
@@ -1944,17 +2126,17 @@ void mx_vm_overwrite_done(const void *p, u32 bytes, u32 done) {
   u32 end = (u32)(uintptr_t)p + done;
   lock();
   for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b; pg++) {
-    if (!(vs->flags[pg] & PG_RAW))
+    if (!(FLAGS(vs, pg) & PG_RAW))
       continue;
     u32 va = page_va(pg), from = end > va ? end - va : 0;
-    u8 *d = frame_ptr(vs->frame_of[pg] - 1u);
+    u8 *d = frame_ptr(FRAME_OF(vs, pg) - 1u);
     if (from < PAGE) {
-      if (vs->flags[pg] & (PG_SWAP | PG_FILE)) {
+      if (FLAGS(vs, pg) & (PG_SWAP | PG_FILE)) {
         int was = mx_di();
         int t = frame_take();
         mx_irq_restore(was);
         u32 tf = t >= 0 ? (u32)t : evict();
-        if (vs->flags[pg] & PG_SWAP)
+        if (FLAGS(vs, pg) & PG_SWAP)
           swap_io(pg, tf, 0);
         else
           file_in(pg, tf);
@@ -1970,7 +2152,7 @@ void mx_vm_overwrite_done(const void *p, u32 bytes, u32 done) {
       code_sync();
     }
     int was = mx_di();
-    vs->flags[pg] &= (u8)~PG_RAW;
+    FLAGS(vs, pg) &= (u8)~PG_RAW;
     mx_irq_restore(was);
   }
   unlock();
@@ -1981,9 +2163,9 @@ void mx_vm_unpin(const void *p, u32 bytes) {
     return;
   int was = mx_di();
   for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b; pg++)
-    if (vs->pins[pg] && !--vs->pins[pg]) {
+    if (PINS(vs, pg) && !--PINS(vs, pg)) {
       vm.st.pinned--;
-      vs->flags[pg] &= (u8)~PG_RAW; /* overwritten (or not: then its contents are lost) */
+      FLAGS(vs, pg) &= (u8)~PG_RAW; /* overwritten (or not: then its contents are lost) */
     }
   mx_irq_restore(was);
 }
@@ -2019,7 +2201,7 @@ void mx_vm_unpin_after(const void *p, u32 bytes, mx_event e) {
 }
 
 static mx_paddr page_paddr(u32 pg) {
-  return mx_paddr_of(frame_ptr(vs->frame_of[pg] - 1u));
+  return mx_paddr_of(frame_ptr(FRAME_OF(vs, pg) - 1u));
 }
 
 static void pieces_fault(const void *p, u32 bytes, const char *what) __attribute__((noreturn));
@@ -2040,7 +2222,7 @@ u32 mx_vm_pieces(const void *p, u32 bytes, struct mx_vm_piece *pc, u32 max) {
     pieces_fault(p, bytes, "VM not in use there");
   u32 n = 0, off = (uintptr_t)p & (PAGE - 1);
   for (u32 pg = first_page(p), left = bytes; left;) {
-    if (!vs->pins[pg] || !vs->frame_of[pg])
+    if (!PINS(vs, pg) || !FRAME_OF(vs, pg))
       pieces_fault(p, bytes, "VM not pinned (mx_vm_pin)");
     u32 k = PAGE - off < left ? PAGE - off : left;
     mx_paddr a = mx_paddr_add(page_paddr(pg), off);
@@ -2067,7 +2249,7 @@ struct mx_vm_piece mx_vm_first_piece(const void *p, u32 bytes) {
     pieces_fault(p, bytes, "VM not in use there");
   u32 off = (uintptr_t)p & (PAGE - 1), got = 0;
   for (u32 pg = first_page(p); got < bytes; pg++, off = 0) {
-    if (!vs->pins[pg] || !vs->frame_of[pg])
+    if (!PINS(vs, pg) || !FRAME_OF(vs, pg))
       pieces_fault(p, bytes, "VM not pinned (mx_vm_pin)");
     mx_paddr a = mx_paddr_add(page_paddr(pg), off);
     if (got && pc.addr.v + got != a.v)
@@ -2113,7 +2295,7 @@ static int pin_run(u32 n, u32 align) {
         break;
       int q = page_in(f);
       struct vm_space *s = q >= 0 ? space_in(f) : vs;
-      if (q >= 0 && (s->pins[q] || (s->flags[q] & PG_BUSY)))
+      if (q >= 0 && (PINS(s, q) || (FLAGS(s, q) & PG_BUSY)))
         break;
     }
     if (i == n)
@@ -2188,18 +2370,32 @@ void mx__vm_frames_give(void *p, u32 bytes) {
   mx_irq_restore(was);
 }
 
-/* bytes (whole pages) of the heap window for a heap of pages: its
-   address, or 0 */
-u32 mx__vm_va_take(u32 bytes) {
-  u32 n = (bytes + PAGE - 1) / PAGE;
-  int was = mx_di();
-  u32 r = 0;
-  if (vm.active && vs->heap_next + n <= vs->nheap) {
-    r = MX_VM_HEAP_BASE + vs->heap_next * PAGE;
-    vs->heap_next += n;
+/* A free run of the region for npg pages, in whole pieces of 2 MiB: its
+   first piece, marked as kind's, or -1. Interrupts off, or the lock held
+   and no fault of another thread of the space meanwhile (va_page reads
+   piece[] at EXL: a byte each). */
+static int piece_take(struct vm_space *s, u32 npg, u32 kind) {
+  u32 n = (npg + LEAF_PAGES - 1) / LEAF_PAGES, lim = s->nreg / LEAF_PAGES;
+  for (u32 a = 0, run = 0; n && a < lim; a++) {
+    run = s->piece[a] ? 0 : run + 1;
+    if (run == n) {
+      for (u32 k = a + 1 - n; k <= a; k++)
+        s->piece[k] = (u8)kind;
+      return (int)(a + 1 - n);
+    }
   }
+  return -1;
+}
+
+/* bytes of the region for a heap of pages: its address, or 0. It stays the
+   space's (a heap is not given back). */
+u32 mx__vm_va_take(u32 bytes) {
+  if (!vm.active)
+    return 0;
+  int was = mx_di();
+  int a = piece_take(vs, (bytes + PAGE - 1) / PAGE, PIECE_HEAP);
   mx_irq_restore(was);
-  return r;
+  return a < 0 ? 0 : MX_VM_REGION_BASE + (u32)a * LEAF_PAGES * PAGE;
 }
 
 /* [p, p + bytes) all resident (no fault to touch or lock it) */
@@ -2211,7 +2407,7 @@ int mx__vm_resident(const void *p, u32 bytes) {
   int was = mx_di();
   int r = 1;
   for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b && r; pg++)
-    r = vs->frame_of[pg] && !(vs->flags[pg] & PG_BUSY);
+    r = FRAME_OF(vs, pg) && !(FLAGS(vs, pg) & PG_BUSY);
   mx_irq_restore(was);
   return r;
 }
@@ -2225,7 +2421,7 @@ u32 mx__vm_resident_bytes(const void *p, u32 bytes) {
   int was = mx_di();
   u32 n = 0;
   for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b; pg++)
-    n += vs->frame_of[pg] ? PAGE : 0;
+    n += FRAME_OF(vs, pg) ? PAGE : 0;
   mx_irq_restore(was);
   return n;
 }
@@ -2258,7 +2454,7 @@ static void pager(void *arg) {
          for the page being read, at most */
       for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b; pg++) {
         lock();
-        if (!vs->frame_of[pg]) {
+        if (!FRAME_OF(vs, pg)) {
           flog.src = MX_VM_FAULT_PAGER;
           fault_in(pg, 0);
         }
@@ -2306,17 +2502,17 @@ void mx__vm_discard(const void *p, u32 bytes) {
     return;
   lock();
   for (u32 pg = va_page(a), b = va_page(e - 1); pg <= b; pg++) {
-    if (vs->pins[pg] || (vs->flags[pg] & PG_BUSY))
+    if (LEAF(vs, pg) == &zero_leaf || PINS(vs, pg) || (FLAGS(vs, pg) & PG_BUSY))
       continue;
     int was = mx_di();
     unmap(pg);
-    if (vs->frame_of[pg]) {
-      vm.page_of[vs->frame_of[pg] - 1u] = 0;
+    if (FRAME_OF(vs, pg)) {
+      vm.page_of[FRAME_OF(vs, pg) - 1u] = 0;
       vm.nfree++;
-      frame_freed(vs->frame_of[pg] - 1u);
-      vs->frame_of[pg] = 0;
+      frame_freed(FRAME_OF(vs, pg) - 1u);
+      FRAME_OF(vs, pg) = 0;
     }
-    vs->flags[pg] = 0;
+    FLAGS(vs, pg) = 0;
     mx_irq_restore(was);
   }
   unlock();
@@ -2329,8 +2525,8 @@ void mx__vm_cold(const void *p, u32 bytes) {
     return;
   int was = mx_di();
   for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b; pg++)
-    if (vs->frame_of[pg])
-      vs->stamp[pg] = F.refills - 0x40000000u;
+    if (FRAME_OF(vs, pg))
+      STAMP(vs, pg) = F.refills - 0x40000000u;
   mx_irq_restore(was);
 }
 
@@ -2346,17 +2542,26 @@ const void *mx_vm_map_file(const char *path, u32 *size) {
   u32 npg = n > 0 ? ((u32)n + PAGE - 1) / PAGE : 0;
   const void *p = 0;
   lock();
-  if (npg && vs->map_next + npg <= vs->nmap) {
-    u32 pg = vs->npages + vs->map_next;
-    if (file_pages(fd, pg, (u32)n, 0) >= 0) {
-      vs->map_next += npg;
-      p = (const void *)(uintptr_t)page_va(pg);
-    }
+  /* its entry first (the seg its pieces name), then a run of the region */
+  int i = npg ? file_pages(fd, 0, 0, 0) : -1;
+  if (i >= 0) {
+    int was = mx_di();
+    int a = piece_take(vs, npg, (u32)i + 1);
+    if (a >= 0) {
+      vs->seg[i].pg = VM_PAGES + (u32)a * LEAF_PAGES;
+      vs->seg[i].npg = npg;
+      vs->seg[i].filesz = (u32)n;
+      p = (const void *)(uintptr_t)page_va(vs->seg[i].pg);
+    } else
+      vs->seg[i].fd = -1;
+    mx_irq_restore(was);
   }
   unlock();
   if (!p) {
     mx_printf("mx_vm_map_file: %s: %s\n", path,
-              n <= 0 ? "empty, or no size" : "no room (mx_vm_config.map_size, 8 files)");
+              n <= 0 ? "empty, or no size"
+              : i < 0 ? "60 files mapped already"
+                      : "no room in the region (512 MiB, in pieces of 2 MiB)");
     mx_fio_close(fd);
     return 0;
   }
@@ -2419,32 +2624,36 @@ void mx_vm_unmap_file(const void *p) {
   }
   u32 npg = vs->seg[i].npg;
   int fd = vs->seg[i].fd;
-  for (u32 q = pg; q < pg + npg; q++) {
-    if (vs->pins[q])
+  for (u32 q = pg; q < pg + npg; q++)
+    if (PINS(vs, q))
       vm_fatal("mx_vm_unmap_file: a page is pinned", q);
+  /* its pieces first: no fault brings a page of it in from now (mx__vm_slow) */
+  u32 k0 = (pg - VM_PAGES) / LEAF_PAGES, nk = 0;
+  int was0 = mx_di();
+  while (k0 + nk < NPIECE && vs->piece[k0 + nk] == i + 1)
+    vs->piece[k0 + nk++] = 0;
+  mx_irq_restore(was0);
+  for (u32 q = pg; q < pg + npg; q++) {
+    if (LEAF(vs, q) == &zero_leaf)
+      continue;
     int was = mx_di();
     unmap(q);
-    if (vs->frame_of[q]) {
-      vm.page_of[vs->frame_of[q] - 1u] = 0;
-      frame_freed(vs->frame_of[q] - 1u);
-      vs->frame_of[q] = 0;
+    if (FRAME_OF(vs, q)) {
+      vm.page_of[FRAME_OF(vs, q) - 1u] = 0;
+      frame_freed(FRAME_OF(vs, q) - 1u);
+      FRAME_OF(vs, q) = 0;
       vm.nfree++;
     }
-    vs->flags[q] = 0;
+    FLAGS(vs, q) = 0;
     mx_irq_restore(was);
   }
-  /* unmapped, its pages kept (npg) until the window's end comes back to
-     them: the window is given out from its start */
+  /* its leaves go, its entry is free */
+  int was = mx_di();
   vs->seg[i].fd = -1;
-  for (int k = 0; k >= 0;) {
-    k = -1;
-    for (u32 j = 0; j < vs->nseg; j++)
-      if (vs->seg[j].fd < 0 && vs->seg[j].npg &&
-          vs->seg[j].pg + vs->seg[j].npg == vs->npages + vs->map_next)
-        k = (int)j;
-    if (k >= 0)
-      vs->map_next -= vs->seg[k].npg, vs->seg[k].npg = 0;
-  }
+  vs->seg[i].npg = 0;
+  for (u32 k = k0; k < k0 + nk; k++)
+    leaf_drop(vs, VM_PAGES / LEAF_PAGES + k);
+  mx_irq_restore(was);
   unlock();
   mx_fio_close(fd);
 }
@@ -2482,6 +2691,8 @@ void mx__vm_report(void) {
             "server calls; %u TLB refills (%u of code; about %u ms; %u entries); %u frames pinned\n",
             s.us_lock / 1000, us_behind / 1000, writer_yields, s.io_calls, s.refills, s.refills_i,
             s.refills / (MX_EE_HZ / 1000 / MX_VM_REFILL_CYCLES), s.tlb_entries, s.pinned_frames);
+  if (mx__vm_dbg_zero)
+    mx_printf("maxsdk: VM: the tables' zero leaf was written %u times, put right\n", mx__vm_dbg_zero);
   if (mx__vm_dbg_stale[0]) {
     const u32 *d = mx__vm_dbg_stale;
     mx_printf("maxsdk: VM: %u pages with an entry not their own, put right; the first:", d[0]);
@@ -2559,21 +2770,28 @@ int mx__vm_refill_hist(struct mx_vm_hot *out, int max) {
   if (!vm.active || vm.bpp != 1)
     return -1;
   if (!vs->hist) {
-    u32 bytes = npages_all() * 4;
-    u32 *h = mx__vm_frames_take(bytes);
-    if (!h)
-      return -1;
-    __builtin_memset(h, 0, bytes);
-    int was = mx_di();
-    vs->hist = F.hist = h;
-    mx_irq_restore(was);
+    /* a block of counts for each leaf there is; a later leaf gets its own
+       (leaf_need) */
+    lock();
+    vs->hist = 1;
+    for (u32 li = 0; li < NDIR; li++)
+      if (vs->dir[li] != &zero_leaf && !vs->dir[li]->hist) {
+        u32 *h = blk_take();
+        if (!h)
+          break;
+        vs->dir[li]->hist = h;
+      }
+    unlock();
     return 0;
   }
   int n = 0;
-  for (u32 pg = 0, np = npages_all(); pg < np && n < max; pg++) {
+  FOR_PAGES(vs, pg) {
+    u32 *h = LEAF(vs, pg)->hist;
+    if (!h || n >= max)
+      continue;
     int was = mx_di();
-    u32 c = vs->hist[pg];
-    vs->hist[pg] = 0;
+    u32 c = h[pg % LEAF_PAGES];
+    h[pg % LEAF_PAGES] = 0;
     mx_irq_restore(was);
     if (c)
       out[n].va = page_va(pg), out[n].count = c, n++;
@@ -2596,32 +2814,38 @@ u32 mx__vm_check(void) {
     u32 q = vm.page_of[f];
     if (!q)
       nfree++;
-    else if (q < FRAME_PINNED && space_in(f)->frame_of[q - 1] != f + 1)
+    else if (q < FRAME_PINNED && FRAME_OF(space_in(f), q - 1) != f + 1)
       r = 1u << 28 | f;
   }
   if (!r && nfree != vm.nfree)
     r = 2u << 28;
-  for (u32 pg = 0; pg < npages_all() && !r; pg++) {
-    u32 f = vs->frame_of[pg];
+  FOR_PAGES(vs, pg) {
+    u32 f = FRAME_OF(vs, pg);
+    if (r)
+      break;
     if (f && (vm.page_of[f - 1] != pg + 1 || space_in(f - 1) != vs))
       r = 1u << 28 | (f - 1);
-    else if ((vs->lo[pg] & LO_V) &&
-             (!f || vs->lo[pg] >> 6 != mx_paddr_of(frame_ptr(f - 1)).v >> 12))
+    else if ((LO(vs, pg) & LO_V) &&
+             (!f || LO(vs, pg) >> 6 != mx_paddr_of(frame_ptr(f - 1)).v >> 12))
       r = 3u << 28 | pg;
   }
+  /* 7 << 28: something was written through a directory entry without a leaf */
+  zero_check();
+  if (!r && mx__vm_dbg_zero)
+    r = 7u << 28 | mx__vm_dbg_zero;
   for (u32 s = 0; s < TLB_N && !r; s++) {
     u32 q = F.slot_page[s];
     if (q) {
       u32 pg = (q - 1) / vm.bpp, b = (q - 1) % vm.bpp;
-      if (vs->page_slot[q - 1] != s)
+      if (PSLOT(vs, q - 1) != s)
         r = 4u << 28 | s;
       else {
         u32 pm, hi, lo0, lo1;
         tlb_read(s, &pm, &hi, &lo0, &lo1);
         if (vm.bpp > 1 ? pm != PM4K || (hi & ~0x1FFFu) != page_va(pg) + b * BLK ||
-                             (lo0 & ~LO_D) != ((vs->lo[pg] & ~LO_D) + (b * BLK >> 12 << 6)) ||
-                             (lo0 & LO_D & ~vs->lo[pg])
-                       : pm != PM16K || (hi & ~0x1FFFu) != page_va(pg) || lo0 != vs->lo[pg])
+                             (lo0 & ~LO_D) != ((LO(vs, pg) & ~LO_D) + (b * BLK >> 12 << 6)) ||
+                             (lo0 & LO_D & ~LO(vs, pg))
+                       : pm != PM16K || (hi & ~0x1FFFu) != page_va(pg) || lo0 != LO(vs, pg))
           r = 5u << 28 | s;
       }
     }
@@ -2668,26 +2892,18 @@ static void *from_win(void *p) {
   return (void *)(uintptr_t)((u32)(uintptr_t)p - MX_PHYS_WIN - mx__core_off);
 }
 static void tables_to_win(void) {
-  vs->lo = to_win(vs->lo), vs->frame_of = to_win(vs->frame_of);
-  vs->slot_of = to_win(vs->slot_of), vs->flags = to_win(vs->flags);
-  vs->pins = to_win(vs->pins), vs->page_slot = to_win(vs->page_slot);
-  vs->stamp = F.stamp = to_win(vs->stamp);
+  slab[0].mem = to_win(slab[0].mem);
   vm.page_of = to_win(vm.page_of), vm.frame_space = to_win(vm.frame_space);
   tables_win = 1;
 }
 
 static void undo_init(void) {
-  mx__phys_free(from_win(vs->lo)), vs->lo = 0;
-  mx__phys_free(from_win(vs->frame_of)), vs->frame_of = 0;
-  mx__phys_free(from_win(vs->slot_of)), vs->slot_of = 0;
-  mx__phys_free(from_win(vs->flags)), vs->flags = 0;
-  mx__phys_free(from_win(vs->pins)), vs->pins = 0;
-  mx__phys_free(from_win(vs->page_slot)), vs->page_slot = 0;
-  mx__phys_free(from_win(vs->stamp)), vs->stamp = F.stamp = 0;
+  mx__phys_free(from_win(slab[0].mem));
+  __builtin_memset(slab, 0, sizeof slab);
+  space_clear(&space0);
   mx__phys_free(from_win(vm.page_of)), vm.page_of = 0;
   mx__phys_free(from_win(vm.frame_space)), vm.frame_space = 0;
   tables_win = 0;
-  mx__phys_free(vm.tr.seen), vm.tr.seen = 0;
   mx__phys_free(vm.tr.buf), vm.tr.buf = 0;
   if (vm.lock >= 0)
     mx_bios_delete_sema(vm.lock);
@@ -2732,35 +2948,26 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
       return -1;
     }
   }
-  u32 nmap = (cfg->map_size ? cfg->map_size : 64u << 20) / PAGE;
-  if (nmap > (MX_VM_MAP_LIMIT - MX_VM_MAP_BASE) / PAGE)
-    nmap = (MX_VM_MAP_LIMIT - MX_VM_MAP_BASE) / PAGE;
-  u32 nheap = (cfg->heap_size ? cfg->heap_size : 64u << 20) / PAGE;
-  if (nheap > (MX_VM_HEAP_LIMIT - MX_VM_HEAP_BASE) / PAGE)
-    nheap = (MX_VM_HEAP_LIMIT - MX_VM_HEAP_BASE) / PAGE;
-  vm.bpp = cfg->trace ? BPP : 1; /* slot_page holds a block + 1 */
-  if ((np + nmap + nheap) * vm.bpp > 0xFFFE) {
-    nheap = 0;
-    if ((np + nmap) * vm.bpp > 0xFFFE)
-      nmap = 0xFFFE / vm.bpp > np ? 0xFFFE / vm.bpp - np : 0;
-  }
-  /* the kernel's (mx__vm_boot): its space one page, the windows for the
-     programs' spaces */
-  new_nmap = nmap, new_nheap = nheap;
+  vm.bpp = cfg->trace ? BPP : 1;
+  /* the region: all of it; with a trace what slot_page can name (a block +
+     1 in 16 bits), in whole pieces */
+  u32 nreg = REG_PAGES;
+  if (vm.bpp > 1)
+    nreg = (0xFFFEu / BPP - VM_PAGES) / LEAF_PAGES * LEAF_PAGES;
+  /* the kernel's (mx__vm_boot): its space one page and nothing of the region */
   if (boot0)
-    np = 1, nmap = nheap = 0;
-  u32 nt = np + nmap + nheap; /* the tables: VM's pages, the file window's, the heap window's */
-  vs->lo = table(nt * 4);
-  vs->frame_of = table(nt * 2);
-  vs->slot_of = table(nt * 2);
-  vs->flags = table(nt);
-  vs->pins = table(nt);
-  vs->page_slot = table(nt * vm.bpp);
-  vs->stamp = F.stamp = table(nt * 4);
+    np = 1, nreg = 0;
+  __builtin_memset(&zero_leaf, 0, sizeof zero_leaf);
+  __builtin_memset(zero_blk, 0, sizeof zero_blk);
+  zero_leaf.bslot = zero_blk, zero_leaf.seen = zero_blk + 256;
+  space_clear(&space0);
+  /* the first blocks for the leaves (64 MiB of addresses touched, less
+     with a trace or refill counts): the rest comes from frames */
+  __builtin_memset(slab, 0, sizeof slab);
+  slab[0].mem = table(PAGE);
   if (cfg->trace) {
-    vm.tr.seen = table(nt * BPP);
     vm.tr.buf = mx__phys_alloc(cfg->trace, 16);
-    if (!vm.tr.seen || !vm.tr.buf) {
+    if (!vm.tr.buf) {
       mx_printf("mx_vm_init: no core memory for the trace (%u bytes)\n", cfg->trace);
       undo_init();
       return -1;
@@ -2785,8 +2992,7 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
     nf = 0xFFFE;
   vm.page_of = table(nf * 2);
   vm.frame_space = table(nf);
-  if (!vs->lo || !vs->frame_of || !vs->slot_of || !vs->flags || !vs->pins || !vs->page_slot || !F.stamp ||
-      !vm.page_of || !vm.frame_space || nf < 4) {
+  if (!slab[0].mem || !vm.page_of || !vm.frame_space || nf < 4) {
     undo_init();
     mx_printf("mx_vm_init: not enough memory (%u frames)\n", nf);
     return -1;
@@ -2794,9 +3000,7 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   if (vm.fd < 0 && np > nf)
     np = nf;
   vs->npages = np;
-  vs->nmap = nmap;
-  vs->nheap = nheap;
-  vs->heap_next = 0;
+  vs->nreg = nreg;
   vm.pinned_frames = 0;
   /* the frames through MX_PHYS_WIN: the BIOS's mapping of them goes */
   u32 flo = mx_paddr_of(mem).v, fhi = flo + nf * PAGE;
@@ -2831,14 +3035,17 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   int faults = vm.st.zero_fills == 1 && t[1] == 1;
   vm.dbit = vm.modified_seen != 0;
   was = mx_di();
-  if (vs->frame_of[0]) {
-    vm.page_of[vs->frame_of[0] - 1u] = 0; /* free again */
-    frame_freed(vs->frame_of[0] - 1u);
-    vs->frame_of[0] = 0;
-    vm.nfree++;
+  if (LEAF(vs, 0) != &zero_leaf) {
+    if (FRAME_OF(vs, 0)) {
+      vm.page_of[FRAME_OF(vs, 0) - 1u] = 0; /* free again */
+      frame_freed(FRAME_OF(vs, 0) - 1u);
+      FRAME_OF(vs, 0) = 0;
+      vm.nfree++;
+    }
+    FLAGS(vs, 0) = 0;
+    unmap(0);
+    leaf_drop(vs, 0);
   }
-  vs->flags[0] = 0;
-  unmap(0);
   vm.st.zero_fills = vm.st.faults = 0;
   F.refills = F.refills_i = 0;
   mx_irq_restore(was);
@@ -2851,11 +3058,9 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   }
   /* the fast refill (tlb.S): without a trace (a page, one entry) */
   was = mx_di();
-  F.lo = vs->lo;
-  F.page_slot = vs->page_slot;
+  F.dir = vs->dir;
   F.npages = vm.bpp == 1 ? vs->npages : 0;
-  F.nmap = vm.bpp == 1 ? vs->nmap : 0;
-  F.nheap = vm.bpp == 1 ? vs->nheap : 0;
+  F.nreg = vm.bpp == 1 ? vs->nreg : 0;
   mx_irq_restore(was);
   if (cfg->trace) {
     was = mx_di();
@@ -2919,10 +3124,12 @@ void mx__vm_swap_gone(void) {
   int was = mx_di();
   for (u32 k = 0; k < MAX_SPACES; k++) {
     struct vm_space *s = spaces[k];
-    for (u32 pg = 0; s && pg < s->npages + s->nmap + s->nheap; pg++) {
-      if (s->flags[pg] & PG_SWAP)
-        s->flags[pg] = (u8)((s->flags[pg] & ~PG_SWAP) | (s->frame_of[pg] ? PG_DIRTY : PG_LOST));
-      s->slot_of[pg] = 0;
+    if (!s)
+      continue;
+    FOR_PAGES(s, pg) {
+      if (FLAGS(s, pg) & PG_SWAP)
+        FLAGS(s, pg) = (u8)((FLAGS(s, pg) & ~PG_SWAP) | (FRAME_OF(s, pg) ? PG_DIRTY : PG_LOST));
+      SLOT_OF(s, pg) = 0;
     }
   }
   __builtin_memset(slot_bits, 0, sizeof slot_bits);
@@ -2945,30 +3152,32 @@ int mx__vm_swap_drain(void) {
   lock();
   for (u32 k = 0; k < MAX_SPACES && !r; k++) {
     struct vm_space *s = spaces[k];
-    for (u32 pg = 0; s && pg < s->npages + s->nmap + s->nheap; pg++) {
-      if (!(s->flags[pg] & PG_SWAP))
+    if (!s)
+      continue;
+    FOR_PAGES(s, pg) {
+      if (r || !(FLAGS(s, pg) & PG_SWAP))
         continue;
-      if (!s->frame_of[pg]) {
+      if (!FRAME_OF(s, pg)) {
         int f = frame_take();
         if (f < 0) {
           r = -1;
-          break;
+          continue;
         }
         int was = mx_di();
-        s->flags[pg] |= PG_BUSY;
+        FLAGS(s, pg) |= PG_BUSY;
         mx_irq_restore(was);
         swap_io_s(s, pg, (u32)f, 0);
         code_sync();
         vm.st.swap_ins++;
         was = mx_di();
-        s->flags[pg] &= (u8)~PG_BUSY;
+        FLAGS(s, pg) &= (u8)~PG_BUSY;
         frame_give_s(s, pg, (u32)f);
         mx_irq_restore(was);
       }
       int was = mx_di();
-      slot_give(s->slot_of[pg]);
-      s->slot_of[pg] = 0;
-      s->flags[pg] = (u8)((s->flags[pg] & ~PG_SWAP) | PG_DIRTY);
+      slot_give(SLOT_OF(s, pg));
+      SLOT_OF(s, pg) = 0;
+      FLAGS(s, pg) = (u8)((FLAGS(s, pg) & ~PG_SWAP) | PG_DIRTY);
       mx_irq_restore(was);
     }
   }

@@ -41,9 +41,9 @@ struct mx_vm_config {
                     (then VM is as large as the frames). In the struct, not a
                     pointer: a program linked into VM reads it before VM is on */
   u32 size;      /* bytes of VM; 0: 128 MiB */
-  u32 heap_size; /* bytes of the heap window (heaps of pages, <mx/mem.h>); 0: 64 MiB */
+  u32 reserved0; /* 0 (it was the heap window's size: the region has none to set) */
   u32 frames;    /* bytes of physical memory for pages; 0: the rest */
-  u32 map_size;  /* bytes of the file window (mx_vm_map_file); 0: 64 MiB */
+  u32 reserved1; /* 0 (it was the file window's size) */
   u32 clean_frames; /* 0, or a writer thread keeps that many frames free or
                        clean (their pages written to the swap file ahead),
                        so a page fault reads and does not write first. It
@@ -72,14 +72,14 @@ u32 mx_vm_size(void);
 
 /* ---- mapped files ---------------------------------------------------------------- */
 
-/* Map file path, read-only, into the file window (MX_VM_MAP_BASE,
-   0x4000_0000, mx_vm_config.map_size): its pages are read when first
+/* Map file path, read-only, into a free piece of the region
+   (MX_VM_REGION_BASE, 0x4000_0000, 512 MiB for mapped files and heaps of
+   pages together; a piece is whole 2 MiB): its pages are read when first
    touched and share the frames with VM, but are never written: evicted,
    they are dropped and read again (no swap file needed). A store into one
-   ends the program with a report. The file stays open until unmapped. Up
-   to 8 files; the window is given out from its start, and space comes
-   back when the last mapping goes. Thread code. Returns the address (*size
-   the file's bytes), or 0. */
+   ends the program with a report. The file stays open until unmapped; its
+   piece is free again then. Up to 60 files. Thread code. Returns the
+   address (*size the file's bytes), or 0. */
 const void *mx_vm_map_file(const char *path, u32 *size);
 void mx_vm_unmap_file(const void *p);
 /* The same with a choice (kernel version 36). MX_VM_MAP_RESIDENT: the whole
@@ -170,7 +170,7 @@ struct mx_vm_stats {
 void mx_vm_stats(struct mx_vm_stats *s);
 
 /* Where the program's TLB refills fall (kernel version 35): a count for each
-   32 KiB page of its VM, file and heap windows. The first call starts the
+   32 KiB page of its VM and of what it has of the region. The first call starts the
    counting and returns 0. Each later call writes up to max pages that had
    refills since the call before (their address and count, by address) and
    starts those at 0 again; it returns how many it wrote (as many as max:
@@ -201,7 +201,8 @@ int mx_vm_refill_hist(struct mx_vm_hot *out, int max);
 struct mx_vm_trace_head {
   u32 magic, version;       /* MX_VM_TRACE_MAGIC, 1 */
   u32 page, block;          /* bytes: MX_VM_PAGE, 8192 */
-  u32 npages, nmap, nframes; /* VM pages, the file window's, frames */
+  u32 npages, nmap, nframes; /* pages of the VM window (4096: block numbers of
+                                the region follow those), of the region, frames */
   u32 interval_ms, events, lost;
 };
 /* Events, a u32 each: kind << 30 | value. */

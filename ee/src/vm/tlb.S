@@ -39,14 +39,19 @@ mx__vm_vector:
 	lw $1, VMF_NPAGES($27)
 	sltu $1, $26, $1
 	beqz $1, other
-	lw $2, VMF_PAGE_SLOT($27)
-have:	addu $2, $2, $26	# $2 = &page_slot[page]
-	lbu $1, 0($2)
+	lw $2, VMF_DIR($27)
+have:	sw $26, VMF_PAGE($27)	# the page in the tables, for slot_page below
+	srl $1, $26, VML_SHIFT
+	sll $1, $1, 2
+	addu $2, $2, $1
+	lw $2, 0($2)		# $2 = its leaf (the zero leaf where no page was touched yet:
+	andi $26, $26, 63	# no entry and V = 0 there, so C); k0 = the page in the leaf
+	addu $1, $2, $26
+	lbu $1, VML_PAGE_SLOT($1)
 	bnez $1, slow		# it has an entry: C
-	lw $1, VMF_LO($27)
 	sll $3, $26, 2
-	addu $1, $1, $3
-	lw $1, 0($1)		# $1 = lo[page]
+	addu $3, $2, $3
+	lw $1, VML_LO($3)	# $1 = lo[page]
 	andi $3, $1, 2		# LO_V
 	beqz $3, slow
 	lw $3, VMF_NEXT($27)	# $3 = the entry to take
@@ -63,34 +68,41 @@ have:	addu $2, $2, $26	# $2 = &page_slot[page]
 	sync.p
 	tlbwi
 	sync.p
-	sb $3, 0($2)		# page_slot[page] = entry
-	sll $1, $3, 1
-	addu $1, $1, $27
-	lhu $2, VMF_SLOT_PAGE($1)	# what the entry held: page + 1, or 0
-	addiu $26, $26, 1
-	sh $26, VMF_SLOT_PAGE($1)	# slot_page[entry] = page + 1
-	beqz $2, 4f
-	lw $1, VMF_PAGE_SLOT($27)
-	addu $1, $1, $2
-	sb $0, -1($1)		# that page: no entry
-4:	addu $1, $27, $3	# the next entry: the VM's in turn (next_of)
-	lbu $3, VMF_NEXT_OF($1)
-	sw $3, VMF_NEXT($27)
+	addu $1, $2, $26
+	sb $3, VML_PAGE_SLOT($1)	# page_slot[page] = entry
 	lw $1, VMF_REFILLS($27)
 	addiu $1, $1, 1
 	sw $1, VMF_REFILLS($27)
-	lw $2, VMF_STAMP($27)	# stamp[page] = refills: used now (eviction)
-	sll $3, $26, 2		# k0 = page + 1
-	addu $2, $2, $3
-	sw $1, -4($2)
-	lw $2, VMF_HIST($27)	# hist[page]++, when a program asked (mx_vm_refill_hist)
-	beqz $2, 5f
-	nop
-	addu $2, $2, $3
-	lw $3, -4($2)
-	addiu $3, $3, 1
-	sw $3, -4($2)
-5:	mfc0 $1, $14		# an instruction fetch: BadVAddr = EPC (+ 4 in a delay slot)
+	sll $26, $26, 2
+	addu $26, $2, $26
+	sw $1, VML_STAMP($26)	# stamp[page] = refills: used now (eviction)
+	lw $1, VML_HIST($2)	# hist[page]++, when a program asked (mx_vm_refill_hist)
+	beqz $1, 3f
+	subu $26, $26, $2
+	addu $1, $1, $26
+	lw $2, 0($1)
+	addiu $2, $2, 1
+	sw $2, 0($1)
+3:	sll $1, $3, 1
+	addu $1, $1, $27
+	lhu $2, VMF_SLOT_PAGE($1)	# what the entry held: page + 1, or 0
+	lw $26, VMF_PAGE($27)
+	addiu $26, $26, 1
+	sh $26, VMF_SLOT_PAGE($1)	# slot_page[entry] = page + 1
+	beqz $2, 4f
+	addiu $2, $2, -1
+	srl $1, $2, VML_SHIFT	# that page: no entry
+	sll $1, $1, 2
+	lw $26, VMF_DIR($27)
+	addu $1, $1, $26
+	lw $1, 0($1)
+	andi $2, $2, 63
+	addu $1, $1, $2
+	sb $0, VML_PAGE_SLOT($1)
+4:	addu $1, $27, $3	# the next entry: the VM's in turn (next_of)
+	lbu $3, VMF_NEXT_OF($1)
+	sw $3, VMF_NEXT($27)
+	mfc0 $1, $14		# an instruction fetch: BadVAddr = EPC (+ 4 in a delay slot)
 	mfc0 $2, $13
 	bgez $2, 6f
 	nop
@@ -107,25 +119,14 @@ have:	addu $2, $2, $26	# $2 = &page_slot[page]
 	sync.p
 	eret
 	nop
-	# Not the VM window: the file window's pages follow the VM's in the
-	# tables, the heap window's follow those (vm.c's va_page). Before
-	# 2026-11-17 these went the full way, with every register saved: the
-	# paged heaps and the mapped files of a program are there.
-other:	lw $1, VMF_NPAGES($27)
-	addiu $26, $26, VMF_BASE_PAGE - VMF_MAP_PAGE	# k0 = the page of the file window
-	lw $3, VMF_NMAP($27)
-	sltu $2, $26, $3
-	bnez $2, 1f
-	addu $2, $1, $26	# npages + it
-	addiu $26, $26, VMF_MAP_PAGE - VMF_HEAP_PAGE	# k0 = the page of the heap window
-	addu $1, $1, $3		# npages + nmap
-	lw $3, VMF_NHEAP($27)
+	# Not the VM window: the region's pages (mapped files, heaps of pages)
+	# follow the whole VM window's in the tables (vm.c's va_page); $2 is
+	# the directory already.
+other:	addiu $26, $26, VMF_BASE_PAGE - VMF_REG_PAGE	# k0 = the page of the region
+	lw $3, VMF_NREG($27)
 	sltu $3, $26, $3
-	beqz $3, slow
-	addu $2, $1, $26	# npages + nmap + it
-1:	move $26, $2		# k0 = the page in the tables
-	b have
-	lw $2, VMF_PAGE_SLOT($27)
+	bnez $3, have
+	addiu $26, $26, VMF_VM_PAGES	# k0 = the page in the tables
 slow:
 	lq $1, VMF_SAVE($27)
 	lq $2, VMF_SAVE + 16($27)

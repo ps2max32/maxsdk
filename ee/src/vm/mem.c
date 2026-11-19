@@ -1,7 +1,7 @@
 /* Heaps by kind (<mx/mem.h>).
 
    A heap is segments (runs of pinned frames, physical blocks without VM,
-   or one range of the heap window for a heap of pages) cut into extents,
+   or one piece of the region for a heap of pages) cut into extents,
    kept in a table sorted by address apart from the memory: an allocation
    is the first free extent it fits in (split off before and after), a free
    merges with its free neighbours in the same segment. A pinned segment
@@ -29,7 +29,7 @@ struct ext {
 struct seg {
   u32 a, n;
   u8 frames; /* frames of the pool (mx__vm_frames_take), else physical blocks */
-  u8 va;     /* a range of the heap window: never given back */
+  u8 va;     /* a piece of the region: never given back */
   u8 live;
 };
 
@@ -37,7 +37,7 @@ struct mx_heap {
   const char *name;
   int kind;
   u32 max;
-  int paged; /* a heap of pages in the heap window (VM on) */
+  int paged; /* a heap of pages in the region (VM on) */
   int ready;
   void *meta; /* its tables: segs, then exts */
   u32 meta_bytes;
@@ -159,7 +159,7 @@ struct mx_heap *mx_heap_create(const char *name, int kind, u32 max_bytes) {
     *h = (struct mx_heap){.name = name, .kind = kind, .max = max_bytes};
     setup(h);
     if (h->paged && !h->nseg) {
-      mx_printf("mx_heap_create %s: no room in the heap window for %u KB (mx_vm_config.heap_size)\n",
+      mx_printf("mx_heap_create %s: no room in the region for %u KB\n",
                 name, max_bytes / 1024);
       nheaps--;
       h = 0;

@@ -12,8 +12,8 @@
      rings, vertex and texture data), what interrupt handlers touch, thread
      stacks. mx_paddr_of, MX_UNCACHED and MX_UCAB work on it as on core
      memory, and it costs no VM TLB entries;
-   - pages of VM (MX_MEM_PAGED, MX_MEM_ASSET): pageable, in the heap window
-     (MX_VM_HEAP_BASE, apart from malloc's VM), each heap its own range.
+   - pages of VM (MX_MEM_PAGED, MX_MEM_ASSET): pageable, in the region
+     (MX_VM_REGION_BASE, apart from malloc's VM), each heap its own piece.
      ASSET memory is read by DMA while locked (mx_mem_lock_try,
      mx_vm_lock + mx_frame_unlock).
    With VM off every kind is physical memory (the heap above the break),
@@ -38,9 +38,9 @@ enum mx_mem_kind {
 
 struct mx_heap;
 /* A heap. max_bytes: for MX_MEM_PAGED and MX_MEM_ASSET the VM it may use
-   (taken from the heap window: mx_vm_config.heap_size); for the pinned
-   kinds a limit (0: none). name: for reports (kept, not copied). Returns 0
-   when out of heaps (16) or heap window. */
+   (a piece of the region, in whole 2 MiB: only the pages touched cost
+   memory); for the pinned kinds a limit (0: none). name: for reports (kept,
+   not copied). Returns 0 when out of heaps (16) or of room in the region. */
 struct mx_heap *mx_heap_create(const char *name, int kind, u32 max_bytes);
 /* bytes, aligned to align (a power of two, 16 at least; 64 for what the
    DMAC reads: a cache line of its own). Returns 0 when out of memory. */
@@ -51,7 +51,7 @@ void mx_heap_free(struct mx_heap *h, void *p);
 void mx_heap_reset(struct mx_heap *h);
 /* bytes in use (allocations), and held (its runs, or its pages resident) */
 void mx_heap_stats(const struct mx_heap *h, u32 *used, u32 *held);
-/* the defaults: pinned, stream, and pageable (16 MiB of the heap window,
+/* the defaults: pinned, stream, and pageable (16 MiB of the region,
    taken at its first use) */
 extern struct mx_heap *const mx_heap_pinned, *const mx_heap_stream, *const mx_heap_paged;
 
