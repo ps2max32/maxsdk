@@ -182,6 +182,12 @@ the region's 480i or 576i and confirm it. `mx_gs_init` in libmxk shows its w x h
 `mx_screen_pick` (exact size, the shape it has on the region's TV mode). On PCSX2 the screen is
 set up again after the settings are read. `tests/ps2/k59_video.c`.
 
+Version 44 (2026-11-19): the VM reads a page from the swap file or a file with its lock let go
+(`docs/vm.md`: Reads without the lock), so another thread's fault that needs no read, a pin or the
+slow refill path does not wait for the read. In Quake 3 the main thread waited for the lock while
+the pager read pages for `mx_mem_prefetch`. A thread that needs the page being read waits for that
+page only. No new call; programs run unchanged. `tests/ps2/k83_ioread.c`.
+
 Version 43 (2026-11-19): `mx_vm_clean` (`<mx/vm.h>`, `docs/vm.md`: Clean), table entry
 `vm_clean`: the caller's written pages to the swap file now, left resident, so that eviction later
 drops them instead of writing them. For the end of a level's load: in Quake 3's timedemo every late

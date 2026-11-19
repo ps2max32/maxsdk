@@ -124,6 +124,17 @@ struct vm_space {
 static struct vm_space space_mem[MAX_SPACES];
 #define space0 space_mem[0]
 static struct vm_space *vs = &space0; /* the running thread's (mx__vm_space_switch) */
+/* pages read without the lock (place_s) */
+#define NTRANSIT 8
+static struct {
+  struct vm_space *s; /* 0: free */
+  u32 pg, f;
+  int tid; /* the thread reading it */
+} transit[NTRANSIT];
+static int pager_tid = -1;
+static void busy_wait(void);
+static u32 bwaiters; /* threads in busy_wait */
+static int bsema = -1;
 /* What a directory entry without a leaf names. Never written (zero_check). */
 static struct vm_leaf zero_leaf MX_ALIGNED(16);
 static u8 zero_blk[512]; /* its bslot and seen (a trace) */
@@ -1089,8 +1100,26 @@ void mx__vm_space_free(struct vm_space *n) {
   }
   if (wfor == n) /* its program asked for the writer: nothing ahead from now */
     wfor = 0, vm.clean_frames = 0;
+  /* a page of it read without the lock: by the pager (a thread of the
+     VM's, it goes on), wait for it; by a thread of its program (gone with
+     it, the reader never runs again), the frame back (below) */
+  for (int again = 1; again;) {
+    again = 0;
+    for (u32 i = 0; i < NTRANSIT; i++)
+      if (transit[i].s == n && transit[i].tid == pager_tid)
+        again = 1;
+    if (again)
+      busy_wait();
+  }
   res_forget(n->id); /* its resident files: their frames go below */
   int was = mx_di();
+  for (u32 i = 0; i < NTRANSIT; i++)
+    if (transit[i].s == n) {
+      vm.page_of[transit[i].f] = 0;
+      vm.nfree++;
+      frame_freed(transit[i].f);
+      transit[i].s = 0;
+    }
   for (u32 f = 0; f < vm.nframes; f++)
     if (page_in(f) >= 0 && space_in(f) == n) {
       vm.page_of[f] = 0;
@@ -1481,25 +1510,26 @@ static void swap_io1(struct vm_space *s, u32 pg, u32 f, int out) {
 
 /* Page pg (PG_FILE) into frame f from its file (the program's ELF, a
    mapped file): the file's bytes of the page, the rest zero. */
-static void file_in1(u32 pg, u32 f);
-static void file_in(u32 pg, u32 f) {
+static void file_in1(struct vm_space *s, u32 pg, u32 f);
+static void file_in_s(struct vm_space *s, u32 pg, u32 f) {
   struct io_mark m = io_begin();
-  file_in1(pg, f);
+  file_in1(s, pg, f);
   io_end(m, &vm.st.us_file_in);
 }
+static void file_in(u32 pg, u32 f) { file_in_s(vs, pg, f); }
 
-static void file_in1(u32 pg, u32 f) {
+static void file_in1(struct vm_space *s, u32 pg, u32 f) {
   irq_check(0x18);
   u32 i = 0;
-  while (i < vs->nseg && !(vs->seg[i].fd >= 0 && pg - vs->seg[i].pg < vs->seg[i].npg))
+  while (i < s->nseg && !(s->seg[i].fd >= 0 && pg - s->seg[i].pg < s->seg[i].npg))
     i++;
-  if (i == vs->nseg)
+  if (i == s->nseg)
     vm_fatal("a file page outside the files", pg);
-  u32 off = (pg - vs->seg[i].pg) * PAGE;
-  u32 at = vs->seg[i].offset + off, n = vs->seg[i].filesz - off;
+  u32 off = (pg - s->seg[i].pg) * PAGE;
+  u32 at = s->seg[i].offset + off, n = s->seg[i].filesz - off;
   if (n > PAGE)
     n = PAGE;
-  int fd = vs->seg[i].fd;
+  int fd = s->seg[i].fd;
   int got = -1, sought = -1;
   for (int tries = 0; tries < 4 && got != (int)n; tries++) {
     if (tries)
@@ -1880,50 +1910,116 @@ static u32 frame_for_vs(void) {
   return f >= 0 ? (u32)f : evict();
 }
 
-/* Make page pg resident at frame f (a free frame, taken), then map it. The
-   lock is held. */
-static void place(u32 pg, u32 f, int write) {
-  leaf_need(vs, pg);
-  int was = mx_di();
-  FLAGS(vs, pg) |= PG_BUSY; /* another thread's fault waits */
-  mx_irq_restore(was);
-  if (FLAGS(vs, pg) & PG_LOST)
-    vm_fatal("its page was in the swap file of a device that was removed", pg);
-  if (FLAGS(vs, pg) & PG_SWAP) {
-    swap_io(pg, f, 0);
-    code_sync();
-    vm.st.swap_ins++;
-  } else if (FLAGS(vs, pg) & PG_FILE) {
-    file_in(pg, f);
-    code_sync();
-    vm.st.file_ins++;
-  } else {
-    copy_frame(f, -1);
-    vm.st.zero_fills++;
-  }
-  was = mx_di();
-  FLAGS(vs, pg) &= (u8)~PG_BUSY;
-  frame_give(pg, f);
-  map(pg, write);
-  mx_irq_restore(was);
+/* Pages read without the VM lock (kernel version 44): a fault or a pin of
+   another page goes on meanwhile (Quake 3: the program's faults waited
+   0.2-0.4 s of a 23 s timedemo for the lock while the pager read a file
+   page, about 6 ms each, a lost field). The page is PG_BUSY and has no
+   frame yet; its frame is taken (FRAME_TAKEN: no scan sees it). A thread
+   that needs the page waits for it (busy_wait); mx_vm_unmap_file waits for
+   the pages of its file; the end of a space takes back the frames of its
+   own (its threads are gone). One entry for each thread reading; with all
+   in use the read is done under the lock, as before. */
+
+/* The lock is held: let it go until a page read without it is in. The
+   caller looks again (the page, and whether its file is still mapped). */
+static void lock(void);
+static void unlock(void);
+static void busy_wait(void) {
+  bwaiters++;
+  unlock();
+  mx_bios_wait_sema(bsema);
+  lock();
+}
+/* The lock is held: a page came in; the waiters look again */
+static void busy_done(void) {
+  for (; bwaiters; bwaiters--)
+    mx_bios_signal_sema(bsema);
+}
+/* a page of space s in [lo, hi) on its way in without the lock */
+static int in_transit(struct vm_space *s, u32 lo, u32 hi) {
+  for (u32 i = 0; i < NTRANSIT; i++)
+    if (transit[i].s == s && transit[i].pg - lo < hi - lo)
+      return 1;
+  return 0;
 }
 
-/* Page pg resident and mapped. The lock is held. */
-static void fault_in(u32 pg, int write) {
-  leaf_need(vs, pg);
+/* Make page pg resident at frame f (a free frame, taken), then map it. The
+   lock is held; with unlocked, it is let go for a read (the caller then
+   looks at nothing it saw before but this page). */
+static void place_s(struct vm_space *s, u32 pg, u32 f, int write, int unlocked) {
+  leaf_need(s, pg);
   int was = mx_di();
-  if (FRAME_OF(vs, pg)) {
-    map(pg, write);
-    mx_irq_restore(was);
-    return;
-  }
+  FLAGS(s, pg) |= PG_BUSY; /* another thread's fault waits */
   mx_irq_restore(was);
-  if (!flog.buf || flog.space != vs) {
-    place(pg, frame_for_vs(), write);
+  u8 fl = FLAGS(s, pg);
+  if (fl & PG_LOST)
+    vm_fatal("its page was in the swap file of a device that was removed", pg);
+  int t = -1;
+  if ((fl & (PG_SWAP | PG_FILE)) && unlocked && bsema >= 0 && vm.bpp == 1) {
+    was = mx_di();
+    for (u32 i = 0; i < NTRANSIT && t < 0; i++)
+      if (!transit[i].s)
+        t = (int)i, transit[i].s = s, transit[i].pg = pg, transit[i].f = f,
+        transit[i].tid = mx_thread_self();
+    mx_irq_restore(was);
+  }
+  if (t >= 0)
+    unlock();
+  if (fl & PG_SWAP) {
+    swap_io_s(s, pg, f, 0);
+    code_sync();
+  } else if (fl & PG_FILE) {
+    file_in_s(s, pg, f);
+    code_sync();
+  } else
+    copy_frame(f, -1);
+  if (t >= 0) {
+    lock();
+    if (transit[t].s != s) /* its space ended meanwhile (and took the frame back) */
+      return;
+    transit[t].s = 0;
+    busy_done();
+  }
+  if (fl & PG_SWAP)
+    vm.st.swap_ins++;
+  else if (fl & PG_FILE)
+    vm.st.file_ins++;
+  else
+    vm.st.zero_fills++;
+  was = mx_di();
+  FLAGS(s, pg) &= (u8)~PG_BUSY;
+  frame_give_s(s, pg, f);
+  map_s(s, pg, write);
+  mx_irq_restore(was);
+}
+static void place(u32 pg, u32 f, int write) { place_s(vs, pg, f, write, 0); }
+
+/* Page pg resident and mapped. The lock is held; it may be let go
+   meanwhile (a read, or another thread's read of this page). */
+static void fault_in(u32 pg, int write) {
+  struct vm_space *s = vs;
+  for (;;) {
+    leaf_need(s, pg);
+    int was = mx_di();
+    if (FRAME_OF(s, pg)) {
+      map_s(s, pg, write);
+      mx_irq_restore(was);
+      return;
+    }
+    int busy = FLAGS(s, pg) & PG_BUSY;
+    mx_irq_restore(was);
+    if (!busy)
+      break;
+    busy_wait(); /* another thread reads it */
+    if (pg >= VM_PAGES && !piece_of(s, pg))
+      vm_fatal("a mapped file used after mx_vm_unmap_file", pg);
+  }
+  if (!flog.buf || flog.space != s) {
+    place_s(s, pg, frame_for_vs(), write, 1);
     return;
   }
-  u32 c0 = mx_count(), outs = vm.st.swap_outs, fl = FLAGS(vs, pg);
-  place(pg, frame_for_vs(), write);
+  u32 c0 = mx_count(), outs = vm.st.swap_outs, fl = FLAGS(s, pg);
+  place_s(s, pg, frame_for_vs(), write, 1);
   u32 kind = fl & PG_SWAP ? MX_VM_FAULT_SWAP : fl & PG_FILE ? MX_VM_FAULT_FILE : MX_VM_FAULT_ZERO;
   flog_push(page_va(pg) | kind | flog.src | (write ? MX_VM_FAULT_WRITE : 0) |
                 (outs != vm.st.swap_outs ? MX_VM_FAULT_OUT : 0),
@@ -2126,7 +2222,8 @@ int mx_vm_pin(const void *p, u32 bytes, u32 flags) {
   u32 lo = (u32)(uintptr_t)p, hi = lo + bytes;
   for (u32 pg = a; pg <= b; pg++) {
     u32 va = page_va(pg);
-    if ((flags & MX_VM_PIN_OVERWRITE) && va >= lo && va + PAGE <= hi && !FRAME_OF(vs, pg)) {
+    if ((flags & MX_VM_PIN_OVERWRITE) && va >= lo && va + PAGE <= hi && !FRAME_OF(vs, pg) &&
+        !(FLAGS(vs, pg) & PG_BUSY)) { /* (being read by another thread: fault_in waits) */
       /* overwritten whole: a frame, nothing read into it */
       leaf_need(vs, pg);
       int was = mx_di();
@@ -2500,6 +2597,10 @@ static void pager(void *arg) {
          for the page being read, at most */
       for (u32 pg = first_page(p), b = last_page(p, bytes); pg <= b; pg++) {
         lock();
+        if (pg >= VM_PAGES && !piece_of(vs, pg)) { /* its file was unmapped meanwhile */
+          unlock();
+          break;
+        }
         if (!FRAME_OF(vs, pg)) {
           flog.src = MX_VM_FAULT_PAGER;
           fault_in(pg, 0);
@@ -2522,8 +2623,10 @@ static void pager_make(int prio) {
   if (id < 0) {
     mx_printf("maxsdk: the VM's pager thread did not start\n");
     psema = -2;
-  } else
+  } else {
+    pager_tid = id;
     mx__thread_keep(id);
+  }
 }
 
 void mx__vm_prefetch(const void *p, u32 bytes) {
@@ -2679,6 +2782,9 @@ void mx_vm_unmap_file(const void *p) {
   while (k0 + nk < NPIECE && vs->piece[k0 + nk] == i + 1)
     vs->piece[k0 + nk++] = 0;
   mx_irq_restore(was0);
+  /* its pages on their way in without the lock: in first */
+  while (in_transit(vs, pg, pg + npg))
+    busy_wait();
   for (u32 q = pg; q < pg + npg; q++) {
     if (LEAF(vs, q) == &zero_leaf)
       continue;
@@ -2955,7 +3061,9 @@ static void undo_init(void) {
     mx_bios_delete_sema(vm.lock);
   if (vm.swapsema >= 0)
     mx_bios_delete_sema(vm.swapsema);
-  vm.lock = vm.swapsema = -1;
+  if (bsema >= 0)
+    mx_bios_delete_sema(bsema);
+  vm.lock = vm.swapsema = bsema = -1;
   if (vm.fd >= 0)
     mx_fio_close(vm.fd);
   vm.fd = -1;
@@ -3058,6 +3166,13 @@ int mx_vm_init(const struct mx_vm_config *cfg) {
   } sp = {0, 1, 1, 0, 0, 0};
   vm.lock = mx_bios_create_sema(&sp);
   vm.swapsema = mx_bios_create_sema(&sp);
+  {
+    struct {
+      s32 count, max_count, init_count, wait_threads;
+      u32 attr, option;
+    } bp = {0, 64, 0, 0, 0, 0};
+    bsema = mx_bios_create_sema(&bp);
+  }
   vm.wsema = -1;
 
   mx_dcache_flush_all(); /* no dirty line of the frames under the BIOS's mapping */
@@ -3196,6 +3311,14 @@ int mx__vm_swap_drain(void) {
     return 0;
   int r = 0;
   lock();
+  /* the pages read without the lock in first: from here on under it */
+  for (int again = 1; again;) {
+    again = 0;
+    for (u32 i = 0; i < NTRANSIT; i++)
+      again |= transit[i].s != 0;
+    if (again)
+      busy_wait();
+  }
   for (u32 k = 0; k < MAX_SPACES && !r; k++) {
     struct vm_space *s = spaces[k];
     if (!s)
