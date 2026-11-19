@@ -18,7 +18,8 @@
    (mx_hires_strip_records): each strip's pass alone draws a block of the
    strip's colour at the strip's left end, and one in the strip below it,
    which its scissor leaves out; z a Z strip of the passes' own
-   (mx_hires_own_z): the same picture. */
+   (mx_hires_own_z): the same picture; a<n> at most n records waiting
+   (mx_hires_ahead). */
 
 #include <mx/hires.h>
 #include <mx/hud.h>
@@ -97,6 +98,8 @@ int main(int argc, char **argv) {
     }
     if (argv[a][0] == 'z')
       mx_hires_own_z(1);
+    if (argv[a][0] == 'a')
+      mx_hires_ahead((u32)(argv[a][1] - '0'));
     if (argv[a][0] == 'r')
       strips = 1;
   }

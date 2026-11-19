@@ -75,6 +75,7 @@ static struct {
 static u64 pass_mem[NPASS_CHAINS][PASS_QW * 2] MX_ALIGNED(64);
 static u32 cfg_strip_lines; /* mx_hires_strip_lines */
 static int cfg_own_z;       /* mx_hires_own_z */
+static u32 cfg_ahead = MX_HIRES_SLOTS; /* mx_hires_ahead: the most records waiting to be played */
 static int own_z;           /* this picture's: the passes' Z is a strip of its own */
 static u32 own_zbp;         /* its first page */
 /* mx_hires_save_tga's line */
@@ -354,6 +355,7 @@ static void vsync_hook(void) {
 
 void mx_hires_strip_lines(u32 lines) { cfg_strip_lines = lines; }
 void mx_hires_own_z(int on) { cfg_own_z = on; }
+void mx_hires_ahead(u32 n) { cfg_ahead = n ? n : 1; }
 u32 mx_hires_strip_height(void) { return h.strip_h; }
 
 static u32 align_up(u32 v, u32 a) { return (v + a - 1) / a * a; }
@@ -531,7 +533,8 @@ u8 *mx__hires_begin(u32 *qw, u8 **once, u32 *once_qw) {
     u32 t0 = mx_count();
     int s;
     int reported = 0;
-    while ((s = slot_free()) < 0) {
+    /* a record is free, and no more are waiting than may (mx_hires_ahead) */
+    while (h.nwait >= cfg_ahead || (s = slot_free()) < 0) {
       /* asleep until a pass ends or a field begins (a record is free once
          the pass 0 that replaced it is past and its last pass's DMA done) */
       mx__gs_event_wait();

@@ -129,6 +129,13 @@ void mx_hires_strip_lines(u32 lines);
    a strip's pages of GS memory more, and each pass the time the beam is
    outside its strip. 0 (the default): the Z is the strip after. */
 void mx_hires_own_z(int on);
+/* The most records that wait to be played while the program builds the
+   next (any time; the default: all there are, MX_HIRES_SLOTS - 2). A
+   program faster than the fields fills them, and what it draws is shown as
+   many fields later: with 1 a frame is shown at the next field, and a frame
+   that takes longer than a field repeats the picture before, where a
+   record that waited would have been shown. */
+void mx_hires_ahead(u32 n);
 /* The lines of a strip after mx_hires_init: strip k shows lines k * this
    up to the next strip's, of the picture's h. */
 u32 mx_hires_strip_height(void);
