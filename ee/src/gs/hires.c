@@ -533,8 +533,12 @@ u8 *mx__hires_begin(u32 *qw, u8 **once, u32 *once_qw) {
     u32 t0 = mx_count();
     int s;
     int reported = 0;
-    /* a record is free, and no more are waiting than may (mx_hires_ahead) */
-    while (h.nwait >= cfg_ahead || (s = slot_free()) < 0) {
+    /* No more records waiting than may (mx_hires_ahead): asleep a part of a
+       millisecond at a time, and for a tenth of a second at most (a pipeline that
+       plays nothing now, stopped or held, takes no record: the frame goes on) */
+    while (h.nwait >= cfg_ahead && mx_count() - t0 < MX_EE_HZ / 10)
+      mx_sleep_us(250);
+    while ((s = slot_free()) < 0) {
       /* asleep until a pass ends or a field begins (a record is free once
          the pass 0 that replaced it is past and its last pass's DMA done) */
       mx__gs_event_wait();
