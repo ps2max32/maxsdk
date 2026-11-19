@@ -17,7 +17,8 @@
    (mx_hires_strip_lines: l64 is nine strips), r the strips' own records
    (mx_hires_strip_records): each strip's pass alone draws a block of the
    strip's colour at the strip's left end, and one in the strip below it,
-   which its scissor leaves out. */
+   which its scissor leaves out; z a Z strip of the passes' own
+   (mx_hires_own_z): the same picture. */
 
 #include <mx/hires.h>
 #include <mx/hud.h>
@@ -94,6 +95,8 @@ int main(int argc, char **argv) {
       else
         every = v ? v : 1;
     }
+    if (argv[a][0] == 'z')
+      mx_hires_own_z(1);
     if (argv[a][0] == 'r')
       strips = 1;
   }

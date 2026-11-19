@@ -25,6 +25,12 @@
    record that is complete, so the picture is whole however slowly the
    frames come; a new record is taken at pass 0, the first pass of a field.
 
+   With a Z strip of its own (mx_hires_own_z: a strip's pages more of GS
+   memory, 1920 x 192 at 16 bits 720 KB) no pass draws its Z into the
+   picture: pass k may run from the moment the beam has left strip k until
+   it comes to it again, a whole field less the strip's own time, so a strip
+   that takes long has the time the others leave.
+
    In interlaced FRAME mode (1080i: each field shows all 540 lines) the
    lower field's passes draw half a line lower (XYOFFSET.Y + 8), which gives
    the two fields of a 1080-line picture (examples/field).
@@ -119,6 +125,10 @@ u32 mx_hires_passes(void);
    to run in (above), and every pass still plays the whole main record: for
    programs that give each strip its own record (mx_hires_strip_records). */
 void mx_hires_strip_lines(u32 lines);
+/* 1: the next mx_hires_init gives the passes a Z strip of their own (above):
+   a strip's pages of GS memory more, and each pass the time the beam is
+   outside its strip. 0 (the default): the Z is the strip after. */
+void mx_hires_own_z(int on);
 /* The lines of a strip after mx_hires_init: strip k shows lines k * this
    up to the next strip's, of the picture's h. */
 u32 mx_hires_strip_height(void);

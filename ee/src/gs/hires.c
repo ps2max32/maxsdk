@@ -74,6 +74,9 @@ static struct {
 
 static u64 pass_mem[NPASS_CHAINS][PASS_QW * 2] MX_ALIGNED(64);
 static u32 cfg_strip_lines; /* mx_hires_strip_lines */
+static int cfg_own_z;       /* mx_hires_own_z */
+static int own_z;           /* this picture's: the passes' Z is a strip of its own */
+static u32 own_zbp;         /* its first page */
 /* mx_hires_save_tga's line */
 static u32 shot_line[2048] MX_ALIGNED(64);
 static u8 shot_out[2048 * 3];
@@ -130,6 +133,10 @@ static u64 *pass_chain(int s, u32 k, int shifted, int finish, int once) {
      strips before it (mx_hires_init leaves room for that base, not memory it uses) */
   u32 fbp = h.rt.fbp;
   u32 zbp = fbp + ((k + 1) % h.npass) * h.strip_pages - k * h.strip_pages;
+  /* a strip of its own for the Z (mx_hires_own_z): behind the buffer, so that the base
+     of strip k's lines is not below page 0 */
+  if (own_z)
+    zbp = own_zbp - k * h.strip_pages;
   u32 rgb = h.slot[s].rgb;
   u64 *c0 = MX_UNCACHED(pass_mem[h.nchain]);
   h.nchain = (h.nchain + 1) % NPASS_CHAINS;
@@ -330,8 +337,10 @@ static MX_IRQ_FN void timer_irq(void *arg) {
   if (j + 1 < h.npass)
     TMR_COMP = h.line[j + 1];
   too_late(j);
+  /* with a Z strip of its own a pass waits for its own strip alone: the beam has
+     left strip j - 1 */
   if (j)
-    may_run((j + h.npass - 2) % h.npass);
+    may_run(own_z ? j - 1 : (j + h.npass - 2) % h.npass);
 }
 
 /* The vblank starts: H-blanks counted from here. The beam has left the
@@ -340,10 +349,11 @@ static void vsync_hook(void) {
   TMR_COUNT = 0;
   h.next_line = 0;
   TMR_COMP = h.line[0];
-  may_run(h.npass - 2);
+  may_run(own_z ? h.npass - 1 : h.npass - 2);
 }
 
 void mx_hires_strip_lines(u32 lines) { cfg_strip_lines = lines; }
+void mx_hires_own_z(int on) { cfg_own_z = on; }
 u32 mx_hires_strip_height(void) { return h.strip_h; }
 
 static u32 align_up(u32 v, u32 a) { return (v + a - 1) / a * a; }
@@ -385,9 +395,18 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
      pages of its lines only (540 lines in strips of 128: 28, a row of pages) */
   u32 last_rows = (hgt - (h.npass - 1) * h.strip_h + h.page_h - 1) / h.page_h;
   h.pages = (h.npass - 1) * h.strip_pages + last_rows * fbw;
-  u32 fbp = mx_vram_alloc_at((h.npass - 1) * h.strip_pages, h.pages);
+  own_z = cfg_own_z;
+  /* with a Z strip of its own the buffer starts GS memory and the strip follows it */
+  u32 fbp = mx_vram_alloc_at(own_z ? 0 : (h.npass - 1) * h.strip_pages, h.pages);
   if (fbp == ~0u)
     return -1;
+  if (own_z) {
+    own_zbp = mx_vram_alloc_at(fbp + h.pages, h.strip_pages);
+    if (own_zbp == ~0u) {
+      mx_vram_free(fbp, h.pages);
+      return -1;
+    }
+  }
   mx_rt_init(&h.rt, fbp, w, hgt, psm, MX_RT_NOZ, MX_RT_NOZ);
   mx_gs.w = w, mx_gs.h = hgt, mx_gs.fbw = fbw;
   mx_gs.fbp[0] = mx_gs.fbp[1] = fbp;
