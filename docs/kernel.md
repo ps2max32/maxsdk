@@ -182,6 +182,12 @@ the region's 480i or 576i and confirm it. `mx_gs_init` in libmxk shows its w x h
 `mx_screen_pick` (exact size, the shape it has on the region's TV mode). On PCSX2 the screen is
 set up again after the settings are read. `tests/ps2/k59_video.c`.
 
+Version 43 (2026-11-19): `mx_vm_clean` (`<mx/vm.h>`, `docs/vm.md`: Clean), table entry
+`vm_clean`: the caller's written pages to the swap file now, left resident, so that eviction later
+drops them instead of writing them. For the end of a level's load: in Quake 3's timedemo every late
+frame was a wait for a page, 75 of them writes of pages the load had written. Returns the pages
+written; -1 without a swap file (or on an older kernel). `tests/ps2/k82_clean.c`.
+
 Version 42 (2026-11-19): the VM's addresses by use (`docs/vm.md`: Region, Tables). The file
 window (64 MiB) and the heap window (64 MiB) are one region, 0x4000_0000 - 0x5FFF_FFFF
 (`MX_VM_REGION_BASE`): a mapped file or a heap of pages gets a free run of 2 MiB pieces, and

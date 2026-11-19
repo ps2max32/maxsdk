@@ -1722,6 +1722,52 @@ static void writer(void *arg) {
   }
 }
 
+/* <mx/vm.h>'s mx_vm_clean: every written page of the caller's space that is
+   resident and not pinned goes to the swap file now and stays resident, so
+   eviction later drops it instead of writing it (the program calls it where
+   a wait is fine: after a level's load). A page at a time, as the writer:
+   the lock is let go for each write, so the program's other threads fault
+   between them. Returns the pages written; -1 without VM or without a
+   swap file the caller's pages may go to. */
+int mx__vm_clean(void) {
+  if (!vm.active || vm.fd < 0 || (swap_owner && swap_owner != vs))
+    return -1;
+  struct vm_space *s = vs;
+  int n = 0;
+  for (u32 f = 0; f < vm.nframes; f++) {
+    lock();
+    int was = mx_di();
+    int q = page_in(f);
+    u32 pg = (u32)q;
+    if (q < 0 || space_in(f) != s || PINS(s, pg) || (FLAGS(s, pg) & (PG_BUSY | PG_DIRTY)) != PG_DIRTY) {
+      mx_irq_restore(was);
+      unlock();
+      continue;
+    }
+    /* as the writer: pinned for the write, clean from now (a store
+       meanwhile makes it dirty again) */
+    PINS(s, pg)++;
+    FLAGS(s, pg) &= (u8)~PG_DIRTY;
+    if (vm.dbit) {
+      LO(s, pg) &= ~LO_D;
+      tlb_sync_s(s, pg);
+    } else
+      unmap_s(s, pg);
+    mx_irq_restore(was);
+    if (!SLOT_OF(s, pg))
+      SLOT_OF(s, pg) = slot_take(pg);
+    unlock();
+    swap_io_s(s, pg, f, 1);
+    was = mx_di();
+    PINS(s, pg)--;
+    FLAGS(s, pg) |= PG_SWAP;
+    mx_irq_restore(was);
+    vm.st.swap_outs++;
+    n++;
+  }
+  return n;
+}
+
 static void writer_make(u32 clean, int prio);
 static void writer_start(u32 clean) {
   writer_make(clean, mx_thread_prio(mx_thread_self()));

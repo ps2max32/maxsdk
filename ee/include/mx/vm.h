@@ -184,6 +184,18 @@ struct mx_vm_hot {
   u32 count;
 };
 int mx_vm_refill_hist(struct mx_vm_hot *out, int max);
+/* Write the program's written pages to the swap file now (kernel version
+   43): every page it wrote that is resident and not pinned goes to the swap
+   file and stays where it is, so that when eviction takes it later it is
+   dropped instead of written (a write of a page: about 7 ms on a memory card
+   or USB, a whole field of a frame). For a point where a wait is fine,
+   such as the end of a level's load: the pages it wrote are cold then and
+   would otherwise be written one by one as the level runs. It takes a
+   write a page (seconds for thousands of pages); the program's other
+   threads fault between them. A page written again afterwards is dirty
+   again. Returns the pages written; -1 without VM, without a swap file, or
+   a kernel before version 43. Counted in mx_vm_stats' swap_outs. */
+int mx_vm_clean(void);
 /* What a TLB refill of a resident page costs (the PS2, tlb.S's fast
    refill, probe/p22_refill.c; docs/vm.md "Costs") */
 #define MX_VM_REFILL_CYCLES 176

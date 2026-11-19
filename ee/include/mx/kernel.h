@@ -21,7 +21,7 @@
 #include <mx/vm.h>
 
 #define MX_KERNEL_MAGIC 0x4c4e524bu /* "KRNL" */
-#define MX_KERNEL_VERSION 42
+#define MX_KERNEL_VERSION 43
 /* the PT_NOTE of a libmxk program (src/base/kstubs.c): name "MXK", this type,
    the version, the address of its mx__core_off */
 #define MXK_NOTE_TYPE 1
@@ -326,6 +326,8 @@ struct mxk_services {
   int (*fio_chdir)(const char *path);
   int (*fio_getcwd)(char *buf, u32 room);
   int (*proc_spawn_in)(const char *dir, int argc, const char *args, u32 args_len, const char *swap);
+  /* version 43: the caller's written pages to the swap file now (<mx/vm.h>) */
+  int (*vm_clean)(void);
 };
 int mx__iop_write_phys(u32 iop, u32 src, u32 size);
 /* the kernel's own writer of the CRTC timing, used by mx_video_set in it

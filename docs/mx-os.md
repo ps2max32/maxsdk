@@ -194,6 +194,9 @@ Retail PS2s have 32 MiB; never count on more.
    it VM programs have only the frames. Never truncate or assume its size. A program the host
    link starts may bring its own file on `host:` for that run (`host:mxswap.txt`, read by
    mxlink's app at execee; kernel version 28): MXOS's is used again after it.
+   After a level's load (or another point where a wait is fine) call `mx_vm_clean` (kernel
+   version 43): the pages the load wrote go to the swap file then, so evicting them while the
+   level runs costs no write (a write is about 7 ms, a lost field).
 7. **DMA.** Tags, chains, DMA buffers, thread stacks and interrupt handler data must be core or
    pinned (`mx_vm_lock`, `mx_vm_pin`, `MX_IRQ_*`, `MX_FAST_*`), never plain
    VM: `mx_paddr_of`, `MX_UNCACHED` and `MX_UCAB` of VM that is not pinned end the program with a
