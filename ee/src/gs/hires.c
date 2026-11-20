@@ -65,7 +65,14 @@ static struct {
   volatile u32 nwait;
   int building;          /* the slot of the frame being built, -1: none */
   u32 rgb;               /* clear colour of the frame being built */
-  volatile u32 next_line; /* index into line[] of the next timer compare */
+  /* what the timer does at which H-blank count of a field, in that order:
+     late: the beam comes to that strip; run: that strip's pass may run (-1: none) */
+  struct {
+    u16 at;
+    s8 late, run;
+  } ev[MX_HIRES_PASSES + 1];
+  u32 nev;
+  volatile u32 next_line; /* index into ev[] of the next timer compare */
   volatile u32 parity;    /* the field the passes of this field are drawn for */
   int shift_field;
   u32 prev_at, prev_k;
@@ -99,7 +106,8 @@ static struct {
 } lay[L_N];
 static int cfg_widths, widths; /* mx_hires_widths: asked for; this picture's */
 static u32 want_w;             /* mx_hires_width */
-static int cur_l;              /* the layout of the last record begun */
+static int cur_l;              /* the layout of the last record begun, or chosen for the next */
+static int chosen;             /* cur_l is chosen for a record not begun yet (mx__hires_layout) */
 static int shown_l;            /* the display's */
 static volatile int disp_next; /* the layout for the display at the next vblank, -1: none */
 static int lent;               /* the spare room of the half layouts is GS memory's */
@@ -108,6 +116,7 @@ static u32 front_first;        /* the frame of the first L_FRONT record since an
 static u32 spare_fb, spare_fb_n, spare_z, spare_z_n; /* that room */
 static u32 cfg_strip_lines; /* mx_hires_strip_lines */
 static int cfg_own_z;       /* mx_hires_own_z */
+static u32 cfg_margin = 8;  /* mx_hires_margin */
 static u32 cfg_ahead = MX_HIRES_SLOTS; /* mx_hires_ahead: the most records waiting to be played */
 static int own_z;           /* this picture's: the passes' Z is a strip of its own */
 static u32 own_zbp;         /* its first page */
@@ -403,41 +412,52 @@ static void too_late(u32 k) {
 }
 
 /* The beam starts strip j: it has left strip j - 1, the Z of pass j - 2,
-   which may run now. The pass of the last strip but one waits for the end
-   of the last strip, the vblank (vsync_hook). */
+   which may run now (with a Z strip of its own a pass waits for its own
+   strip alone: pass j - 1). The pass that waits for the last strip runs
+   after the vblank's start. Each mx_hires_margin's lines later (h.ev). */
 /* an interrupt handler: pinned (mx OS plan 4b) */
 static MX_IRQ_FN void timer_irq(void *arg) {
   (void)arg;
   TMR_MODE = TMR_MODE | (u32)MX_BIT(TIMER_MODE_EQUF);
-  u32 j = h.next_line;
-  if (j >= h.npass)
-    return;
-  h.next_line = j + 1;
-  if (j + 1 < h.npass)
-    TMR_COMP = h.line[j + 1];
-  too_late(j);
-  /* with a Z strip of its own a pass waits for its own strip alone: the beam has
-     left strip j - 1 */
-  if (j)
-    may_run(own_z ? j - 1 : (j + h.npass - 2) % h.npass);
+  /* every event the count has reached: two may have the same count, and the
+     next one's may have come meanwhile */
+  for (u32 i = h.next_line; i < h.nev && (TMR_COUNT & 0xFFFF) >= h.ev[i].at; i = h.next_line) {
+    h.next_line = i + 1;
+    if (i + 1 < h.nev)
+      TMR_COMP = h.ev[i + 1].at;
+    if (h.ev[i].late >= 0)
+      too_late((u32)h.ev[i].late);
+    if (h.ev[i].run >= 0)
+      may_run((u32)h.ev[i].run);
+  }
 }
 
 /* The vblank starts: H-blanks counted from here. The beam has left the
-   last strip: the pass of the one before it may run. */
+   last strip: the pass that waited for it may run (without a margin: now). */
 static void vsync_hook(void) {
   TMR_COUNT = 0;
   h.next_line = 0;
-  TMR_COMP = h.line[0];
+  TMR_COMP = h.ev[0].at;
   if (disp_next >= 0) {
     disp_layout(disp_next);
     disp_next = -1;
   }
-  may_run(own_z ? h.npass - 1 : h.npass - 2);
+  if (!cfg_margin)
+    may_run(own_z ? h.npass - 1 : h.npass - 2);
+}
+
+/* an event of the field's timer, in the order of the counts */
+static void ev_add(u32 at, int late, int run) {
+  u32 i = h.nev++;
+  for (; i && h.ev[i - 1].at > at; i--)
+    h.ev[i] = h.ev[i - 1];
+  h.ev[i].at = (u16)at, h.ev[i].late = (s8)late, h.ev[i].run = (s8)run;
 }
 
 void mx_hires_strip_lines(u32 lines) { cfg_strip_lines = lines; }
 void mx_hires_own_z(int on) { cfg_own_z = on; }
 void mx_hires_widths(int on) { cfg_widths = on; }
+void mx_hires_margin(u32 lines) { cfg_margin = lines; }
 void mx_hires_width(u32 w) { want_w = w; }
 void mx_hires_ahead(u32 n) { cfg_ahead = n ? n : 1; }
 u32 mx_hires_strip_height(void) { return h.strip_h; }
@@ -445,8 +465,9 @@ u32 mx_hires_strip_height(void) { return h.strip_h; }
 static u32 align_up(u32 v, u32 a) { return (v + a - 1) / a * a; }
 
 u64 mx_hires_frame(u32 mask) {
-  if (widths && h.building >= 0) {
-    int l = h.slot[h.building].layout;
+  if (widths) {
+    /* the frame's: its record's, or the one chosen for it (mx__hires_layout) */
+    int l = h.building >= 0 ? h.slot[h.building].layout : cur_l;
     return mx_gs_frame(lay[l].fbp, lay[l].fbw, h.rt.psm, mask);
   }
   return mx_gs_frame(h.rt.fbp, h.rt.fbw, h.rt.psm, mask);
@@ -505,7 +526,7 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   /* the layouts at half the width (with a Z strip of its own: the Z is the
      same place in all of them) */
   widths = cfg_widths && own_z && (w / 2) % 64 == 0;
-  cur_l = shown_l = L_FULL, disp_next = -1, lent = 0, front_new = 0, front_first = ~0u;
+  cur_l = shown_l = L_FULL, disp_next = -1, lent = 0, chosen = 0, front_new = 0, front_first = ~0u;
   if (widths) {
     u32 hfbw = w / 2 / 64, hsp = hfbw * h.strip_h / h.page_h;
     u32 hpages = (h.npass - 1) * hsp + last_rows * hfbw;
@@ -538,11 +559,17 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   u32 per = mm.interlace && !mm.ffmd ? 1 : 2; /* field lines per 2 buffer lines */
   for (u32 j = 0; j < h.npass; j++)
     h.line[j] = top + j * h.strip_h * magv * per / 2;
-  /* the beam must have left a pass's Z strip (its clear writes all of it)
-     when the pass may run: line j lets pass j - 2 run, a few lines into
-     strip j */
+  /* the beam must have left the strip a pass writes (its own, which its
+     clear writes first; without a Z strip of its own also the next one, its
+     Z) when the pass may run: the margin's lines after the beam started the
+     strip after it, or after the vblank started for the pass that waits for
+     the last strip */
+  h.nev = 0;
+  if (cfg_margin)
+    ev_add(cfg_margin, -1, own_z ? (int)h.npass - 1 : (int)h.npass - 2);
+  ev_add(h.line[0], 0, -1);
   for (u32 j = 1; j < h.npass; j++)
-    h.line[j] += 8;
+    ev_add(h.line[j] + cfg_margin, (int)j, own_z ? (int)j - 1 : (int)((j + h.npass - 2) % h.npass));
 
   cfg_mem = mem, cfg_bytes = bytes, cfg_spr = spr, cfg_spr_bytes = spr_bytes;
   mx_hires_stats = (struct mx_hires_stats){0};
@@ -601,7 +628,7 @@ static int pipeline_start(void) {
   }
   tmr_base = mx_timer_base(tmr);
   TMR_MODE = 0;
-  h.next_line = h.npass;
+  h.next_line = h.nev;
   TMR_COUNT = 0;
   TMR_COMP = 0xFFFF;
   mx_irq_intc(MX_INTC_TIM0 + tmr, timer_irq, 0);
@@ -642,6 +669,22 @@ static int choose_layout(void) {
   }
   front_first = ~0u;
   return L_END;
+}
+
+/* The layout of the frame that begins (mx_frame_begin_n; or of a record begun
+   without one): chosen before the frame's first call, not when its record
+   starts (the stream's first half, which waits for a free record while the
+   frame is built): mx_gs.w and mx_hires_frame are the frame's from its
+   start. */
+void mx__hires_layout(void) {
+  if (!widths || chosen || h.building >= 0)
+    return;
+  int l = choose_layout();
+  front_new = l == L_FRONT && cur_l != L_FRONT;
+  cur_l = l;
+  mx_gs.w = lay[l].w, mx_gs.fbw = lay[l].fbw;
+  mx_gs.fbp[0] = mx_gs.fbp[1] = lay[l].fbp;
+  chosen = 1;
 }
 
 static int slot_free(void) {
@@ -693,15 +736,12 @@ u8 *mx__hires_begin(u32 *qw, u8 **once, u32 *once_qw) {
     h.slot[s].state = BUILDING;
     h.slot[s].rgb = h.rgb;
     h.slot[s].layout = L_FULL;
-    h.building = s;
     if (widths) {
-      int l = choose_layout();
-      h.slot[s].layout = l;
-      front_new = l == L_FRONT && cur_l != L_FRONT;
-      cur_l = l;
-      mx_gs.w = lay[l].w, mx_gs.fbw = lay[l].fbw;
-      mx_gs.fbp[0] = mx_gs.fbp[1] = lay[l].fbp;
+      mx__hires_layout();
+      h.slot[s].layout = cur_l;
+      chosen = 0;
     }
+    h.building = s;
   }
   *qw = h.qw_per_slot;
   *once = h.slot[h.building].once;

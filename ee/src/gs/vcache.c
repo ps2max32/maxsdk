@@ -1009,6 +1009,12 @@ int mx__vcache_check(void) {
                     (u32)(x->key >> 32), (u32)x->key, i, k, own[k]);
           return 1;
         }
+      for (u32 pg = b / 32; n && pg <= (b + n - 1) / 32; pg++)
+        if (mx_vram_owner(pg) != MX_VRAM_CACHE) {
+          mx_printf("vcache check: entry %u piece %u at %u in page %u owned by %u\n", e, i, b, pg,
+                    mx_vram_owner(pg));
+          return 1;
+        }
       if (n && (n >= 32 ? pkind[b / 32] != PG_BIG : pkind[b / 32] != PG_SMALL)) {
         mx_printf("vcache check: entry %u piece %u at %u (%u blocks): page kind %u\n", e, i, b, n,
                   pkind[b / 32]);

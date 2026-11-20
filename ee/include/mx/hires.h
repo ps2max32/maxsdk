@@ -146,6 +146,11 @@ void mx_hires_own_z(int on);
    read the cache's textures there are done, the frames stay at half the
    width. */
 void mx_hires_widths(int on);
+/* Lines the beam is past a pass's strip (into the strip after it, or into the
+   vblank after the last one) before that pass may start (8, the default; for
+   the next mx_hires_init): a pass that starts while the beam still shows its
+   strip's last lines clears them under it. */
+void mx_hires_margin(u32 lines);
 /* The width the frames begun from now are drawn at, mx_hires_init's or half
    of it (with mx_hires_widths). A frame's own is mx_gs.w after
    mx_frame_begin_n (window coordinates of that width; mx_hires_frame its

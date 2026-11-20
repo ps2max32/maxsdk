@@ -32,6 +32,8 @@ void mx__frame_init_record(void *spr, u32 spr_bytes);
    until one is free; qw: their quadwords), the end of the records (at end,
    once_end; full: halves were left out), the frame stream's mx_frame_ready, and the end of the pipeline */
 u8 *mx__hires_begin(u32 *qw, u8 **once, u32 *once_qw);
+/* the layout of the frame that begins is chosen (mx_hires_widths): mx_gs.w, mx_hires_frame */
+void mx__hires_layout(void);
 /* the strips' own records of the record being built (mx_hires_strip_records):
    their memory in at[0 .. n - 1], *qw quadwords each; returns n, 0: none */
 u32 mx__hires_strips(u8 **at, u32 *qw);

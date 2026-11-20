@@ -552,6 +552,11 @@ u32 mx_frame_begin_n(void) {
     mx_trace(MX_TR_WAIT_END, 0x100);
     mx_frame_stats.wait_buffer += mx_count() - t0 - busy;
   }
+  /* the frame's layout from here (mx_gs.w, mx_hires_frame: mx_hires_widths),
+     not from its record's start, the stream's first half: the frame is built
+     for that width from its first call on */
+  if (f.record)
+    mx__hires_layout();
   return mx_gs.frames;
 }
 
