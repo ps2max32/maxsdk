@@ -32,15 +32,34 @@ static void sio_write(const char *s, u32 n) {
 /* the kernel's log (apps/mxos, klog.c): its own output too */
 void mx__debug_tap(const char *s, u32 n) __attribute__((weak));
 
+/* A write to the tty that failed: that text to the serial port, and the
+   tty kept; only after TTY_GIVE_UP failures in a row is it left for the
+   serial port. Before, one failure left it for good: a program whose other
+   thread was in SIF calls lost its console from then on (Quake 3 with its
+   sound loads, 2 runs of 9) while it ran on. mx__debug_tty_errors counts
+   them, mx__debug_tty_last is the last error. */
+#define TTY_GIVE_UP 8
+volatile u32 mx__debug_tty_errors;
+volatile int mx__debug_tty_last;
+static u32 tty_fails;
+
 static void send(const char *s, u32 n) {
   if (mx__debug_tap)
     mx__debug_tap(s, n);
   if (sinks & MX_SINK_SIO)
     sio_write(s, n);
-  if ((sinks & MX_SINK_TTY) && mx_tty_write(s, n) < 0) {
-    sinks = (sinks & ~MX_SINK_TTY) | MX_SINK_SIO;
-    sio_write(s, n);
+  if (!(sinks & MX_SINK_TTY))
+    return;
+  int r = mx_tty_write(s, n);
+  if (r >= 0) {
+    tty_fails = 0;
+    return;
   }
+  mx__debug_tty_errors++, mx__debug_tty_last = r;
+  if (!(sinks & MX_SINK_SIO))
+    sio_write(s, n);
+  if (++tty_fails >= TTY_GIVE_UP)
+    sinks = (sinks & ~MX_SINK_TTY) | MX_SINK_SIO;
 }
 
 /* Bind the file server now, at the start: binding it at the first output,
