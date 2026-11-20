@@ -68,6 +68,9 @@ static struct mx_vcache_stats st;
 static u32 inits;
 /* the entry of each page of a large piece (entry + 1, 0: none) */
 static u16 pent[MX_VRAM_PAGES];
+/* pages being taken back (mx_vcache_release): no piece goes there; one that
+   becomes free goes to that owner (+ 1) */
+static u8 ban[MX_VRAM_PAGES];
 /* the top bytes of 24-bit buffers (mx_vcache_hpages): blocks h_first ..
    h_first + h_n - 1, the entry of each (entry + 1, 0: free) */
 static u32 h_first, h_n, h_used;
@@ -154,6 +157,8 @@ static int page_get(u32 p, u8 kind) {
 
 static void page_drop(u32 p) {
   mx_vram_give(p, 1);
+  if (ban[p])
+    mx_vram_take(p, 1, ban[p] - 1u);
   npages--, nsmall -= pkind[p] == PG_SMALL;
   pkind[p] = PG_NONE, mask[p] = 0, pent[p] = 0;
 }
@@ -304,7 +309,7 @@ static u32 find_window(u32 n, u64 *cost) {
     /* page p comes into the window */
     u32 o = owner[p];
     fresh[p] = o == MX_VRAM_FREE;
-    bad[p] = o != MX_VRAM_FREE && o != MX_VRAM_CACHE;
+    bad[p] = (o != MX_VRAM_FREE && o != MX_VRAM_CACHE) || ban[p];
     pstart[p] = (u16)k;
     if (pkind[p] == PG_BIG) {
       u32 v = pent[p];
@@ -364,6 +369,8 @@ static u32 find_page(u64 *cost) {
   u32 at = ~0u;
   for (u32 p = 0; p < MX_VRAM_PAGES; p++) {
     u64 c;
+    if (ban[p])
+      continue;
     if (pkind[p] == PG_BIG)
       c = ecost[pent[p] - 1];
     else if (pkind[p] == PG_SMALL)
@@ -417,7 +424,7 @@ static u32 ring_window(u32 n) {
       continue;
     for (i = 0; i < n; i++) {
       u32 o = mx_vram_owner(p + i);
-      if (o != MX_VRAM_FREE && (o != MX_VRAM_CACHE || !range_ok((p + i) * 32, 32)))
+      if (ban[p + i] || (o != MX_VRAM_FREE && (o != MX_VRAM_CACHE || !range_ok((p + i) * 32, 32))))
         break;
       fresh += o == MX_VRAM_FREE;
     }
@@ -442,7 +449,7 @@ static u32 ring_big(u32 e, u32 n) {
    pieces, else from a page the ring takes next */
 static u32 ring_small_place(u32 e, u32 b, u32 a) {
   u32 p = ring_small, s = (ring_blk + a - 1) & ~(a - 1);
-  if (p == ~0u || pkind[p] != PG_SMALL || s + b > 32 || !range_ok(p * 32 + s, b)) {
+  if (p == ~0u || pkind[p] != PG_SMALL || ban[p] || s + b > 32 || !range_ok(p * 32 + s, b)) {
     p = ring_window(1);
     if (p == ~0u)
       return ~0u;
@@ -484,7 +491,7 @@ static u32 place_small(u32 e, u32 b, u32 a) {
   u32 m = b >= 32 ? ~0u : (1u << b) - 1, p, s;
   /* a free run in a page of small pieces */
   for (p = 0; p < MX_VRAM_PAGES; p++)
-    if (pkind[p] == PG_SMALL)
+    if (pkind[p] == PG_SMALL && !ban[p])
       for (s = 0; s + b <= 32; s += a)
         if (!((mask[p] >> s) & m))
           goto take;
@@ -503,7 +510,7 @@ static u32 place_small(u32 e, u32 b, u32 a) {
   u64 best = INF;
   u32 bp = ~0u, bs = 0;
   for (u32 q = 0; q < MX_VRAM_PAGES; q++)
-    if (pkind[q] == PG_SMALL)
+    if (pkind[q] == PG_SMALL && !ban[q])
       for (u32 t = 0; t + b <= 32; t += a) {
         u64 c = range_cost(q * 32 + t, b);
         if (c < best)
@@ -660,6 +667,16 @@ static u16 piece_blocks(u32 w, u32 h, u32 psm) {
   return (u16)(b >= 32 ? (b + 31) & ~31u : b);
 }
 
+/* a piece of x in pages being taken back (mx_vcache_release) */
+static int in_ban(const struct ent *x) {
+  for (u32 i = 0; i < x->npieces; i++)
+    if (x->bp[i] != ~0u)
+      for (u32 p = x->bp[i] >> 5; p <= (x->bp[i] + x->nb[i] - 1) >> 5; p++)
+        if (ban[p])
+          return 1;
+  return 0;
+}
+
 /* the key's entry if it has this shape (a use: 1), else dropped (0), or -1
    if it cannot go */
 static int lookup(u64 key, const struct ent *want, struct mx_tex *t) {
@@ -667,6 +684,16 @@ static int lookup(u64 key, const struct ent *want, struct mx_tex *t) {
   if (e < 0)
     return 0;
   struct ent *x = &ents[e];
+  /* in pages being taken back: it stays for the frames that read it (under
+     another key, no more looked up: it goes once they are done), the key
+     is placed again elsewhere */
+  if (x->live && !x->building && in_ban(x)) {
+    h_remove((u32)e);
+    x->key = ~key;
+    h_insert((u32)e);
+    st.moved++;
+    return 0;
+  }
   if (x->kind == want->kind && x->psm == want->psm && x->cpsm == want->cpsm && x->w == want->w &&
       x->h == want->h && x->levels == want->levels) {
     use(x);
@@ -799,7 +826,7 @@ static u64 page_cost(u32 n) {
   }
   u32 a = pow2_of(n), m = (1u << n) - 1;
   for (u32 p = 0; p < MX_VRAM_PAGES; p++)
-    if (pkind[p] == PG_SMALL)
+    if (pkind[p] == PG_SMALL && !ban[p])
       for (u32 s = 0; s + n <= 32; s += a)
         if (!((mask[p] >> s) & m))
           return 0;
@@ -913,6 +940,30 @@ void mx_vcache_reset(void) {
   ring_page = ring_blk = 0, ring_small = ~0u;
   for (u32 i = 0; i < NHIST; i++)
     hist[i].live = 0;
+}
+
+int mx_vcache_release(u32 page, u32 pages, u32 owner) {
+  int left = 0;
+  if (page >= MX_VRAM_PAGES || pages > MX_VRAM_PAGES - page || owner == MX_VRAM_FREE || owner == MX_VRAM_CACHE)
+    return -1;
+  for (u32 p = page; p < page + pages; p++)
+    ban[p] = (u8)(owner + 1);
+  for (u32 p = page; p < page + pages; p++) {
+    u32 o = mx_vram_owner(p);
+    if (o == MX_VRAM_CACHE)
+      for (u32 b = p * 32; b < p * 32 + 32 && pkind[p] != PG_NONE; b++)
+        if (own[b] && weight(&ents[own[b] - 1u]) != INF)
+          evict(own[b] - 1u);
+    o = mx_vram_owner(p);
+    if (o == MX_VRAM_FREE)
+      mx_vram_take(p, 1, owner), o = owner;
+    left |= o != owner;
+  }
+  if (!left)
+    for (u32 p = page; p < page + pages; p++)
+      ban[p] = 0;
+  wt_now = ~0u;
+  return left ? -1 : 0;
 }
 
 void mx_vcache_init(u32 maxp, int m, int pol) {

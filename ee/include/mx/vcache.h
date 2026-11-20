@@ -116,6 +116,12 @@ void mx_vcache_unpin(u64 key);
 /* Drop key now (its room is free for the next lookups): 0, or -1 if it is
    not there, pinned, or one the mode keeps (in use). */
 int mx_vcache_drop(u64 key);
+/* Pages page .. page + pages - 1 back for owner (someone gave them to GS
+   memory, and the cache took some): no piece is placed there from now on,
+   the entries there that may go (mode) go, and the pages that are free are
+   taken for owner. 0 once all of them are owner's (asked again until then:
+   the entries a frame in flight reads go when it is done), -1 meanwhile. */
+int mx_vcache_release(u32 page, u32 pages, u32 owner);
 
 /* ---- textures whose upper levels may be paged out ------------------------------ */
 
@@ -184,6 +190,7 @@ struct mx_vcache_stats {
      the entries evicted for them (all of each entry: more when one lay
      only partly in the run) */
   u32 evict_run_blocks, evicted_blocks;
+  u32 moved;              /* entries placed again elsewhere as their pages were taken back (mx_vcache_release) */
 };
 void mx_vcache_stats(struct mx_vcache_stats *s);
 /* Where GS memory goes now (blocks; for measuring, it walks every entry):

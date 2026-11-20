@@ -615,3 +615,28 @@ void mx_vuq_read(struct mx_vuq *q, const struct mx_kernel *k, void *dst, u32 n) 
     }
   }
 }
+
+u32 mx_vu1_stop_dump(u32 *vi) {
+  /* force break (FBRST.FB1), the enables as they were */
+  u32 keep = fbrst_get() & (u32)(MX_BIT(VU_FBRST_TE0) | MX_BIT(VU_FBRST_DE0) | MX_BIT(VU_FBRST_TE1) |
+                                MX_BIT(VU_FBRST_DE1));
+  fbrst_set(keep | (u32)MX_BIT(VU_FBRST_FB1));
+  for (u32 t = 0; (mx_vpu_stat() & MX_VPU_VBS1) && t < 100000; t++)
+    ;
+  /* VU1's registers in VU0 memory (VU User's Manual 5.5.4, 5.5.5): VI at
+     quadword 0x420 + n, TPC at 0x43A; read by VLQI through vi2 */
+  u32 q[4] MX_ALIGNED(16);
+  mx_vu0_wait();
+  for (u32 n = 0; n < 17; n++) {
+    u32 a = n < 16 ? 0x420 + n : 0x43A;
+    __asm__ volatile("move $8, %0\n\t.word 0x48c81000\n\tmove $9, %1\n\t.word 0x4be1137c\n\t.word 0xf9210000"
+                     :
+                     : "r"(a), "r"(q)
+                     : "$8", "$9", "memory");
+    if (n < 16)
+      vi[n] = q[0] & 0xFFFF;
+    else
+      vi[16] = q[0];
+  }
+  return vi[16];
+}

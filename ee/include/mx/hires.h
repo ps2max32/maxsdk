@@ -81,6 +81,12 @@ struct mx_hires_stats {
   u32 strip_max;  /* the largest record of a strip's own, bytes */
   u32 over;       /* passes still being sent when the beam came to their strip (shown half drawn) */
   u32 logged;     /* passes written into the log (mx_hires_log), since it was given */
+  /* the first pass still being sent 30 ms after its start (stuck): VIF1's
+     STAT and CODE; VIF1's DMA CHCR, MADR, QWC, TADR, ASR0, ASR1; GIF_STAT;
+     the GIF's DMA CHCR, MADR, QWC, TADR; its strip; VPU_STAT; stuck[15] 1 once taken */
+  u32 stuck[16];
+  u32 stuck_vu1[17]; /* then VU1 stopped: its VI00..VI15 and TPC (mx_vu1_stop_dump) */
+  u32 stuck_mem[20][4]; /* the 16 quadwords before VIF1's TADR and the 4 from it (core memory) */
 };
 extern struct mx_hires_stats mx_hires_stats;
 
@@ -129,6 +135,22 @@ void mx_hires_strip_lines(u32 lines);
    a strip's pages of GS memory more, and each pass the time the beam is
    outside its strip. 0 (the default): the Z is the strip after. */
 void mx_hires_own_z(int on);
+/* 1: the next mx_hires_init's picture may be drawn at half its width (the
+   display shows each pixel twice), from frame to frame (mx_hires_width):
+   with mx_hires_own_z, a width that is a multiple of 128. At half the
+   width a frame takes half the framebuffer and of the Z strip: the rest
+   (but the buffer's last row of pages) is given to GS memory once the
+   frames before at the whole width are done, where the cache
+   (<mx/vcache.h>) takes it, and taken back (mx_vcache_release) before a
+   frame is drawn at the whole width again: until the frames in flight that
+   read the cache's textures there are done, the frames stay at half the
+   width. */
+void mx_hires_widths(int on);
+/* The width the frames begun from now are drawn at, mx_hires_init's or half
+   of it (with mx_hires_widths). A frame's own is mx_gs.w after
+   mx_frame_begin_n (window coordinates of that width; mx_hires_frame its
+   FRAME). */
+void mx_hires_width(u32 w);
 /* The most records that wait to be played while the program builds the
    next (any time; the default: all there are, MX_HIRES_SLOTS - 2). A
    program faster than the fields fills them, and what it draws is shown as
@@ -162,6 +184,13 @@ u64 mx_hires_frame(u32 mask);
 /* The pages whose top byte no pass writes (CT24 strips: all of them), the
    first in *page; 0 for another format. */
 u32 mx_hires_hbyte(u32 *page);
+/* GS memory in the framebuffer that no pass writes: the blocks of its last
+   row of pages below the picture's last line (540 lines at 16 bits: 36
+   lines, 480 blocks at 1920 wide), as runs of 4 blocks (1 KB, room for a
+   16 x 16 CLUT of 32 bits or a 32 x 32 T8: a run aligned to 4, its first
+   block into at[]), at most n of them. Only with mx_hires_own_z (else the
+   Z of the last strip but one is written there): 0 otherwise. */
+u32 mx_hires_spare(u32 *at, u32 n);
 /* The record of the frame being built (0 .. MX_HIRES_SLOTS - 1), after
    mx_frame_begin_n: data per frame can be kept per record. */
 u32 mx_hires_slot(void);

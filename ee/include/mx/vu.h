@@ -32,6 +32,10 @@ void mx_vif_reset(int vif);
    (mx_vu_reset) clears both enables. Do not enable the D bit on VU1: a D
    bit with FBRST.DE1 set hung the PS2 (docs/interrupts.md). */
 void mx_vu_enable_tbit(int vu, int on);
+/* For finding a hang: VU1 stopped (force break) and its VI00..VI15 into
+   vi[0..15], its TPC into vi[16] (also returned); uses VU0's vi2 and vf1
+   (VU0 must be free). */
+u32 mx_vu1_stop_dump(u32 *vi);
 void mx_vu_enable_dbit(int vu, int on);
 
 /* ---- VU0 through COP2 ---------------------------------------------------- */

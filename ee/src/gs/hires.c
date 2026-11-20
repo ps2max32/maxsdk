@@ -4,6 +4,9 @@
 #include <mx/frame.h>
 #include <mx/hires.h>
 #include <mx/timer.h>
+#include <mx/vcache.h>
+#include <mx/vram.h>
+#include <mx/vu.h>
 #include <mx/irq.h>
 #include <mx/mx.h>
 #include <mx/sif.h>
@@ -43,6 +46,7 @@ static struct {
     u32 rgb;
     mx_event last; /* the DMA of its last pass */
     int kicked;
+    int layout;    /* L_*: where its strips lie (mx_hires_widths) */
   } slot[MX_HIRES_SLOTS];
   u32 qw_per_slot, once_qw; /* main and once records' quadwords */
   u32 strip_qw;             /* a strip's own record's, 0: none */
@@ -73,6 +77,35 @@ static struct {
 } h;
 
 static u64 pass_mem[NPASS_CHAINS][PASS_QW * 2] MX_ALIGNED(64);
+
+/* A picture drawn at its whole width or at half of it, from record to
+   record (mx_hires_widths, mx_hires_width): its strips lie in one of three
+   layouts. L_FULL the buffer as mx_hires_init made it; at half the width
+   the strips take half the pages, at the buffer's start (L_FRONT) or at
+   its end (L_END). A record's passes draw while the beam still shows the
+   record before (the strips it has not reached yet), so a record may only
+   follow one whose strips its own do not overwrite before the beam has
+   shown them: L_FRONT follows anything; L_FULL follows L_FULL or L_END
+   (whose strips lie behind its own); so from L_FRONT back to the whole
+   width one record of L_END first. While the records are L_FRONT, the rest
+   of the buffer (but its last row of pages, mx_hires_spare's) and the rest
+   of the Z strip are free: given to GS memory (the cache takes them), and
+   taken back before a record of L_END (mx_vcache_release). The display
+   changes at the vblank after a record of another layout began to be
+   played: its strips were all drawn in that field. */
+enum { L_FULL, L_FRONT, L_END, L_N };
+static struct {
+  u32 fbp, fbw, w, strip_pages, ox; /* ox: XYOFFSET's x, the picture of that width centred as h.rt's */
+} lay[L_N];
+static int cfg_widths, widths; /* mx_hires_widths: asked for; this picture's */
+static u32 want_w;             /* mx_hires_width */
+static int cur_l;              /* the layout of the last record begun */
+static int shown_l;            /* the display's */
+static volatile int disp_next; /* the layout for the display at the next vblank, -1: none */
+static int lent;               /* the spare room of the half layouts is GS memory's */
+static int front_new;          /* the record being built is the first L_FRONT after another */
+static u32 front_first;        /* the frame of the first L_FRONT record since another, ~0u: not built yet */
+static u32 spare_fb, spare_fb_n, spare_z, spare_z_n; /* that room */
 static u32 cfg_strip_lines; /* mx_hires_strip_lines */
 static int cfg_own_z;       /* mx_hires_own_z */
 static u32 cfg_ahead = MX_HIRES_SLOTS; /* mx_hires_ahead: the most records waiting to be played */
@@ -98,14 +131,24 @@ static void tmr_off(void) {
 }
 
 /* A slot retired by the pass 0 that replaced it is free once the DMA of
-   its last pass is done (interrupts off or in a handler). */
+   its last pass is done (interrupts off or in a handler). The frames are
+   done up to the oldest one still played or retiring: a record none of whose
+   passes was sent (all left out) is free at once, while an older one's last
+   pass may still be read (its memory must not be taken for a new frame). */
+static u32 freed_to; /* one past the newest frame freed */
 static void retire(void) {
   for (int i = 0; i < MX_HIRES_SLOTS; i++)
     if (h.slot[i].state == RETIRING && (!h.slot[i].kicked || mx_event_done(h.slot[i].last))) {
       h.slot[i].state = FREE;
-      if (mx_gs.frames_done < h.slot[i].frame + 1)
-        mx_gs.frames_done = h.slot[i].frame + 1;
+      if (freed_to < h.slot[i].frame + 1)
+        freed_to = h.slot[i].frame + 1;
     }
+  u32 to = freed_to;
+  for (int i = 0; i < MX_HIRES_SLOTS; i++)
+    if ((h.slot[i].state == RETIRING || h.slot[i].state == PLAYED) && h.slot[i].frame < to)
+      to = h.slot[i].frame;
+  if (mx_gs.frames_done < to)
+    mx_gs.frames_done = to;
 }
 
 /* The chain of pass k of slot s (shifted: half a line lower; finish: a
@@ -128,16 +171,21 @@ static u64 *pass_chain(int s, u32 k, int shifted, int finish, int once) {
   /* the lines of the strip that are shown (the last one is shorter) */
   u32 rows = h.rt.h - y0 < h.strip_h ? h.rt.h - y0 : h.strip_h;
   u32 oy = h.rt.oy + (shifted ? 8 : 0);
+  /* the slot's layout (mx_hires_widths) */
+  u32 fbp = h.rt.fbp, fbw = h.rt.fbw, w = h.rt.w, sp = h.strip_pages, ox = h.rt.ox;
+  if (widths) {
+    int l = h.slot[s].layout;
+    fbp = lay[l].fbp, fbw = lay[l].fbw, w = lay[l].w, sp = lay[l].strip_pages, ox = lay[l].ox;
+  }
   /* one FRAME for all strips: the stream may write it. Line y is line y of the buffer,
      SCISSOR chooses the strip. ZBUF is the pass's: at line y of strip k, Z is in strip
      k + 1, so ZBP is a strip after FRAME's base; the last strip's Z is strip 0, n - 1
      strips before it (mx_hires_init leaves room for that base, not memory it uses) */
-  u32 fbp = h.rt.fbp;
-  u32 zbp = fbp + ((k + 1) % h.npass) * h.strip_pages - k * h.strip_pages;
+  u32 zbp = fbp + ((k + 1) % h.npass) * sp - k * sp;
   /* a strip of its own for the Z (mx_hires_own_z): behind the buffer, so that the base
      of strip k's lines is not below page 0 */
   if (own_z)
-    zbp = own_zbp - k * h.strip_pages;
+    zbp = own_zbp - k * sp;
   u32 rgb = h.slot[s].rgb;
   u64 *c0 = MX_UNCACHED(pass_mem[h.nchain]);
   h.nchain = (h.nchain + 1) % NPASS_CHAINS;
@@ -158,18 +206,17 @@ static u64 *pass_chain(int s, u32 k, int shifted, int finish, int once) {
   c = mx_e_ad(c, MX_GS_REG_PRMODECONT, 1);
   c = mx_e_ad(c, MX_GS_REG_COLCLAMP, 1);
   for (int ctx = 0; ctx < 2; ctx++) {
-    c = mx_e_ad(c, mx_gs_ctx(MX_GS_REG_FRAME_1, ctx), mx_gs_frame(fbp, h.rt.fbw, h.rt.psm, 0));
+    c = mx_e_ad(c, mx_gs_ctx(MX_GS_REG_FRAME_1, ctx), mx_gs_frame(fbp, fbw, h.rt.psm, 0));
     c = mx_e_ad(c, mx_gs_ctx(MX_GS_REG_ZBUF_1, ctx), mx_gs_zbuf(zbp, h.zpsm, (u32)ctx));
-    c = mx_e_ad(c, mx_gs_ctx(MX_GS_REG_XYOFFSET_1, ctx), mx_gs_xyoffset(h.rt.ox, oy));
-    c = mx_e_ad(c, mx_gs_ctx(MX_GS_REG_SCISSOR_1, ctx), mx_gs_scissor(0, h.rt.w - 1, y0, y0 + rows - 1));
+    c = mx_e_ad(c, mx_gs_ctx(MX_GS_REG_XYOFFSET_1, ctx), mx_gs_xyoffset(ox, oy));
+    c = mx_e_ad(c, mx_gs_ctx(MX_GS_REG_SCISSOR_1, ctx), mx_gs_scissor(0, w - 1, y0, y0 + rows - 1));
   }
   /* the strip and its Z cleared */
   c = mx_e_ad(c, MX_GS_REG_TEST_1, mx_gs_test(0, 0, 0, 0, 0, 0, 1, 1));
   c = mx_e_ad(c, MX_GS_REG_PRIM, mx_gs_prim(MX_GS_PRIM_SPRITE, 0, 0, 0, 0, 0, 0, 0, 0));
   c = mx_e_ad(c, MX_GS_REG_RGBAQ, mx_gs_rgbaq(rgb & 0xFF, rgb >> 8 & 0xFF, rgb >> 16 & 0xFF, 0x80, 1));
-  c = mx_e_ad(c, MX_GS_REG_XYZ2, mx_gs_xyz(h.rt.ox, oy + (y0 << 4), 0));
-  c = mx_e_ad(c, MX_GS_REG_XYZ2,
-              mx_gs_xyz(h.rt.ox + (h.rt.w << 4), oy + ((y0 + h.strip_h) << 4), 0));
+  c = mx_e_ad(c, MX_GS_REG_XYZ2, mx_gs_xyz(ox, oy + (y0 << 4), 0));
+  c = mx_e_ad(c, MX_GS_REG_XYZ2, mx_gs_xyz(ox + (w << 4), oy + ((y0 + h.strip_h) << 4), 0));
   /* the strip's own record of the frame, after the main one */
   if (h.strip_qw)
     c = mx_e_call(c, h.slot[s].strip[k], 0, 0, 0);
@@ -262,6 +309,17 @@ static MX_IRQ_FN void pass_done(void *arg) {
   mx__gs_event();
 }
 
+/* the displays to layout l (with interrupts off) */
+static void disp_layout(int l) {
+  for (int i = 0; i < 2; i++) {
+    struct mx_circuit *c = &h.disp[i].c[1];
+    c->fbp = lay[l].fbp, c->fbw = lay[l].fbw, c->w = lay[l].w;
+  }
+  shown_l = l;
+  if (!h.hidden)
+    mx_display_apply(&h.disp[0]);
+}
+
 /* Pass k may run from now: the beam has left strip k + 1, which the pass
    takes for its Z (in an interrupt handler). */
 static void may_run(u32 k) {
@@ -285,6 +343,10 @@ static void may_run(u32 k) {
       h.nwait--;
       h.slot[h.played].state = PLAYED;
       h.slot[h.played].kicked = 0;
+      /* another layout: the display follows at the vblank, when this field's
+         passes have drawn all of its strips */
+      if (widths && h.slot[h.played].layout != shown_l)
+        disp_next = h.slot[h.played].layout;
       mx_hires_stats.shown++;
       if (old >= 0)
         h.slot[old].state = RETIRING;
@@ -306,6 +368,22 @@ static void may_run(u32 k) {
    out (its strip shows what was there; the passes after it keep their
    time). */
 static void too_late(u32 k) {
+  if (h.busy && !mx_hires_stats.stuck[15] && mx_count() - h.prev_at > MX_EE_HZ / 33) {
+    u32 *st = mx_hires_stats.stuck;
+    st[0] = MX_R32(MX_VIF_VIF1_STAT), st[1] = MX_R32(MX_VIF_VIF1_CODE);
+    st[2] = MX_R32(MX_DMA_VIF1_CHCR), st[3] = MX_R32(MX_DMA_VIF1_MADR), st[4] = MX_R32(MX_DMA_VIF1_QWC);
+    st[5] = MX_R32(MX_DMA_VIF1_TADR), st[6] = MX_R32(MX_DMA_VIF1_ASR0), st[7] = MX_R32(MX_DMA_VIF1_ASR1);
+    st[8] = MX_R32(MX_GIF_STAT);
+    st[9] = MX_R32(MX_DMA_GIF_CHCR), st[10] = MX_R32(MX_DMA_GIF_MADR), st[11] = MX_R32(MX_DMA_GIF_QWC);
+    st[12] = MX_R32(MX_DMA_GIF_TADR), st[13] = h.prev_k, st[14] = mx_vpu_stat(), st[15] = 1;
+    if (st[14] & MX_VPU_VBS1)
+      mx_vu1_stop_dump(mx_hires_stats.stuck_vu1);
+    u32 ta = st[5] & 0x01FFFFF0u;
+    if (ta >= 16 * 16 && ta + 4 * 16 <= 0x02000000u)
+      for (u32 i = 0; i < 20; i++)
+        for (u32 j = 0; j < 4; j++)
+          mx_hires_stats.stuck_mem[i][j] = *(volatile u32 *)(uintptr_t)(0xA0000000u + ta - 16 * 16 + i * 16 + j * 4);
+  }
   if (h.busy && h.prev_k == k) {
     mx_hires_stats.over++;
     if (h.log_cur)
@@ -350,17 +428,29 @@ static void vsync_hook(void) {
   TMR_COUNT = 0;
   h.next_line = 0;
   TMR_COMP = h.line[0];
+  if (disp_next >= 0) {
+    disp_layout(disp_next);
+    disp_next = -1;
+  }
   may_run(own_z ? h.npass - 1 : h.npass - 2);
 }
 
 void mx_hires_strip_lines(u32 lines) { cfg_strip_lines = lines; }
 void mx_hires_own_z(int on) { cfg_own_z = on; }
+void mx_hires_widths(int on) { cfg_widths = on; }
+void mx_hires_width(u32 w) { want_w = w; }
 void mx_hires_ahead(u32 n) { cfg_ahead = n ? n : 1; }
 u32 mx_hires_strip_height(void) { return h.strip_h; }
 
 static u32 align_up(u32 v, u32 a) { return (v + a - 1) / a * a; }
 
-u64 mx_hires_frame(u32 mask) { return mx_gs_frame(h.rt.fbp, h.rt.fbw, h.rt.psm, mask); }
+u64 mx_hires_frame(u32 mask) {
+  if (widths && h.building >= 0) {
+    int l = h.slot[h.building].layout;
+    return mx_gs_frame(lay[l].fbp, lay[l].fbw, h.rt.psm, mask);
+  }
+  return mx_gs_frame(h.rt.fbp, h.rt.fbw, h.rt.psm, mask);
+}
 
 /* mx_hires_init's memory, for the pipeline's restart after a pause */
 static void *cfg_mem, *cfg_spr;
@@ -412,6 +502,25 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   mx_rt_init(&h.rt, fbp, w, hgt, psm, MX_RT_NOZ, MX_RT_NOZ);
   mx_gs.w = w, mx_gs.h = hgt, mx_gs.fbw = fbw;
   mx_gs.fbp[0] = mx_gs.fbp[1] = fbp;
+  /* the layouts at half the width (with a Z strip of its own: the Z is the
+     same place in all of them) */
+  widths = cfg_widths && own_z && (w / 2) % 64 == 0;
+  cur_l = shown_l = L_FULL, disp_next = -1, lent = 0, front_new = 0, front_first = ~0u;
+  if (widths) {
+    u32 hfbw = w / 2 / 64, hsp = hfbw * h.strip_h / h.page_h;
+    u32 hpages = (h.npass - 1) * hsp + last_rows * hfbw;
+    lay[L_FULL].fbp = fbp, lay[L_FULL].fbw = fbw, lay[L_FULL].w = w, lay[L_FULL].strip_pages = h.strip_pages;
+    lay[L_FRONT].fbp = fbp, lay[L_END].fbp = fbp + h.pages - hpages;
+    lay[L_FULL].ox = h.rt.ox;
+    for (int l = L_FRONT; l <= L_END; l++)
+      lay[l].fbw = hfbw, lay[l].w = w / 2, lay[l].strip_pages = hsp, lay[l].ox = h.rt.ox + ((w - w / 2) / 2 << 4);
+    /* the spare room: the buffer after L_FRONT's strips up to L_END's last
+       row (its spare blocks are mx_hires_spare's in every layout), and the Z
+       strip's second half */
+    u32 row = hgt / h.page_h;
+    spare_fb = fbp + hpages, spare_fb_n = lay[L_END].fbp + row * hfbw - spare_fb;
+    spare_z = own_zbp + hsp, spare_z_n = h.strip_pages - hsp;
+  }
   for (int i = 0; i < 2; i++)
     mx_display_init(&h.disp[i], &h.rt);
   for (int i = 0; i < 2; i++)
@@ -437,6 +546,9 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
 
   cfg_mem = mem, cfg_bytes = bytes, cfg_spr = spr, cfg_spr_bytes = spr_bytes;
   mx_hires_stats = (struct mx_hires_stats){0};
+  /* VU1 and VIF1 from the start: a program before may have left VU1 running */
+  if (mx_vpu_stat() & MX_VPU_VBS1)
+    mx_vu_reset(2);
   paused = 0;
   return pipeline_start();
 }
@@ -466,6 +578,7 @@ static int pipeline_start(void) {
   }
   h.played = -1;
   h.nwait = 0;
+  freed_to = mx_gs.frames_done;
   h.building = -1;
   h.rgb = 0;
   h.shift_field = 0;
@@ -502,6 +615,35 @@ static int pipeline_start(void) {
 
 void mx__gs_event_wait(void);
 void mx__gs_event(void);
+
+/* The layout of the record begun now: the width asked for (mx_hires_width),
+   by way of L_END from L_FRONT; the spare room given to GS memory once a
+   record of L_FRONT is done (no record of another layout is played or
+   shown since), and taken back before L_END. */
+static int choose_layout(void) {
+  int half = want_w && want_w < h.rt.w;
+  if (half) {
+    if (cur_l == L_FRONT && !lent && front_first != ~0u && mx_gs.frames_done > front_first) {
+      mx_vram_free(spare_fb, spare_fb_n);
+      mx_vram_free(spare_z, spare_z_n);
+      lent = 1;
+    }
+    return L_FRONT;
+  }
+  if (cur_l != L_FRONT)
+    return L_FULL;
+  if (lent) {
+    /* both asked each time: each stops the cache placing more there */
+    int a = mx_vcache_release(spare_fb, spare_fb_n, MX_VRAM_FIXED);
+    int b = mx_vcache_release(spare_z, spare_z_n, MX_VRAM_FIXED);
+    if (a < 0 || b < 0)
+      return L_FRONT;
+    lent = 0;
+  }
+  front_first = ~0u;
+  return L_END;
+}
+
 static int slot_free(void) {
   int was = mx_di();
   retire();
@@ -550,7 +692,16 @@ u8 *mx__hires_begin(u32 *qw, u8 **once, u32 *once_qw) {
     }
     h.slot[s].state = BUILDING;
     h.slot[s].rgb = h.rgb;
+    h.slot[s].layout = L_FULL;
     h.building = s;
+    if (widths) {
+      int l = choose_layout();
+      h.slot[s].layout = l;
+      front_new = l == L_FRONT && cur_l != L_FRONT;
+      cur_l = l;
+      mx_gs.w = lay[l].w, mx_gs.fbw = lay[l].fbw;
+      mx_gs.fbp[0] = mx_gs.fbp[1] = lay[l].fbp;
+    }
   }
   *qw = h.qw_per_slot;
   *once = h.slot[h.building].once;
@@ -626,6 +777,8 @@ void mx__hires_end(u8 *end, u8 *once_end, int full) {
     mx_printf("mx_hires: a frame does not fit its record (%u bytes)\n", h.qw_per_slot * 16);
   h.slot[s].rgb = h.rgb;
   h.slot[s].frame = mx_gs.frames;
+  if (widths && front_new)
+    front_first = mx_gs.frames, front_new = 0;
   int was = mx_di();
   h.slot[s].state = WAITING;
   h.wait[h.nwait++] = (u32)s;
@@ -673,6 +826,42 @@ u32 mx_hires_hbyte(u32 *page) {
   return h.rt.psm == MX_GS_PSM_CT24 ? h.pages : 0;
 }
 
+/* a page's blocks by their row and column (GS manual 8.3: block configuration in a page) */
+static const u8 blocks_16s[8][4] = {{0, 2, 16, 18},  {1, 3, 17, 19},  {8, 10, 24, 26}, {9, 11, 25, 27},
+                                    {4, 6, 20, 22},  {5, 7, 21, 23},  {12, 14, 28, 30}, {13, 15, 29, 31}};
+static const u8 blocks_16[8][4] = {{0, 2, 8, 10},    {1, 3, 9, 11},   {4, 6, 12, 14},  {5, 7, 13, 15},
+                                   {16, 18, 24, 26}, {17, 19, 25, 27}, {20, 22, 28, 30}, {21, 23, 29, 31}};
+static const u8 blocks_32[4][8] = {{0, 1, 4, 5, 16, 17, 20, 21},
+                                   {2, 3, 6, 7, 18, 19, 22, 23},
+                                   {8, 9, 12, 13, 24, 25, 28, 29},
+                                   {10, 11, 14, 15, 26, 27, 30, 31}};
+
+u32 mx_hires_spare(u32 *at, u32 n) {
+  if (!own_z || !h.npass)
+    return 0;
+  int b16 = h.rt.psm == MX_GS_PSM_CT16 || h.rt.psm == MX_GS_PSM_CT16S;
+  u32 rows = b16 ? 8 : 4, cols = b16 ? 4 : 8; /* blocks of 8 lines */
+  u32 used = h.rt.h % h.page_h; /* the last row's lines that are shown */
+  if (!used)
+    return 0;
+  u32 first_free = (used + 7) / 8;
+  /* the blocks below the picture */
+  u32 free = 0;
+  for (u32 r = first_free; r < rows; r++)
+    for (u32 c = 0; c < cols; c++)
+      free |= 1u << (h.rt.psm == MX_GS_PSM_CT16S ? blocks_16s[r][c] : b16 ? blocks_16[r][c] : blocks_32[r][c]);
+  u32 row = h.rt.h / h.page_h, k = 0;
+  /* at half the width too: the last row of L_END, the part of L_FULL's
+     that is the same pages */
+  u32 p0 = widths ? lay[L_END].fbp + row * lay[L_END].fbw : h.rt.fbp + row * h.rt.fbw;
+  u32 np = widths ? lay[L_END].fbw : h.rt.fbw;
+  for (u32 p = 0; p < np; p++)
+    for (u32 g = 0; g < 32; g += 4)
+      if ((free >> g & 15) == 15 && k < n)
+        at[k++] = (p0 + p) * 32 + g;
+  return k;
+}
+
 void mx_hires_clear(u32 r, u32 g, u32 b) { h.rgb = (r & 0xFF) | (g & 0xFF) << 8 | (b & 0xFF) << 16; }
 
 void mx_hires_shift_field(int f) { h.shift_field = f; }
@@ -697,7 +886,12 @@ int mx_hires_save_tga(const char *path) {
     return -1;
   int both = mx_video.interlace && mx_video.ffmd && h.shift_field >= 0;
   int twice = mx_video.interlace && mx_video.ffmd;
-  u32 w = h.rt.w > 2048 ? 2048 : h.rt.w, hh = h.rt.h, rows = h.strip_h;
+  u32 lfbp = h.rt.fbp, lfbw = h.rt.fbw, lw = h.rt.w, lsp = h.strip_pages;
+  if (widths) {
+    int l = h.slot[s].layout;
+    lfbp = lay[l].fbp, lfbw = lay[l].fbw, lw = lay[l].w, lsp = lay[l].strip_pages;
+  }
+  u32 w = lw > 2048 ? 2048 : lw, hh = h.rt.h, rows = h.strip_h;
   int b16 = h.rt.psm == MX_GS_PSM_CT16 || h.rt.psm == MX_GS_PSM_CT16S;
   int fd = mx_fio_open(path, MX_FIO_WRONLY | MX_FIO_CREAT | MX_FIO_TRUNC);
   if (fd < 0)
@@ -714,7 +908,7 @@ int mx_hires_save_tga(const char *path) {
       mx_dmaq_drain(&h.q);
       mx_gs_wait_finish(fin, 1);
       for (u32 y = 0; y < n; y++) {
-        if (mx_gs_download(shot_line, MX_GS_PAGE(h.rt.fbp + k * h.strip_pages), h.rt.fbw,
+        if (mx_gs_download(shot_line, MX_GS_PAGE(lfbp + k * lsp), lfbw,
                            b16 ? h.rt.psm : MX_GS_PSM_CT32, 0, y, w, 1) < 0)
           break;
         for (u32 x = 0; x < w; x++) {
