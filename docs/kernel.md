@@ -182,6 +182,15 @@ the region's 480i or 576i and confirm it. `mx_gs_init` in libmxk shows its w x h
 `mx_screen_pick` (exact size, the shape it has on the region's TV mode). On PCSX2 the screen is
 set up again after the settings are read. `tests/ps2/k59_video.c`.
 
+Version 45 (2026-11-20): at a program's end the kernel stops the DMA channels with the DMAC held
+(`D_ENABLEW` CPND, EE User's Manual 5.7: a transfer may not stop by STR = 0 alone), resets VU0 and
+VU1 first (FBRST RS0, RS1) and then VIF0 and VIF1 (and their ERR masks), as maxsdk's
+`mx_vu_reset`, again while a VU is still busy; the screen says so if one stays busy. Before, the
+VIFs were reset first and the VUs got a force break with the reset. A program's end once left VU1
+running (a SCPH-90006, kernel 44): the next program's first VIF1 FLUSH waited for good. Not
+reproduced: `tests/ps2/k84_vuend.c` (VU1 in a loop, or a VIF1 chain calling VU1 for ever, at the
+end; two runs: `loop` or `dma`, then without) passes on kernel 44 too.
+
 Version 44 (2026-11-19): the VM reads a page from the swap file or a file with its lock let go
 (`docs/vm.md`: Reads without the lock), so another thread's fault that needs no read, a pin or the
 slow refill path does not wait for the read. In Quake 3 the main thread waited for the lock while
