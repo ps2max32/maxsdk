@@ -102,9 +102,32 @@ memory: [vm.md](vm.md). Where it goes (a game OS): [mx-os-plan.md](mx-os-plan.md
   space of its own. A program that would take all memory (without VM and without a core heap
   of its own) is not started.
 - The shell: the program the setting `shell.path` names (kernel version 27; before, `SHELL.CFG`), else
-  `mc0:/MXOS/MXSHELL.ELF`. It is a role, not a file name: the kernel starts it when nothing else
+  `mc0:/MXOS/MXSHELL.ELF`, with the words of `shell.args` as its arguments (kernel version 46).
+  It is a role, not a file name: the kernel starts it when nothing else
   is in front and brings it in front at the home button, and `mx_proc_list` marks it
-  (`MX_PROC_SHELL`; a service `MX_PROC_SERVICE`).
+  (`MX_PROC_SHELL`; a service `MX_PROC_SERVICE`). Without a shell to go back to and without the
+  home menu (a program not on maxsdk's frame pipeline) the home button does nothing (version 46).
+- The boot script (kernel version 46): with `INIT.ELF` in the kernel's directory (`apps/mxos`
+  `make init`; a kernel tried from `host:` takes the card's, as its modules: `host:` is there only
+  while ps2client is connected) the kernel starts it once at
+  its first start, before the service and the shell, in that directory. It runs `RC.SH` there,
+  lines in a shell's style, then ends: `set`/`$NAME` (also `$KDIR`, `$ROM`, `$?`), `echo`,
+  `cd`, `setting KEY value`, `net dhcp` or `net IP MASK GW`, `swap PATH [MiB]`,
+  `service PATH args`, `shell PATH args` (a game may be the shell), `run PATH args` (waited for,
+  `$?` its status), `if [not] exists PATH | equal A B | match PATTERN* TEXT` / `else` / `fi`,
+  `exit`. What it sets with `mx_setting_set` holds for this boot only: read before the store,
+  never written to `SETTINGS.DAT`. The kernel then starts the service and the shell as the
+  settings say and attaches the swap file again if it changed. An error stops the script with
+  its line in a notification; the boot goes on as without it. Example, a game on a USB drive
+  beside the kernel:
+
+      net 192.168.0.50 255.255.255.0 192.168.0.1
+      swap Q3/SWAP.SWP 64
+      if exists Q3/demoq3/pak0.pk3
+        shell Q3/QUAKE3.ELF +set com_basegame demoq3
+      else
+        shell Q3/QUAKE3.ELF
+      fi
 - Start: the kernel loads the ELF (from `host:`, `usb0:`, `mx4sio0:`, `ata0:`, ...) and runs it in a thread
   at priority 64: one of the kernel's own threads for a `libmxk` program of version 10, which
   uses the kernel's threads, semaphores and interrupt dispatch (`kernel.md`, Interrupts and
@@ -261,7 +284,8 @@ from an interrupt); `mx_timer_claim` lends a whole EE timer for a clock of its o
 Provided for every program: the home button (`MX_PAD_HOME`: a USB pad's PS button; on a SIO2 pad
 Select + Start + L1 + R1 held together, which the program then gets as the home button, not as
 those four) opens the kernel's home menu (resume, the pad's settings, quit) for a `libmxk`
-program on maxsdk's frame pipeline, else it ends it (`mx_pad`). Since kernel version 25, when the
+program on maxsdk's frame pipeline; for another program it does nothing (since kernel version 46;
+before, it ended the program: a game without a shell to go back to ended at a press). Since kernel version 25, when the
 shell started the program (and waits for it or runs beside it, `mx_proc_spawn`), the home button
 brings the shell in front instead: the program is paused at its frame boundary and the shell gets
 `MX_EVENT_HOME`; it brings the program back with `mx_proc_front` or ends it with `mx_proc_kill`.

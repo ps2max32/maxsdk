@@ -22,7 +22,9 @@ extern "C" {
    when it is not set */
 int mx_setting_get(const char *key, char *value, u32 size);
 /* key set to value ("" or 0: removed). 0, or -1 (not the shell, a key or
-   value too long, the store full) */
+   value too long, the store full). From INIT.ELF (kernel version 46, the boot
+   script, docs/mx-os.md) for this boot only: not written to SETTINGS.DAT,
+   read before the store; the shell's own change of the key drops it. */
 int mx_setting_set(const char *key, const char *value);
 
 struct mx_setting {
