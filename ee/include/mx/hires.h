@@ -149,8 +149,9 @@ void mx_hires_widths(int on);
 /* Lines the beam is past a pass's strip (into the strip after it, or into the
    vblank after the last one) before that pass may start (8, the default; for
    the next mx_hires_init): a pass that starts while the beam still shows its
-   strip's last lines clears them under it. */
-void mx_hires_margin(u32 lines);
+   strip's last lines clears them under it. Below 0: that many lines before
+   the beam has left the strip (examples/beam: where the beam really is). */
+void mx_hires_margin(int lines);
 /* The width the frames begun from now are drawn at, mx_hires_init's or half
    of it (with mx_hires_widths). A frame's own is mx_gs.w after
    mx_frame_begin_n (window coordinates of that width; mx_hires_frame its

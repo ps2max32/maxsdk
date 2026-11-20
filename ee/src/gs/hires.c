@@ -1,5 +1,6 @@
 /* High resolution by passes (<mx/hires.h>). */
 
+#include <mx/crtc.h>
 #include <mx/dma.h>
 #include <mx/frame.h>
 #include <mx/hires.h>
@@ -116,7 +117,8 @@ static u32 front_first;        /* the frame of the first L_FRONT record since an
 static u32 spare_fb, spare_fb_n, spare_z, spare_z_n; /* that room */
 static u32 cfg_strip_lines; /* mx_hires_strip_lines */
 static int cfg_own_z;       /* mx_hires_own_z */
-static u32 cfg_margin = 8;  /* mx_hires_margin */
+static int cfg_margin = 8;  /* mx_hires_margin */
+static int last_at_vsync;   /* the pass that waits for the last strip runs at the vblank's interrupt */
 static u32 cfg_ahead = MX_HIRES_SLOTS; /* mx_hires_ahead: the most records waiting to be played */
 static int own_z;           /* this picture's: the passes' Z is a strip of its own */
 static u32 own_zbp;         /* its first page */
@@ -433,7 +435,8 @@ static MX_IRQ_FN void timer_irq(void *arg) {
 }
 
 /* The vblank starts: H-blanks counted from here. The beam has left the
-   last strip: the pass that waited for it may run (without a margin: now). */
+   last strip, or does so a few lines later (the timer's event then): the
+   pass that waited for it may run. */
 static void vsync_hook(void) {
   TMR_COUNT = 0;
   h.next_line = 0;
@@ -442,7 +445,7 @@ static void vsync_hook(void) {
     disp_layout(disp_next);
     disp_next = -1;
   }
-  if (!cfg_margin)
+  if (last_at_vsync)
     may_run(own_z ? h.npass - 1 : h.npass - 2);
 }
 
@@ -457,7 +460,7 @@ static void ev_add(u32 at, int late, int run) {
 void mx_hires_strip_lines(u32 lines) { cfg_strip_lines = lines; }
 void mx_hires_own_z(int on) { cfg_own_z = on; }
 void mx_hires_widths(int on) { cfg_widths = on; }
-void mx_hires_margin(u32 lines) { cfg_margin = lines; }
+void mx_hires_margin(int lines) { cfg_margin = lines; }
 void mx_hires_width(u32 w) { want_w = w; }
 void mx_hires_ahead(u32 n) { cfg_ahead = n ? n : 1; }
 u32 mx_hires_strip_height(void) { return h.strip_h; }
@@ -544,6 +547,10 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   }
   for (int i = 0; i < 2; i++)
     mx_display_init(&h.disp[i], &h.rt);
+  /* the picture's place while it is on: below the registers are those of the
+     display off, all 0 */
+  u64 shown[MX_DISP_NREGS];
+  mx_display_regs(&mm, &h.disp[0], shown);
   for (int i = 0; i < 2; i++)
     for (int c = 0; c < 2; c++)
       h.disp_on[i][c] = h.disp[i].c[c].on, h.disp[i].c[c].on = 0;
@@ -551,25 +558,54 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   mx_gs_displays(h.disp, 2);
   mx_display_apply(&h.disp[0]); /* off: PMODE's circuits */
 
-  /* the beam's line of each strip: DISPLAY2's DY (frame lines when
-     interlaced) and MAGV; + 4, as gsKit_hires_flip found */
-  u64 d = mx_gs.dregs[MX_DISP_DISPLAY2];
+  /* the beam's line of each strip, in H-blanks since the vblank's interrupt,
+     which comes at the end of the timing's active lines: its front porch,
+     then as far as DISPLAY2's DY (frame lines when interlaced) puts the
+     picture, + 4 as gsKit_hires_flip found, and a line. Measured on a TV with
+     examples/beam in every TV mode (SCPH-90006): within two lines of it, PAL
+     three. (DY is read from the display as it will be shown: since the
+     display is off until the first record was played, the registers here are
+     0, and the strips' lines were reckoned a blanking too early.) */
+  u64 d = shown[MX_DISP_DISPLAY2];
   u32 dy = (u32)(d >> 12) & 0x7FF, magv = ((u32)(d >> 27) & 3) + 1;
   u32 top = (dy + 4) >> (mm.interlace ? 1 : 0);
+  const struct mx_crtc *crtc = mm.crtc ? mm.crtc : mx_crtc_for_code(mm.code, mm.interlace);
+  int field = 0; /* a field's lines, 0: not known */
+  if (crtc) {
+    /* the timing's lines are half lines in the TV modes (240p and 288p too) and when interlaced */
+    int u = crtc->kind == MX_CRTC_NTSC || crtc->kind == MX_CRTC_PAL || crtc->interlace ? 1 : 2;
+    int f2 = (crtc->vs + crtc->vbpe + crtc->vbp + crtc->vdp + crtc->vfpe + crtc->vfp) * u;
+    int top2 = (int)dy * (mm.interlace ? 1 : 2) + (mm.interlace ? 4 : 8) + (crtc->vfpe + crtc->vfp) * u + 2;
+    top = (u32)top2 / 2;
+    field = f2 / 2;
+  }
   u32 per = mm.interlace && !mm.ffmd ? 1 : 2; /* field lines per 2 buffer lines */
   for (u32 j = 0; j < h.npass; j++)
     h.line[j] = top + j * h.strip_h * magv * per / 2;
   /* the beam must have left the strip a pass writes (its own, which its
      clear writes first; without a Z strip of its own also the next one, its
      Z) when the pass may run: the margin's lines after the beam started the
-     strip after it, or after the vblank started for the pass that waits for
-     the last strip */
+     strip after it; for the pass that waits for the last strip after the
+     picture's end, which is before the vblank's interrupt or after it (a
+     field's lines later the count starts again) */
   h.nev = 0;
-  if (cfg_margin)
-    ev_add(cfg_margin, -1, own_z ? (int)h.npass - 1 : (int)h.npass - 2);
+  int last = own_z ? (int)h.npass - 1 : (int)h.npass - 2;
+  /* the picture's end and the margin: before the interrupt (in this field's
+     count), or after it; without a timing the end is taken for the interrupt */
+  int end = (int)(top + hgt * magv * per / 2) + cfg_margin, before = 1;
+  if (!field && cfg_margin >= 0)
+    end = cfg_margin, before = 0;
+  else if (field && end >= field)
+    end -= field, before = 0;
+  last_at_vsync = before ? end <= (int)h.line[h.npass - 1] : end <= 0;
+  if (!last_at_vsync)
+    ev_add((u32)end, -1, last);
   ev_add(h.line[0], 0, -1);
-  for (u32 j = 1; j < h.npass; j++)
-    ev_add(h.line[j] + cfg_margin, (int)j, own_z ? (int)j - 1 : (int)((j + h.npass - 2) % h.npass));
+  for (u32 j = 1; j < h.npass; j++) {
+    int at = (int)h.line[j] + cfg_margin;
+    ev_add(at > (int)h.line[j - 1] ? (u32)at : h.line[j - 1] + 1, (int)j,
+           own_z ? (int)j - 1 : (int)((j + h.npass - 2) % h.npass));
+  }
 
   cfg_mem = mem, cfg_bytes = bytes, cfg_spr = spr, cfg_spr_bytes = spr_bytes;
   mx_hires_stats = (struct mx_hires_stats){0};

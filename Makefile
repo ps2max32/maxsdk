@@ -142,6 +142,9 @@ $(OUT)/examples/display.elf: $(LIBK)
 MOVIE_EXAMPLES = $(OUT)/examples/movie.elf $(OUT)/examples/moviehd.elf $(OUT)/examples/picture.elf
 $(MOVIE_EXAMPLES): MX_TARGET = mxos
 $(MOVIE_EXAMPLES): $(LIBK) $(HERE)/ee/ld/maxsdk-vm.ld
+# the beam example is read from a TV: on the PS2, so under the kernel
+$(OUT)/examples/beam.elf: MX_TARGET = mxos
+$(OUT)/examples/beam.elf: $(LIBK) $(HERE)/ee/ld/maxsdk-vm.ld
 # tests/ps2/mpeg.c: its streams (tools/mpeg-fixtures.sh), embedded
 $(OUT)/tests/mpeg.elf: CFLAGS += -Wno-c23-extensions
 $(OUT)/tests/mpeg.elf: $(wildcard $(HERE)/tests/ps2/data/mpeg_*)
