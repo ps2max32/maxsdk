@@ -92,6 +92,39 @@ int mx_net_recv(int s, void *data, u32 size) {
   return call_data(MXSOCK_RECV, (u32)s, size, 0, 0, 0, 0, size, data, 0);
 }
 
+/* "a.b.c.d": 1 and its address */
+static int dotted(const char *name, u32 *ip) {
+  u32 part = 0, parts = 0, value = 0, digits = 0;
+  for (const char *p = name;; p++) {
+    if (*p == '.' || !*p) {
+      if (!digits || part > 255 || parts == 4)
+        return 0;
+      value |= part << (8 * parts++), part = 0, digits = 0;
+      if (!*p)
+        break;
+    } else if (*p >= '0' && *p <= '9' && digits < 3)
+      part = part * 10 + (u32)(*p - '0'), digits++;
+    else
+      return 0;
+  }
+  if (parts != 4)
+    return 0;
+  *ip = value;
+  return 1;
+}
+
+int mx_net_resolve(const char *name, u32 *ip) {
+  u32 len = strlen(name) + 1, who[2];
+  if (dotted(name, ip))
+    return 0;
+  if (len > MXSOCK_NAME)
+    return MX_NET_NOTFOUND;
+  int n = call_data(MXSOCK_RESOLVE, 0, 0, 0, 0, name, len, 0, 0, who);
+  if (n == 0)
+    *ip = who[0];
+  return n;
+}
+
 int mx_net_recvfrom(int s, void *data, u32 size, u32 *ip, u32 *port) {
   u32 who[2];
   size = limit(size);

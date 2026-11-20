@@ -55,7 +55,17 @@ enum {
      mxnet_status (64-byte aligned), written now and at each change from
      then on; answer: MXNET_STATUS_VERSION */
   MXSOCK_NET_WATCH,
-  MXSOCK_NET_CONFIG /* a struct mxnet_config */
+  MXSOCK_NET_CONFIG, /* a struct mxnet_config */
+  /* a host's name to its address, by lwIP's DNS (the server: mxnet_config's dns,
+     or DHCP's): data, the name (at most MXSOCK_NAME bytes with its 0); answer 0
+     and the address, AGAIN while it is asked (the same name again later),
+     MXSOCK_NOTFOUND. The IOP's resolver thread holds MXSOCK_LOOKUPS names and asks
+     them one after the other; lwIP keeps what it found a while (DNS_TABLE_SIZE). */
+  MXSOCK_RESOLVE
 };
+
+#define MXSOCK_NAME 256
+#define MXSOCK_LOOKUPS 4
+#define MXSOCK_NOTFOUND (-2)
 
 #endif

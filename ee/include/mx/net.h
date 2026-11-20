@@ -37,6 +37,13 @@ int mx_net_recv(int s, void *data, u32 size);
 int mx_net_sendto(int s, const void *data, u32 size, u32 ip, u32 port);
 int mx_net_recvfrom(int s, void *data, u32 size, u32 *ip, u32 *port);
 int mx_net_close(int s);
+/* A host's name to its address (network order): 0, MX_NET_AGAIN while the DNS
+   is asked (call again with the same name, a few times a second or each frame),
+   MX_NET_NOTFOUND. A dotted address ("192.168.1.10") is taken as it is. The DNS
+   server is the network's (net.dns, or DHCP's). Up to four names are asked at
+   once; a name asked and not come back for is forgotten when the program ends. */
+#define MX_NET_NOTFOUND (-2)
+int mx_net_resolve(const char *name, u32 *ip);
 /* which of want (MX_NET_READ, MX_NET_WRITE) can go on now */
 int mx_net_poll(int s, int want);
 /* Sleep until one of the sockets can go on: bit s of rd for reading (data, a

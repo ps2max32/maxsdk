@@ -318,26 +318,20 @@ int select(int n, fd_set *r, fd_set *w, fd_set *e, struct timeval *timeout) {
   return ready;
 }
 
+int h_errno;
+
+/* blocking: sleeps while the IOP asks the DNS */
 struct hostent *gethostbyname(const char *name) {
   static struct hostent h;
   static u32 ip;
   static char *list[2] = {(char *)&ip, 0};
-  u32 part = 0, parts = 0, value = 0;
-  for (const char *p = name;; p++) {
-    if (*p == '.' || !*p) {
-      if (part > 255)
-        return 0;
-      value |= part << (8 * parts++), part = 0;
-      if (!*p)
-        break;
-    } else if (*p >= '0' && *p <= '9')
-      part = part * 10 + (u32)(*p - '0');
-    else
-      return 0;
-  }
-  if (parts != 4)
+  int n;
+  while ((n = mx_net_resolve(name, &ip)) == MX_NET_AGAIN)
+    mx_sleep_us(10000);
+  if (n < 0) {
+    h_errno = HOST_NOT_FOUND;
     return 0;
-  ip = value;
+  }
   h.h_name = (char *)name, h.h_addrtype = AF_INET, h.h_length = 4, h.h_addr_list = list;
   return &h;
 }

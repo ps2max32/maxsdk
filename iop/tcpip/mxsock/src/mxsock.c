@@ -6,6 +6,7 @@
 #include <sifcmd.h>
 #include <sysclib.h>
 #include <thbase.h>
+#include <thsemap.h>
 #include <mxsock.h>
 #include <mxnet.h>
 #include <sifman.h>
@@ -73,6 +74,109 @@ static int do_connect(int s, int fd, u32 ip, u32 port) {
   return err ? MXSOCK_CLOSED : 0;
 }
 
+/* ---- names (MXSOCK_RESOLVE): lwIP's DNS waits, so a thread of its own asks ---- */
+
+enum { L_FREE, L_ASKED, L_BUSY, L_DONE, L_FAILED };
+static struct {
+  char name[MXSOCK_NAME];
+  volatile u8 state;
+  volatile u8 orphan; /* the program went (MXSOCK_CLOSE_ALL): free it when done */
+  u32 ip;
+} look[MXSOCK_LOOKUPS];
+static int resolve_sema = -1;
+
+/* No DNS server (a fixed address without net.dns): the gateway, as a home
+   router answers DNS */
+static void server_or_gateway(void) {
+  static struct mxnet_status now;
+  if (ip4_addr_get_u32(ip_2_ip4(dns_getserver(0))))
+    return;
+  mxnet_status(&now);
+  if (now.gw) {
+    ip_addr_t g;
+    memset(&g, 0, sizeof g);
+    ip4_addr_set_u32(ip_2_ip4(&g), now.gw);
+    dns_setserver(0, &g);
+  }
+}
+
+static void resolve_thread(void *arg) {
+  static char buf[512];
+  (void)arg;
+  for (;;) {
+    WaitSema(resolve_sema);
+    server_or_gateway();
+    for (int i = 0; i < MXSOCK_LOOKUPS; i++) {
+      if (look[i].state != L_ASKED)
+        continue;
+      look[i].state = L_BUSY;
+      struct hostent h, *got = 0;
+      int err = 0;
+      int n = lwip_gethostbyname_r(look[i].name, &h, buf, sizeof buf, &got, &err);
+      if (n == 0 && got && got->h_addr_list[0]) {
+        memcpy(&look[i].ip, got->h_addr_list[0], 4);
+        look[i].state = L_DONE;
+      } else
+        look[i].state = L_FAILED;
+      if (look[i].orphan)
+        look[i].orphan = 0, look[i].state = L_FREE;
+    }
+  }
+}
+
+static int resolve(char *name, s32 *ip) {
+  name[MXSOCK_NAME - 1] = 0;
+  if (!name[0])
+    return MXSOCK_NOTFOUND;
+  if (resolve_sema < 0) {
+    iop_sema_t sm = {0, 0, 0, MXSOCK_LOOKUPS};
+    iop_thread_t t = {TH_C, 0, resolve_thread, 0x1000, 0x58};
+    int sema = CreateSema(&sm), id;
+    if (sema < 0 || (id = CreateThread(&t)) <= 0 || StartThread(id, 0) < 0)
+      return -12;
+    resolve_sema = sema;
+  }
+  int free = -1, old = -1;
+  for (int i = 0; i < MXSOCK_LOOKUPS; i++) {
+    int st = look[i].state;
+    if (st == L_FREE || look[i].orphan) {
+      if (st == L_FREE && free < 0)
+        free = i;
+      continue;
+    }
+    if (strcmp(look[i].name, name)) {
+      if (st == L_DONE || st == L_FAILED)
+        old = i; /* nobody came back for it: may be taken */
+      continue;
+    }
+    if (st == L_DONE || st == L_FAILED) {
+      look[i].state = L_FREE;
+      if (st == L_FAILED)
+        return MXSOCK_NOTFOUND;
+      *ip = (s32)look[i].ip;
+      return 0;
+    }
+    return MXSOCK_AGAIN;
+  }
+  if (free < 0)
+    free = old;
+  if (free < 0)
+    return MXSOCK_AGAIN; /* all are being asked: later */
+  strcpy(look[free].name, name);
+  look[free].state = L_ASKED;
+  SignalSema(resolve_sema);
+  return MXSOCK_AGAIN;
+}
+
+static void resolve_forget(void) {
+  for (int i = 0; i < MXSOCK_LOOKUPS; i++) {
+    if (look[i].state == L_BUSY)
+      look[i].orphan = 1;
+    else
+      look[i].state = L_FREE;
+  }
+}
+
 /* ---- the network's state for the kernel (MXSOCK_NET_WATCH) ---- */
 
 static u32 watch_ee; /* where it goes, 0: nobody asked */
@@ -133,7 +237,12 @@ static void *rpc(int fno, void *data, int size) {
         lwip_close(sockets[s].fd - 1);
         sockets[s].fd = 0;
       }
+    resolve_forget();
     r[0] = 0;
+    return r;
+  }
+  if (fno == MXSOCK_RESOLVE) {
+    r[0] = resolve((char *)in, &r[1]);
     return r;
   }
   if (fno == MXSOCK_NET_WATCH) {
