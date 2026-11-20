@@ -47,7 +47,10 @@ u32 mx_pad_pressed(int port);
    x, right y, left x, left y, 0 .. 255 with the middle at 128 (y grows
    downwards). Returns 1, or 0 with 128s when the pad is digital or not
    connected. A DualShock is put into analog mode (locked) by the first calls
-   after it is connected. */
+   after it is connected. Each stick's middle is where it rests (a stand near
+   128 held still for 0.8 s): the values are moved so that it is 128, the
+   edges kept at 0 and 255, so a game's dead zone is around the real middle (a
+   DualShock 2 rests up to 30 steps off 128: drift). */
 int mx_pad_sticks(int port, u8 st[4]);
 
 /* The motors of the pad on port (0..): small (the right, light one: 0 off,

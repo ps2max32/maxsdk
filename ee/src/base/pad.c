@@ -265,11 +265,53 @@ u32 mx_pad_buttons(int port) {
   return s.buttons;
 }
 
+/* Each stick's middle: where it rests. A DualShock 2's stick at rest is often
+   10 to 30 steps off 128 (and elsewhere after each release), enough to leave
+   a game's dead zone: the view turns or the player walks by itself (drift).
+   A stand of both axes within MID_NEAR of 128 that stays within MID_STILL
+   steps for MID_MS is the stick's middle, and the values are moved so that it
+   is 128, each side stretched to keep 0 and 255 at the edges. A stick held
+   there on purpose is inside a game's dead zone, or close to it. */
+#define MID_NEAR 40
+#define MID_STILL 4
+#define MID_MS 800
+static struct {
+  u8 mid[4], still[4];
+  u8 timing[2];
+  u32 since[2];
+} rest[MX_PAD_PORTS];
+
+static u8 from_middle(int v, int mid) {
+  int out = v >= mid ? 128 + (v - mid) * 127 / (255 - mid) : 128 - (mid - v) * 128 / mid;
+  return (u8)(out < 0 ? 0 : out > 255 ? 255 : out);
+}
+
 int mx_pad_sticks(int port, u8 st[4]) {
   struct mx_pad_state s;
   pad_get(port, &s, 1);
   for (int i = 0; i < 4; i++)
     st[i] = s.sticks[i];
+  if (!s.analog || (unsigned)port >= MX_PAD_PORTS)
+    return s.analog;
+  u32 now = mx_count();
+  for (int k = 0; k < 4; k += 2) {
+    typeof(rest[0]) *r = &rest[port];
+    if (!r->mid[k])
+      r->mid[k] = r->mid[k + 1] = 128;
+    int x = st[k], y = st[k + 1], c = k / 2;
+    if (x - 128 <= MID_NEAR && 128 - x <= MID_NEAR && y - 128 <= MID_NEAR && 128 - y <= MID_NEAR) {
+      int dx = x - r->still[k], dy = y - r->still[k + 1];
+      if (!r->timing[c] || dx > MID_STILL || -dx > MID_STILL || dy > MID_STILL || -dy > MID_STILL) {
+        r->still[k] = (u8)x, r->still[k + 1] = (u8)y;
+        r->since[c] = now, r->timing[c] = 1;
+      } else if (now - r->since[c] >= (u32)((u64)MX_EE_HZ * MID_MS / 1000)) {
+        r->mid[k] = (u8)x, r->mid[k + 1] = (u8)y;
+      }
+    } else
+      r->timing[c] = 0;
+    st[k] = from_middle(x, r->mid[k]);
+    st[k + 1] = from_middle(y, r->mid[k + 1]);
+  }
   return s.analog;
 }
 
