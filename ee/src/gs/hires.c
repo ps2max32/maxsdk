@@ -48,12 +48,16 @@ static struct {
     mx_event last; /* the DMA of its last pass */
     int kicked;
     int layout;    /* L_*: where its strips lie (mx_hires_widths) */
+    u32 queued;    /* passes in the queue that play this record, not the one played when they are sent */
   } slot[MX_HIRES_SLOTS];
   u32 qw_per_slot, once_qw; /* main and once records' quadwords */
   u32 strip_qw;             /* a strip's own record's, 0: none */
   /* the passes that may run and are not sent yet, in the order they came */
   volatile u8 queue[MX_HIRES_PASSES];
+  volatile s8 queue_slot[MX_HIRES_PASSES]; /* the record a pass plays, -1: the one played when it is sent */
   volatile u32 nqueue;
+  u32 took[MX_HIRES_PASSES];   /* EE cycles the last pass of each strip took */
+  u8 skipped[MX_HIRES_PASSES]; /* that strip's last pass was left out ahead (mx_hires_skip_late) */
   volatile int busy;        /* a pass is being sent */
   volatile int played;   /* the slot played, -1: none yet */
   /* the display is off from mx_hires_init until a record was played a whole
@@ -71,7 +75,7 @@ static struct {
   struct {
     u16 at;
     s8 late, run;
-  } ev[MX_HIRES_PASSES + 1];
+  } ev[MX_HIRES_PASSES + 2];
   u32 nev;
   volatile u32 next_line; /* index into ev[] of the next timer compare */
   volatile u32 parity;    /* the field the passes of this field are drawn for */
@@ -95,7 +99,10 @@ static u64 pass_mem[NPASS_CHAINS][PASS_QW * 2] MX_ALIGNED(64);
    follow one whose strips its own do not overwrite before the beam has
    shown them: L_FRONT follows anything; L_FULL follows L_FULL or L_END
    (whose strips lie behind its own); so from L_FRONT back to the whole
-   width one record of L_END first. While the records are L_FRONT, the rest
+   width one record of L_END first. Without a Z strip of the passes' own the
+   half width is drawn in place (in_place): the same buffer and the same
+   pages a strip, the left half of each line, so every layout follows every
+   other and no memory is free. While the records are L_FRONT, the rest
    of the buffer (but its last row of pages, mx_hires_spare's) and the rest
    of the Z strip are free: given to GS memory (the cache takes them), and
    taken back before a record of L_END (mx_vcache_release). The display
@@ -106,6 +113,7 @@ static struct {
   u32 fbp, fbw, w, strip_pages, ox; /* ox: XYOFFSET's x, the picture of that width centred as h.rt's */
 } lay[L_N];
 static int cfg_widths, widths; /* mx_hires_widths: asked for; this picture's */
+static int in_place;           /* the half width in the whole width's buffer (no Z strip of the passes' own) */
 static u32 want_w;             /* mx_hires_width */
 static int cur_l;              /* the layout of the last record begun, or chosen for the next */
 static int chosen;             /* cur_l is chosen for a record not begun yet (mx__hires_layout) */
@@ -119,6 +127,10 @@ static u32 cfg_strip_lines; /* mx_hires_strip_lines */
 static int cfg_own_z;       /* mx_hires_own_z */
 static int cfg_margin = 8;  /* mx_hires_margin */
 static int last_at_vsync;   /* the pass that waits for the last strip runs at the vblank's interrupt */
+static int cfg_swap_strips; /* mx_hires_swap_strips */
+static int cfg_merge_last;  /* mx_hires_merge_last */
+static int cfg_skip_late;   /* mx_hires_skip_late */
+static u32 field_lines, line_cycles; /* a field's H-blanks, and the EE's cycles of one (0: not known) */
 static u32 cfg_ahead = MX_HIRES_SLOTS; /* mx_hires_ahead: the most records waiting to be played */
 static int own_z;           /* this picture's: the passes' Z is a strip of its own */
 static u32 own_zbp;         /* its first page */
@@ -149,7 +161,7 @@ static void tmr_off(void) {
 static u32 freed_to; /* one past the newest frame freed */
 static void retire(void) {
   for (int i = 0; i < MX_HIRES_SLOTS; i++)
-    if (h.slot[i].state == RETIRING && (!h.slot[i].kicked || mx_event_done(h.slot[i].last))) {
+    if (h.slot[i].state == RETIRING && !h.slot[i].queued && (!h.slot[i].kicked || mx_event_done(h.slot[i].last))) {
       h.slot[i].state = FREE;
       if (freed_to < h.slot[i].frame + 1)
         freed_to = h.slot[i].frame + 1;
@@ -181,6 +193,10 @@ static u64 *pass_chain(int s, u32 k, int shifted, int finish, int once) {
   u32 y0 = k * h.strip_h;
   /* the lines of the strip that are shown (the last one is shorter) */
   u32 rows = h.rt.h - y0 < h.strip_h ? h.rt.h - y0 : h.strip_h;
+  /* the last strip may be higher than the others (mx_hires_merge_last) */
+  if (k == h.npass - 1)
+    rows = h.rt.h - y0;
+  u32 clear_h = rows > h.strip_h ? rows : h.strip_h;
   u32 oy = h.rt.oy + (shifted ? 8 : 0);
   /* the slot's layout (mx_hires_widths) */
   u32 fbp = h.rt.fbp, fbw = h.rt.fbw, w = h.rt.w, sp = h.strip_pages, ox = h.rt.ox;
@@ -227,7 +243,7 @@ static u64 *pass_chain(int s, u32 k, int shifted, int finish, int once) {
   c = mx_e_ad(c, MX_GS_REG_PRIM, mx_gs_prim(MX_GS_PRIM_SPRITE, 0, 0, 0, 0, 0, 0, 0, 0));
   c = mx_e_ad(c, MX_GS_REG_RGBAQ, mx_gs_rgbaq(rgb & 0xFF, rgb >> 8 & 0xFF, rgb >> 16 & 0xFF, 0x80, 1));
   c = mx_e_ad(c, MX_GS_REG_XYZ2, mx_gs_xyz(ox, oy + (y0 << 4), 0));
-  c = mx_e_ad(c, MX_GS_REG_XYZ2, mx_gs_xyz(ox + (w << 4), oy + ((y0 + h.strip_h) << 4), 0));
+  c = mx_e_ad(c, MX_GS_REG_XYZ2, mx_gs_xyz(ox + (w << 4), oy + ((y0 + clear_h) << 4), 0));
   /* the strip's own record of the frame, after the main one */
   if (h.strip_qw)
     c = mx_e_call(c, h.slot[s].strip[k], 0, 0, 0);
@@ -255,28 +271,27 @@ void mx_hires_log(struct mx_hires_pass *log, u32 n) {
 }
 
 /* The log's next entry for a pass of strip k (0: no log). */
-static struct mx_hires_pass *log_pass(u32 k) {
+static struct mx_hires_pass *log_pass(u32 k, int s) {
   if (!h.log)
     return 0;
   struct mx_hires_pass *e = &h.log[mx_hires_stats.logged++ % h.log_n];
-  e->frame = h.played >= 0 ? h.slot[h.played].frame : 0;
+  e->frame = s >= 0 ? h.slot[s].frame : 0;
   e->wait_us = (mx_count() - h.may_at[k]) / (MX_EE_HZ / 1000000);
   e->run_us = 0;
   e->strip = (u8)k, e->over = 0, e->out = 0, e->pad = 0;
   return e;
 }
 
-/* Pass k of the slot played into the VIF1 queue (in an interrupt handler,
-   or with interrupts off). Returns 0, or -1: not sent. */
-static int send(u32 k) {
+/* Pass k of slot s into the VIF1 queue (in an interrupt handler, or with
+   interrupts off). Returns 0, or -1: not sent. */
+static int send(u32 k, int s) {
   int shifted = mx_video.interlace && mx_video.ffmd && h.shift_field == (int)h.parity;
-  int s = h.played;
   int once = h.slot[s].once_inline;
   u64 *c0 = pass_chain(s, k, shifted, 0, once);
   mx_event e;
   if (mx_dmaq_try_chain(&h.q, c0, 1, &e) < 0)
     return -1;
-  h.log_cur = log_pass(k);
+  h.log_cur = log_pass(k, s);
   h.prev_at = mx_count(), h.prev_k = k;
   h.busy = 1;
   h.slot[s].last = e, h.slot[s].kicked = 1;
@@ -285,15 +300,41 @@ static int send(u32 k) {
   return 0;
 }
 
+/* mx_hires_skip_late: would pass k, sent now, still be drawn when the beam
+   comes to its strip? By what that strip's last pass took and an eighth
+   more, and the lines the beam has to go. Not twice in a row for a strip:
+   its time is that of the last pass sent, and a strip that takes longer
+   than the beam gives would never be drawn again. */
+static int skip(u32 k) {
+  if (!cfg_skip_late || !own_z || !line_cycles || !h.took[k])
+    return 0;
+  if (h.skipped[k]) {
+    h.skipped[k] = 0;
+    return 0;
+  }
+  u32 cnt = TMR_COUNT & 0xFFFF, to = h.line[k];
+  u32 left = cnt < to ? to - cnt : cnt < field_lines + to ? field_lines + to - cnt : 0;
+  if (h.took[k] + h.took[k] / 8 <= left * line_cycles)
+    return 0;
+  h.skipped[k] = 1;
+  mx_hires_stats.skipped++;
+  return 1;
+}
+
 /* The next pass that may run, if none is being sent. */
 static void start_next(void) {
   while (!h.busy && h.nqueue) {
     u32 k = h.queue[0];
+    int s = h.queue_slot[0];
     for (u32 i = 1; i < h.nqueue; i++)
-      h.queue[i - 1] = h.queue[i];
+      h.queue[i - 1] = h.queue[i], h.queue_slot[i - 1] = h.queue_slot[i];
     h.nqueue--;
-    if (send(k) < 0) {
-      struct mx_hires_pass *e = log_pass(k);
+    if (s >= 0)
+      h.slot[s].queued--;
+    else
+      s = h.played;
+    if (skip(k) || send(k, s) < 0) {
+      struct mx_hires_pass *e = log_pass(k, s);
       if (e)
         e->out = 1;
       mx_hires_stats.late++;
@@ -308,6 +349,7 @@ static MX_IRQ_FN void pass_done(void *arg) {
   (void)arg;
   if (!h.busy)
     return;
+  h.took[h.prev_k] = h.q.t_last_end - h.prev_at;
   u32 t = (h.q.t_last_end - h.prev_at) / (MX_EE_HZ / 1000000);
   if (t > mx_hires_stats.pass_us[h.prev_k])
     mx_hires_stats.pass_us[h.prev_k] = t;
@@ -335,17 +377,23 @@ static void disp_layout(int l) {
    takes for its Z (in an interrupt handler). */
 static void may_run(u32 k) {
   retire();
-  if (k == 0) {
+  if (k == 0)
     mx_hires_stats.fields++;
-    /* the oldest waiting record is played from this field on, once its
-       texture uploads (PATH3) are done */
-    int s0 = h.nwait ? (int)h.wait[0] : -1;
+  /* the oldest waiting record is played from this field on, once its
+     texture uploads (PATH3) are done; with mx_hires_swap_strips from this
+     pass on, whichever it is (a record of another layout at pass 0 only:
+     the display follows at the vblank) */
+  int s0 = h.nwait ? (int)h.wait[0] : -1;
+  if (k == 0 || (cfg_swap_strips && s0 >= 0 &&
+                 (h.played < 0 || !widths || h.slot[s0].layout == h.slot[h.played].layout))) {
     if (s0 >= 0 && h.slot[s0].once_pending && !mx_dma_busy(MX_CH_GIF))
       h.slot[s0].once_pending = 0;
     if (s0 >= 0 && h.slot[s0].once_pending)
       mx_hires_stats.held++;
     if (h.nwait && !h.slot[s0].once_pending) {
       int old = h.played;
+      if (k)
+        mx_hires_stats.shown_mid++;
       h.played = (int)h.wait[0];
       if (!h.first_field)
         h.first_field = mx_hires_stats.fields;
@@ -358,20 +406,28 @@ static void may_run(u32 k) {
          passes have drawn all of its strips */
       if (widths && h.slot[h.played].layout != shown_l)
         disp_next = h.slot[h.played].layout;
+      /* and the passes that still wait (the field before's last ones) play
+         the record they were for: its layout is the one the beam still
+         shows this field */
+      if (widths && old >= 0 && h.slot[h.played].layout != h.slot[old].layout)
+        for (u32 i = 0; i < h.nqueue; i++)
+          if (h.queue_slot[i] < 0)
+            h.queue_slot[i] = (s8)old, h.slot[old].queued++;
       mx_hires_stats.shown++;
       if (old >= 0)
         h.slot[old].state = RETIRING;
       retire();
       mx__gs_event();
     }
-    /* drawn during this field for the next */
-    h.parity = (u32)MX_GET(GS_CSR_FIELD, MX_R64(MX_GS_CSR)) ^ 1;
   }
+  /* drawn during this field for the next */
+  if (k == 0)
+    h.parity = (u32)MX_GET(GS_CSR_FIELD, MX_R64(MX_GS_CSR)) ^ 1;
   if (h.played < 0)
     return;
   h.may_at[k] = mx_count();
   if (h.nqueue < MX_HIRES_PASSES)
-    h.queue[h.nqueue++] = (u8)k;
+    h.queue_slot[h.nqueue] = -1, h.queue[h.nqueue++] = (u8)k;
   start_next();
 }
 
@@ -402,10 +458,15 @@ static void too_late(u32 k) {
   }
   for (u32 i = 0; i < h.nqueue; i++)
     if (h.queue[i] == k) {
+      int s = h.queue_slot[i];
+      if (s >= 0)
+        h.slot[s].queued--;
+      else
+        s = h.played;
       for (u32 j = i + 1; j < h.nqueue; j++)
-        h.queue[j - 1] = h.queue[j];
+        h.queue[j - 1] = h.queue[j], h.queue_slot[j - 1] = h.queue_slot[j];
       h.nqueue--;
-      struct mx_hires_pass *e = log_pass(k);
+      struct mx_hires_pass *e = log_pass(k, s);
       if (e)
         e->out = 1;
       mx_hires_stats.late++;
@@ -463,6 +524,11 @@ void mx_hires_widths(int on) { cfg_widths = on; }
 void mx_hires_margin(int lines) { cfg_margin = lines; }
 void mx_hires_width(u32 w) { want_w = w; }
 void mx_hires_ahead(u32 n) { cfg_ahead = n ? n : 1; }
+void mx_hires_swap_strips(int on) { cfg_swap_strips = on; }
+void mx_hires_merge_last(int on) { cfg_merge_last = on; }
+void mx_hires_skip_late(int on) { cfg_skip_late = on; }
+u32 mx_hires_line(void) { return tmr < 0 ? 0 : TMR_COUNT & 0xFFFF; }
+u32 mx_hires_strip_line(u32 k) { return k < h.npass ? h.line[k] : 0; }
 u32 mx_hires_strip_height(void) { return h.strip_h; }
 
 static u32 align_up(u32 v, u32 a) { return (v + a - 1) / a * a; }
@@ -504,6 +570,14 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   h.npass = (hgt + h.strip_h - 1) / h.strip_h;
   if (h.npass < 3 || h.npass > MX_HIRES_PASSES)
     return -1;
+  /* a last strip of half a strip's lines or less is the one before's
+     (mx_hires_merge_last): that one is higher, and its Z is strip 0 and as
+     many lines of strip 1 as it is higher */
+  u32 more = 0; /* lines the last strip has more than the others */
+  if (cfg_merge_last && !cfg_own_z && h.npass > 3 && (hgt - (h.npass - 1) * h.strip_h) * 2 <= h.strip_h) {
+    h.npass--;
+    more = hgt - h.npass * h.strip_h;
+  }
   u32 fbw = (w + 63) / 64;
   h.strip_pages = fbw * h.strip_h / h.page_h;
   /* the last strip's ZBP is n - 1 strips below the buffer (pass_chain): the buffer
@@ -528,9 +602,17 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   mx_gs.fbp[0] = mx_gs.fbp[1] = fbp;
   /* the layouts at half the width (with a Z strip of its own: the Z is the
      same place in all of them) */
-  widths = cfg_widths && own_z && (w / 2) % 64 == 0;
+  widths = cfg_widths && (!own_z || (w / 2) % 64 == 0);
+  in_place = widths && !own_z;
   cur_l = shown_l = L_FULL, disp_next = -1, lent = 0, chosen = 0, front_new = 0, front_first = ~0u;
-  if (widths) {
+  if (in_place) {
+    /* the Z is the next strip of the picture: the half width in the same
+       buffer, the left half of its lines (the Z's too) */
+    for (int l = 0; l < L_N; l++)
+      lay[l].fbp = fbp, lay[l].fbw = fbw, lay[l].w = l == L_FULL ? w : w / 2, lay[l].strip_pages = h.strip_pages,
+      lay[l].ox = l == L_FULL ? h.rt.ox : h.rt.ox + ((w - w / 2) / 2 << 4);
+    spare_fb = spare_fb_n = spare_z = spare_z_n = 0;
+  } else if (widths) {
     u32 hfbw = w / 2 / 64, hsp = hfbw * h.strip_h / h.page_h;
     u32 hpages = (h.npass - 1) * hsp + last_rows * hfbw;
     lay[L_FULL].fbp = fbp, lay[L_FULL].fbw = fbw, lay[L_FULL].w = w, lay[L_FULL].strip_pages = h.strip_pages;
@@ -579,6 +661,10 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
     top = (u32)top2 / 2;
     field = f2 / 2;
   }
+  field_lines = (u32)field;
+  line_cycles = field && mx_gs.hz ? MX_EE_HZ / (mx_gs.hz * (u32)field) : 0;
+  for (u32 j = 0; j < MX_HIRES_PASSES; j++)
+    h.took[j] = 0, h.skipped[j] = 0;
   u32 per = mm.interlace && !mm.ffmd ? 1 : 2; /* field lines per 2 buffer lines */
   for (u32 j = 0; j < h.npass; j++)
     h.line[j] = top + j * h.strip_h * magv * per / 2;
@@ -603,8 +689,14 @@ int mx_hires_init(const struct mx_video_mode *m, u32 w, u32 hgt, u32 psm, void *
   ev_add(h.line[0], 0, -1);
   for (u32 j = 1; j < h.npass; j++) {
     int at = (int)h.line[j] + cfg_margin;
-    ev_add(at > (int)h.line[j - 1] ? (u32)at : h.line[j - 1] + 1, (int)j,
-           own_z ? (int)j - 1 : (int)((j + h.npass - 2) % h.npass));
+    int run = own_z ? (int)j - 1 : (int)((j + h.npass - 2) % h.npass);
+    /* the last strip's pass, when that strip is higher than the others: its Z
+       reaches into strip 1, so it waits until the beam is past those lines */
+    if (more && run == (int)h.npass - 1) {
+      ev_add((u32)(at + (int)(more * magv * per / 2)), -1, run);
+      run = -1;
+    }
+    ev_add(at > (int)h.line[j - 1] ? (u32)at : h.line[j - 1] + 1, (int)j, run);
   }
 
   cfg_mem = mem, cfg_bytes = bytes, cfg_spr = spr, cfg_spr_bytes = spr_bytes;
@@ -638,6 +730,7 @@ static int pipeline_start(void) {
     h.slot[i].state = FREE;
     h.slot[i].rgb = 0;
     h.slot[i].kicked = 0;
+    h.slot[i].queued = 0;
   }
   h.played = -1;
   h.nwait = 0;
@@ -685,6 +778,8 @@ void mx__gs_event(void);
    shown since), and taken back before L_END. */
 static int choose_layout(void) {
   int half = want_w && want_w < h.rt.w;
+  if (in_place)
+    return half ? L_FRONT : L_FULL;
   if (half) {
     if (cur_l == L_FRONT && !lent && front_first != ~0u && mx_gs.frames_done > front_first) {
       mx_vram_free(spare_fb, spare_fb_n);
@@ -976,7 +1071,7 @@ int mx_hires_save_tga(const char *path) {
   u8 hdr[18] = {0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, (u8)w, (u8)(w >> 8), (u8)oh, (u8)(oh >> 8), 24, 0x20};
   mx_fio_write(fd, hdr, sizeof hdr);
   for (u32 k = 0; k < h.npass; k++) {
-    u32 n = hh - k * rows < rows ? hh - k * rows : rows;
+    u32 n = hh - k * rows < rows || k == h.npass - 1 ? hh - k * rows : rows;
     for (int f = 0; f < 1 + both; f++) {
       u32 fin = mx_gs.finish;
       mx_dmaq_chain(&h.q, pass_chain(s, k, f, 1, h.slot[s].once_inline), 1);

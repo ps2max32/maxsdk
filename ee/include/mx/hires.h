@@ -23,7 +23,8 @@
    has not started when the beam comes to its strip is left out
    (mx_hires_stats.late). Every field draws all strips from the newest
    record that is complete, so the picture is whole however slowly the
-   frames come; a new record is taken at pass 0, the first pass of a field.
+   frames come; a new record is taken at pass 0, the first pass of a field
+   (or at any pass: mx_hires_swap_strips).
 
    With a Z strip of its own (mx_hires_own_z: a strip's pages more of GS
    memory, 1920 x 192 at 16 bits 720 KB) no pass draws its Z into the
@@ -71,7 +72,9 @@ struct mx_hires_stats {
   u32 fields;   /* fields drawn (pass 0 kicked) */
   u32 passes;   /* passes kicked */
   u32 late;     /* passes left out: not started when the beam came to their strip */
+  u32 skipped;  /* of them left out ahead: they would not have been done in time (mx_hires_skip_late) */
   u32 shown;    /* records that became the one played */
+  u32 shown_mid; /* of them at a pass other than a field's first (mx_hires_swap_strips) */
   u32 rec_max;  /* the largest record, bytes */
   u32 rec_full; /* frames that did not fit their record (halves left out) */
   u32 held;     /* fields that kept the record before, as the next one's PATH3 uploads were not done */
@@ -136,8 +139,10 @@ void mx_hires_strip_lines(u32 lines);
    outside its strip. 0 (the default): the Z is the strip after. */
 void mx_hires_own_z(int on);
 /* 1: the next mx_hires_init's picture may be drawn at half its width (the
-   display shows each pixel twice), from frame to frame (mx_hires_width):
-   with mx_hires_own_z, a width that is a multiple of 128. At half the
+   display shows each pixel twice), from frame to frame (mx_hires_width).
+   Without mx_hires_own_z the half width is drawn into the same buffer, the
+   left half of its lines (half the pixels for the GS to fill; GS memory
+   stays as it is). With mx_hires_own_z, a width that is a multiple of 128: at half the
    width a frame takes half the framebuffer and of the Z strip: the rest
    (but the buffer's last row of pages) is given to GS memory once the
    frames before at the whole width are done, where the cache
@@ -164,6 +169,35 @@ void mx_hires_width(u32 w);
    that takes longer than a field repeats the picture before, where a
    record that waited would have been shown. */
 void mx_hires_ahead(u32 n);
+/* 1: a record that waits is played from the next pass on, whichever strip's
+   it is, not from a field's first pass (0, the default; any time). A field
+   then shows strips of two or more frames, with the frames' difference at
+   the strips' edges, and a frame is shown a strip's time after it was
+   built at most: the frames need not keep to the fields, more than one a
+   field can be shown. A record of another width (mx_hires_width) still
+   waits for a field's first pass. */
+void mx_hires_swap_strips(int on);
+/* 1: for the next mx_hires_init, without a Z strip of the passes' own: a
+   last strip of half a strip's lines or less is no strip of its own but
+   part of the one before it, which is then higher than the others (540
+   lines in strips of 128: four strips, the last of 156 lines, not five with
+   a last one of 28). Its pass takes strip 0 and the first lines of strip 1
+   for its Z, and waits until the beam is past those. A pass less a field,
+   and each pass still has the time of the strips that are neither its own
+   nor its Z, here two. Strip k is then lines k * mx_hires_strip_height() up
+   to the next strip's, the last one to the picture's end. */
+void mx_hires_merge_last(int on);
+/* 1: with mx_hires_own_z, a pass that would still be drawn when the beam
+   comes to its strip is left out ahead (mx_hires_stats.skipped, counted in
+   late too): reckoned from the time that strip's last pass took and the
+   lines the beam has to go. Its strip shows the frame before for a field,
+   where it would have been shown half drawn, and the passes after it have
+   its time. Not twice in a row for one strip. 0 (the default). Any time. */
+void mx_hires_skip_late(int on);
+/* The H-blanks counted since the vblank's interrupt (the passes' clock), and
+   the count at which the beam starts strip k: for measurements. */
+u32 mx_hires_line(void);
+u32 mx_hires_strip_line(u32 k);
 /* The lines of a strip after mx_hires_init: strip k shows lines k * this
    up to the next strip's, of the picture's h. */
 u32 mx_hires_strip_height(void);
