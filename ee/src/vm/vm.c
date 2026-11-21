@@ -483,8 +483,9 @@ static void blk_write(u32 s, u32 pg, u32 b) {
    slot_page gives to another page (found 2026-11-13: two pages with one
    entry, an instruction on the one reading the other, refilled each other
    for ever). Counted, the first ones kept (the kind: 1 seen at a sync, 2
-   left behind at a vblank; the page, its entry, what slot_page said, the
-   space, the refills so far), and put right: the page has no entry.
+   left behind at a vblank, a check no longer made; the page, its entry,
+   what slot_page said, the space, the refills so far), and put right: the
+   page has no entry.
    The cause found: tlb.S's returns without a SYNC.L, into a CACHE
    instruction (docs/vm.md, Facts); none seen since, the check stays. */
 u32 mx__vm_dbg_stale[1 + 4 * 6];
@@ -672,18 +673,9 @@ static void vblank(void) {
       F.slot_page[i] = 0;
     }
   }
-  /* no page has an entry now */
-  for (u32 li = 0; li < NDIR; li++) {
-    if (vs->dir[li] == &zero_leaf)
-      continue;
-    const u32 *w = (const u32 *)(const void *)vs->dir[li]->page_slot;
-    for (u32 i = 0; i < LEAF_PAGES / 4; i++)
-      if (w[i])
-        for (u32 k = 0; k < 4; k++)
-          if (PSLOT(vs, li * LEAF_PAGES + i * 4 + k))
-            stale(2, li * LEAF_PAGES + i * 4 + k, PSLOT(vs, li * LEAF_PAGES + i * 4 + k));
-  }
-  zero_check();
+  /* No scan of the tables here (until 2026-11-21: every page's entry,
+     stale, and zero_check): it grew with the program's VM, some 90k cycles
+     a frame in Quake III. mx__vm_check does both. */
 }
 
 void mx_vm_trace_mark(u32 tag) {
