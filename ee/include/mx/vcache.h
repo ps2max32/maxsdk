@@ -109,6 +109,15 @@ int mx_vcache_peek(u64 key, struct mx_tex *t);
    texture whose places the caller kept from this frame's lookup): counts
    for the policy. 0, or -1 if key is not there. */
 int mx_vcache_use(u64 key);
+/* The entry key has now (for mx_vcache_again), or -1. */
+int mx_vcache_entry(u64 key);
+/* A use of key as a hit of mx_vcache_tex or mx_vcache_buf is one, without
+   the lookup and without its places written again, for a caller that kept
+   them from a frame before: 1 when entry (mx_vcache_entry's, then) still
+   holds key with its first piece at block bp; else 0: ask mx_vcache_tex or
+   mx_vcache_buf (the entry went, was placed again elsewhere, is not all
+   placed yet or lies in pages being taken back). */
+int mx_vcache_again(int entry, u64 key, u32 bp);
 /* A pinned entry is never evicted (pins count; MX_VCACHE_FULL comes
    sooner). Returns 0, or -1 if key is not there. */
 int mx_vcache_pin(u64 key);

@@ -1083,6 +1083,19 @@ int mx_vcache_use(u64 key) {
   return 0;
 }
 
+int mx_vcache_entry(u64 key) { return find(key); }
+
+int mx_vcache_again(int entry, u64 key, u32 bp) {
+  if (entry < 0 || entry >= NE)
+    return 0;
+  struct ent *x = &ents[entry];
+  if (!x->live || x->building || x->key != key || x->bp[0] != bp || in_ban(x))
+    return 0;
+  use(x);
+  st.hits++;
+  return 1;
+}
+
 int mx_vcache_peek(u64 key, struct mx_tex *t) {
   int e = find(key);
   if (e < 0)

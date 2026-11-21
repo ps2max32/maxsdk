@@ -549,9 +549,41 @@ static void hbyte(void) {
   check_places(6);
 }
 
+/* a use by the entry kept from a lookup (mx_vcache_again): as long as the key is there, in its place */
+static void again(void) {
+  struct mx_tex t;
+  struct mx_vcache_stats a, b;
+  setup(400, 0, MX_VCACHE_STREAM);
+  CHECK_EQ(mx_vcache_entry(1), -1);
+  CHECK_EQ(tex(1, MX_GS_PSM_CT32, 6, 6, 4, &t), MX_VCACHE_MISS);
+  int e = mx_vcache_entry(1);
+  CHECK(e >= 0);
+  mx_vcache_stats(&a);
+  CHECK_EQ(mx_vcache_again(e, 1, t.tbp[0]), 1);
+  mx_vcache_stats(&b);
+  CHECK_EQ(b.hits, a.hits + 1);
+  CHECK_EQ(b.misses, a.misses);
+  CHECK_EQ(mx_vcache_again(e, 2, t.tbp[0]), 0);     /* another key */
+  CHECK_EQ(mx_vcache_again(e, 1, t.tbp[0] + 1), 0); /* another place */
+  CHECK_EQ(mx_vcache_again(-1, 1, t.tbp[0]), 0);
+  CHECK_EQ(mx_vcache_again(1 << 20, 1, t.tbp[0]), 0);
+  u32 bp;
+  CHECK_EQ(mx_vcache_buf(100, 16, 16, MX_GS_PSM_CT32, &bp), MX_VCACHE_MISS);
+  int eb = mx_vcache_entry(100);
+  CHECK(eb >= 0 && eb != e);
+  CHECK_EQ(mx_vcache_again(eb, 100, bp), 1);
+  CHECK_EQ(mx_vcache_again(e, 100, bp), 0);
+  CHECK_EQ(mx_vcache_drop(100), 0);
+  CHECK_EQ(mx_vcache_again(eb, 100, bp), 0); /* gone */
+  CHECK_EQ(mx_vcache_entry(100), -1);
+  CHECK_EQ(mx_vcache_again(e, 1, t.tbp[0]), 1);
+  check_places(0);
+}
+
 void test_vcache(void) {
   pages();
   basics();
+  again();
   no_clut();
   too_large();
   for (int pol = MX_VCACHE_AUTO; pol <= MX_VCACHE_RING; pol++) {
