@@ -322,7 +322,7 @@ DualShock mode) until the next call; the kernel stops them when the program ends
 ```
 <device>/PS2MAX/<game>/
   <game>.elf
-  game.ini     title=, year=, type=, elf=, args=, data=, description=, cover=
+  game.ini     title=, year=, type=, elf=, args=, data=, setup=, setup_args=, description=, cover=
   cover.t8     apps/mxshell/tools/mk-cover.py
   <game data>, or with data= elsewhere: its saves and configs only
 <device>/PS2MAX/DATA/<name>/
@@ -349,6 +349,22 @@ args=-basedir {data}
 The engine reads its data there and writes next to its ELF (rule 10): Quake and Quake II add
 `./id1` (`./baseq2`) after the data's game directory, QuakeSpasm has it as its userdir, Quake 3
 as `fs_homepath`.
+
+A game whose data must first be made into something the PS2 reads (Quake 3: its textures, sounds
+and maps for its own renderer) names a setup program with `setup=` and its arguments with
+`setup_args=` (`{data}` as in `args=`). The shell starts it before the game, each time, in the
+game's directory; it checks quickly whether there is anything to do (a stamp of what it made) and
+shows its own screen while it works. Its exit status says what next: 0 starts the game, 2 (the
+user stopped it) goes back to the shell quietly, anything else goes back with the status shown.
+What it makes goes next to the game too, never into the data directory:
+
+```
+elf=quake3.elf
+data=../DATA/quake3
+args=+set fs_basepath {data}
+setup=CONVERT.ELF
+setup_args={data}
+```
 
 ## Testing a port
 
