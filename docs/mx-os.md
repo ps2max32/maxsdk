@@ -322,7 +322,7 @@ DualShock mode) until the next call; the kernel stops them when the program ends
 ```
 <device>/PS2MAX/<game>/
   <game>.elf
-  game.ini     title=, year=, type=, elf=, args=, data=, setup=, setup_args=, description=, cover=
+  game.ini     title=, year=, type=, elf=, args=, data=, versions=, setup=, setup_args=, description=, cover=
   cover.t8     apps/mxshell/tools/mk-cover.py
   <game data>, or with data= elsewhere: its saves and configs only
 <device>/PS2MAX/DATA/<name>/
@@ -361,10 +361,21 @@ What it makes goes next to the game too, never into the data directory:
 ```
 elf=quake3.elf
 data=../DATA/quake3
-args=+set fs_basepath {data}
+versions=Full game:baseq3/pak0.pk3:baseq3,Demo:demoq3/pak0.pk3:demoq3
+args=+set fs_basepath {data} +set com_basegame {version}
 setup=CONVERT.ELF
-setup_args={data}
+setup_args={data} {version}
 ```
+
+Data that comes in more than one version (Quake 3's full game and its demo) is named with
+`versions=`: `<name>:<file>:<word>`, `,` between them; a version is there when its file (relative
+to the data directory) is. `{version}` in `args=` and `setup_args=` is the chosen version's word.
+The shell starts the one in `<game>/.version` (one line, its word) if it is there; else, when
+only one is there, that one; when none is, the first (the game says what is missing). With two
+or more there and none chosen, it asks before the game starts and writes `.version`; the game's
+page in the shell switches it. The store shows the versions on the game's page, and gets the
+ones it has (apps/mxstore `docs/index-format.md`). Games that share a data directory share its
+versions.
 
 ## Testing a port
 
