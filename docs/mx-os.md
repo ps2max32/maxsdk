@@ -262,7 +262,8 @@ Retail PS2s have 32 MiB; never count on more.
    (`<mx/hires.h>`).
 9. **A pad is all there is.** Every prompt must work without a keyboard: Cross confirms where an
    engine asks for `Y`. Quit must be reachable from the menu.
-10. **Saves and configs** go next to the ELF, by relative path. Writes are slow (about 750 KB/s
+10. **Saves and configs** go next to the ELF, by relative path, also when the game data is
+    elsewhere (`data=`, under Packaging): the data directory is read, never written. Writes are slow (about 750 KB/s
     on USB) and FAT keeps a file's size until it is closed: close files. On a memory card keep
     few files open at a time: the card driver (mxmc) has 16 for both slots, and each running
     program's ELF from a card takes one (the service's and the shell's too); past that -24 (EMFILE).
@@ -321,14 +322,33 @@ DualShock mode) until the next call; the kernel stops them when the program ends
 ```
 <device>/PS2MAX/<game>/
   <game>.elf
-  game.ini     title=, year=, type=, elf=, args=, description=, cover=
+  game.ini     title=, year=, type=, elf=, args=, data=, description=, cover=
   cover.t8     apps/mxshell/tools/mk-cover.py
-  <game data>
+  <game data>, or with data= elsewhere: its saves and configs only
+<device>/PS2MAX/DATA/<name>/
+  game data that games share (data=../DATA/<name>)
 <device>/PS2MAX/swap.bin
 ```
 
 All paths in `game.ini` are relative to its directory; a directory with just `<dir>.elf` is a game
 too. `apps/mxshell/package-games.sh` writes this layout.
+
+The game data is the user's, not the program's: an update or a removal of the program (the store,
+`apps/mxstore` docs/index-format.md) leaves it alone. A game names where it is with `data=`, in its
+own game.ini (the one of its package, e.g. `apps/quake1/ps2/game.ini`): a directory below its own,
+or `../DATA/<name>` for data that several games read (Quake and QuakeSpasm: `../DATA/quake`).
+`{data}` in `args=` is that path as written (relative: the game runs in its own directory; `.`
+without `data=`), so the engine is told with its own option:
+
+```
+elf=quake1.elf
+data=../DATA/quake
+args=-basedir {data}
+```
+
+The engine reads its data there and writes next to its ELF (rule 10): Quake and Quake II add
+`./id1` (`./baseq2`) after the data's game directory, QuakeSpasm has it as its userdir, Quake 3
+as `fs_homepath`.
 
 ## Testing a port
 
