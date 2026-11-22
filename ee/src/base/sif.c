@@ -1809,9 +1809,15 @@ static int fio_dread_unlocked(int fd, char *name, u32 room, u32 *size) {
     return r[0];
   volatile __typeof__(de) *e = MX_UNCACHED(&de);
   /* drivers written for iomanX (bdmfs_fatfs: mass:) fill in its larger
-     dirent: 64 bytes of stat, so the name comes 24 bytes later */
-  volatile const char *src = e->name[0] ? e->name : e->name + 24;
-  u32 max = e->name[0] ? sizeof de.name : sizeof de.name - 24;
+     dirent: 64 bytes of stat, so the name comes 24 bytes later. Told by its
+     mode (iomanX's FIO_S_IFREG 0x2000, FIO_S_IFDIR 0x1000; the ROM's 0x10,
+     0x20; mcman's attributes always have 0x8000), not by the name's first
+     byte: FILEIO sends its whole buffer, and a ROM driver's entry before
+     (mc0:) left its name there */
+  u32 t = e->mode & 0xF000;
+  int x = t == 0x1000 || t == 0x2000;
+  volatile const char *src = x ? e->name + 24 : e->name;
+  u32 max = x ? sizeof de.name - 24 : sizeof de.name;
   u32 i = 0;
   for (; room && i < room - 1 && i < max && src[i]; i++)
     name[i] = src[i];
