@@ -39,8 +39,8 @@ memory: [vm.md](vm.md). Where it goes (a game OS): [mx-os-plan.md](mx-os-plan.md
   "Other consoles"). On those it sets the video modes itself, 576p (`mx_video_576p`) among them;
   on another a mode is the BIOS's or fails (`mx_video_set` returns -1: set another one). Run `examples/display` on each console the kernel is brought to.
 - Settings (kernel version 27, `<mx/setting.h>`): one store of the system's settings,
-  `mc0:/MXOS/SETTINGS.DAT` (keys such as `net.ip`, `swap.path`, `shell.path`, `service`,
-  `storage.mx4sio`, `pad.swap_xo`, `video.mode`; values are text). Any program reads them
+  `mc0:/MXOS/SETTINGS.DAT` (keys such as `system.root`, `net.ip`, `swap.path`, `shell.path`,
+  `service`, `storage.mx4sio`, `pad.swap_xo`, `video.mode`; values are text). Any program reads them
   (`mx_setting_get`, `mx_setting_list`); only the shell changes them (`mx_setting_set`), and every
   process with events gets `MX_EVENT_SETTING`. The kernel writes the file a few seconds after the
   last change. The files below (`SERVICES.CFG`, `SHELL.CFG`, `SWAP.CFG`, `IPCONFIG.DAT`) are only
@@ -53,8 +53,10 @@ memory: [vm.md](vm.md). Where it goes (a game OS): [mx-os-plan.md](mx-os-plan.md
   serves only the reset, execee and the ping.
 - Devices (kernel version 26, `<mx/dev.h>`): the kernel loads the storage drivers at its boot
   (bdm, its FAT/exFAT file system, USB drives, the HDD) and keeps them; a program never loads a
-  storage IRX. MX4SIO is off: it shares slot 2 with a memory card and keeps the card from being
-  seen (the setting `storage.mx4sio` = `on` loads it at the next boot). Devices come and go at any time: `mx_dev_list` (name,
+  storage IRX. Which ones the settings say (kernel version 47): `storage.usb` and `storage.ata`
+  are on unless `off`; MX4SIO is off unless `storage.mx4sio` = `on`: it shares slot 2 with a memory
+  card and keeps the card from being seen. The driver of the system folder's device is always
+  loaded. A change takes effect at the next boot. Devices come and go at any time: `mx_dev_list` (name,
   kind, present, file system, size, free, flags `MX_DEV_SWAP`, `MX_DEV_BUSY`), `mx_dev_gen`,
   `mx_dev_eject` (refused while the swap file or open files are on it), and the hint
   `MX_EVENT_DEVICE` to every process with `mx_proc_events`. Free space of FAT and exFAT is not
@@ -101,8 +103,27 @@ memory: [vm.md](vm.md). Where it goes (a game OS): [mx-os-plan.md](mx-os-plan.md
   from 1 MiB is its frames; each program's core is a run of them (pinned) and its VM an address
   space of its own. A program that would take all memory (without VM and without a core heap
   of its own) is not started.
-- The shell: the program the setting `shell.path` names (kernel version 27; before, `SHELL.CFG`), else
-  `mc0:/MXOS/MXSHELL.ELF`, with the words of `shell.args` as its arguments (kernel version 46).
+- The system folder (kernel version 47): the setting `system.root` names the folder MXOS's
+  files are in, on any device: `usb0:/PS2MAX`, `ata0:/PS2MAX`, `mx4sio0:/PS2MAX`. One setting
+  moves all of them: `shell.path` and `swap.path` without a device (`mxshell/MXSHELL.ELF`) are
+  in it, and programs that install or keep files (the store) put them there
+  (`mx_setting_get("system.root")`). The memory card holds only the kernel, its modules and
+  the settings. Without the setting the kernel takes the first of `usb0:/PS2MAX`,
+  `ata0:/PS2MAX`, `mx4sio0:/PS2MAX` that is there, for this boot only (the notification
+  "System folder found"; the shell keeps it by setting `system.root`). A change of
+  `system.root` takes effect at the next boot.
+- The boot, in this order (kernel version 47): the IOP and its drivers; then the kernel waits
+  for the system folder, at most 15 seconds (a USB drive after a cold start, an HDD spinning
+  up); then it attaches the swap file; then `INIT.ELF`, the service and the shell. The
+  notification "System folder ready" says it is there. Not there in time: the urgent
+  notification "No system folder", and the boot goes on without it (the swap file and the
+  shell wait for it); when it comes later the swap file is attached and the shell started. A
+  program the host link starts (execee) does not wait for it.
+- The shell: the program the setting `shell.path` names (kernel version 27; before, `SHELL.CFG`),
+  in the system folder when the path names no device (kernel version 47), with the words of
+  `shell.args` as its arguments (kernel version 46). Without the setting, or when its file is
+  not there, there is no shell: the text screen (since kernel version 47 the kernel no longer
+  falls back to `mc0:/MXOS/MXSHELL.ELF`).
   It is a role, not a file name: the kernel starts it when nothing else
   is in front and brings it in front at the home button, and `mx_proc_list` marks it
   (`MX_PROC_SHELL`; a service `MX_PROC_SERVICE`). Without a shell to go back to and without the
@@ -116,8 +137,9 @@ memory: [vm.md](vm.md). Where it goes (a game OS): [mx-os-plan.md](mx-os-plan.md
   `service PATH args`, `shell PATH args` (a game may be the shell), `run PATH args` (waited for,
   `$?` its status), `if [not] exists PATH | equal A B | match PATTERN* TEXT` / `else` / `fi`,
   `exit`. What it sets with `mx_setting_set` holds for this boot only: read before the store,
-  never written to `SETTINGS.DAT`. The kernel then starts the service and the shell as the
-  settings say and attaches the swap file again if it changed. An error stops the script with
+  never written to `SETTINGS.DAT`. It runs after the system folder is there (kernel version
+  47). The kernel then starts the service and the shell as the settings say and attaches the
+  swap file again if it changed. An error stops the script with
   its line in a notification; the boot goes on as without it. Example, a game on a USB drive
   beside the kernel:
 
@@ -211,7 +233,9 @@ Retail PS2s have 32 MiB; never count on more.
 5. **Leave the TLB and the exception handlers alone.** Interrupt handlers only through `mx_irq_*`
    (`<mx/irq.h>`): the kernel removes those when the program ends, not ones added to the BIOS directly.
 6. **Swap.** There is one swap file, MXOS's: the settings `swap.path` and `swap.size` (MiB, 64 by
-   default; before kernel version 27 `mc0:/MXOS/SWAP.CFG`) name it, shared by all address spaces, and the VM uses at most that size:
+   default; before kernel version 27 `mc0:/MXOS/SWAP.CFG`) name it, shared by all address spaces,
+   and the VM uses at most that size. Since kernel version 47 a `swap.path` without a device is in
+   the system folder, without the setting it is `SWAP.SWP` there, and `none` means none:
    a program that needs more ends with "the swap file is full" (plan phase 3c). Since kernel
    version 26 a program's own `mx_vm_config.swap` (and a launch's) is not used; without
    it VM programs have only the frames. Never truncate or assume its size. A program the host

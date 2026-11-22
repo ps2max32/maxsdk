@@ -191,6 +191,32 @@ setting `shell.args`: words after the shell's path. The home button does nothing
 the home menu cannot show over (not on maxsdk's frame pipeline, no frame boundary within 2 s, no
 video mode told) when no shell takes it; before, the program got it and libmxk ended it.
 
+Version 47 (2026-11-22): the system folder (`docs/mx-os.md`; `apps/mxos/ee/main.c`, "the system
+folder"). The setting `system.root` names it (`usb0:/PS2MAX`, ...); `shell.path` and `swap.path`
+without a device are in it (`in_root`), `swap.path` is `SWAP.SWP` there without the setting and
+`none` for none (`mx_swap_set("")` writes `none`), and the shell has no default any more (no
+`MXSHELL.ELF` in the kernel's directory). The boot: `main` no longer attaches the swap file;
+`after_program` asks `root_wait` before INIT.ELF, the service and the shell (not before a
+program the host link or a launch starts): it looks for the folder (its device in mxio's list,
+then `mx_fio_dopen`), without the setting the first of `usb0:/PS2MAX`, `ata0:/PS2MAX`,
+`mx4sio0:/PS2MAX` (put in the boot layer, `ksetting_set_boot`, so programs read it), then
+attaches the swap file (`kswap_boot`) and goes on. While it is not there `after_program`
+returns with the state "waiting for the system folder", and the device watch's tick (`dev_now`,
+twice a second and at each change of the list) calls `kroot_tick`, which asks again; after 15 s
+(`ROOT_WAIT`) the urgent notification "No system folder" and the boot goes on. When the folder
+comes after that, `kroot_tick` attaches the swap file (`kswap_reload`) and, with nothing in
+front, runs `after_program`, which starts the shell. Notifications (`MX_NOTIFY_DEVICE`, action
+Storage): "System folder ready", "System folder found" (without the setting), "No system
+folder" (urgent, resolved when it comes). The storage drivers follow the settings
+(`storage_wanted`): `storage.usb` (`usbmass_bd`) and `storage.ata` (`mxata`) unless `off`,
+`storage.mx4sio` (`mx4sio_bd`) when `on`, and the one of `system.root`'s device always. On PCSX2
+the folder is looked up at once (`emu_main`; `host:root.txt` imported as `system.root`, as the
+other test files), no wait. `INIT.ELF`'s return no longer prints the test end marker (a console
+that connected later was sent it with the boot's lines and ended the host's next run).
+`tests/ps2/k87_root.c` prints the folder, the paths, the swap file and the notifications: on the
+PS2 without the stick "No system folder" after 15 s, and with it put back the swap file attached
+and the shell started.
+
 Version 45 (2026-11-20): at a program's end the kernel stops the DMA channels with the DMAC held
 (`D_ENABLEW` CPND, EE User's Manual 5.7: a transfer may not stop by STR = 0 alone), resets VU0 and
 VU1 first (FBRST RS0, RS1) and then VIF0 and VIF1 (and their ERR masks), as maxsdk's
@@ -527,13 +553,15 @@ the open's and the write's results and tried again 2 s later when the card drive
 free (-24), else 30 s later (the card may be out). Without a store the old files are imported
 once: `IPCONFIG.DAT` (`net.ip`, `net.mask`, `net.gw`), `SWAP.CFG` (`swap.path`, `swap.size`),
 `SHELL.CFG` (`shell.path`), `SERVICES.CFG` (`service`); they are not read again after that. The
-kernel's keys: those, `storage.mx4sio` (`on`: `mx4sio_bd` loaded at the boot) and `pad.swap_ports`,
+kernel's keys: those, `system.root` (version 47), `storage.usb`, `storage.ata` (`off`: not loaded),
+`storage.mx4sio` (`on`: `mx4sio_bd` loaded at the boot) and `pad.swap_ports`,
 `pad.swap_xo` (the home menu's toggles, saved). `mx_setting_get`, `mx_setting_list` (the changes
 after a seq, in their order; a removed key is listed with "") and `mx_setting_seq` for every
 program; `mx_setting_set` for the shell only (-1 for another). A change posts
 `MX_EVENT_SETTING` (status: the store's seq) to every process with events. On PCSX2 the store
 is `host:settings.dat`/`host:settings.new`, and a test run's `host:swap.txt`, `host:shell.txt`,
-`host:services.txt` are imported at every boot (a missing one removes its key).
+`host:services.txt`, `host:root.txt` (version 47) are imported at every boot (a missing one
+removes its key).
 `tests/ps2/k52_settings.c`: as the shell `set` (get, set, remove, the event, the limits) and,
 after a new boot, `check` (read back from the file); `noshell` (set refused).
 
