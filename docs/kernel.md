@@ -205,6 +205,8 @@ kernel loads the module with its others, and goes the plain way without it, or f
   meanwhile. A fault that evicts a dirty page still holds the VM's lock then.
 - In: from the queue when the page is still there, else read from the file by the RPC thread at high
   priority, after the write under way.
+- CLOSE's words and answer are in the kernel's own memory: at the VM's end it comes after
+  `mx__vm_shutdown`, when the pool's window (where the pages' buffer is) is gone.
 - The queue, the writes and the reads are whole sectors: from an address that is not a multiple
   of 4 usbmass_bd writes a sector per command, and a page took 124 ms, not 34.
 Measured with the swap file on a USB stick (ROM 2.20), the whole run, plain and through mxswap:

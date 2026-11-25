@@ -1580,7 +1580,11 @@ static int xs_open(int fd, const char *path) {
 static void xs_close(int fd) {
   if (xs_fd < 0 || fd != xs_fd)
     return;
-  xs_call(MXSWAP_CLOSE, 16, 16);
+  /* not from xs_buf: it is in the VM's window, and at the VM's end this comes
+     after mx__vm_shutdown, which took the window's TLB entry away */
+  static u32 answer[16] MX_ALIGNED(64);
+  xs_head[0] = xs_head[1] = xs_head[2] = xs_head[3] = 0;
+  mx_sif_call(&xs, MXSWAP_CLOSE, xs_head, 16, (void *)MX_UNCACHED(answer), 16);
   xs_fd = -1;
 }
 
