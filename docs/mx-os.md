@@ -241,6 +241,9 @@ Retail PS2s have 32 MiB; never count on more.
    it VM programs have only the frames. Never truncate or assume its size. A program the host
    link starts may bring its own file on `host:` for that run (`host:mxswap.txt`, read by
    mxlink's app at execee; kernel version 28): MXOS's is used again after it.
+   With the setting `swap.iop` (`on`; kernel version 49, read at the boot and at each attach, off
+   without it) the pages go through `mxswap.irx` on the IOP, compressed, and a write does not wait
+   for the drive (`kernel.md`); not for a file on `host:`.
    After a level's load (or another point where a wait is fine) call `mx_vm_clean` (kernel
    version 43): the pages the load wrote go to the swap file then, so evicting them while the
    level runs costs no write (a write is about 7 ms, a lost field).

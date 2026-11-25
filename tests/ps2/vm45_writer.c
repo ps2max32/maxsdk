@@ -3,7 +3,9 @@
    by a program with VM: the shell's games). 16 frames, clean_frames 4, 48
    pages: 300 random touches (a page written whole, or checked) with 5 ms
    of sleep after each, as a game's frame, in which the writer gets ahead.
-   Most write outs must be the writer's.
+   At least a quarter of the write outs must be the writer's (most are, the
+   plain way; through mxswap a fault's own write out does not wait for the
+   drive, so more are the faults').
      vm45_writer.elf                                    (the VM its own)
      vm26_launch.elf launch - host:vm45_writer.elf      (a space; status 0) */
 
@@ -47,6 +49,6 @@ int main(void) {
   mx_printf("vm45: %u words wrong; %u swap outs by faults, %u by the writer, %u ins\n", bad,
             st.swap_outs, st.writer_outs, st.swap_ins);
   CHECK_EQ(bad, 0);
-  CHECK(st.writer_outs > st.swap_outs);
+  CHECK(st.writer_outs * 3 > st.swap_outs);
   return t_done("vm45");
 }

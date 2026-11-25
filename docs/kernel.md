@@ -191,6 +191,27 @@ setting `shell.args`: words after the shell's path. The home button does nothing
 the home menu cannot show over (not on maxsdk's frame pipeline, no frame boundary within 2 s, no
 video mode told) when no shell takes it; before, the program got it and libmxk ended it.
 
+Version 49: the swap file through the IOP, compressed (`mxswap.irx`, `iop/vm/mxswap`,
+`common/include/mxswap.h`; `ee/src/vm/vm.c` at `xs_io`, `lz4.c`). Off without the setting `swap.iop`
+(`on`), which is read at the boot (64 KiB of frames for the buffer are taken while the pool is
+empty; switched on later it works from the next boot) and at each attach of the swap file. The
+kernel loads the module with its others, and goes the plain way without it, or for a file on
+`host:`.
+- Out: the EE compresses the page (LZ4; as it is when that does not help) and PUTs it into a queue
+  in IOP memory (what is free at the first open less 160 KiB, at most 512 KiB: about 200 KiB
+  with everything loaded); a thread of low priority writes it at the page's slot of the same file.
+- A PUT never waits: with the queue full it answers `MXSWAP_FULL`, and the EE lets go of the swap
+  file (`swapsema`) and sleeps 4 ms between tries (`ROOM`), so another thread's page comes in
+  meanwhile. A fault that evicts a dirty page still holds the VM's lock then.
+- In: from the queue when the page is still there, else read from the file by the RPC thread at high
+  priority, after the write under way.
+- The queue, the writes and the reads are whole sectors: from an address that is not a multiple
+  of 4 usbmass_bd writes a sector per command, and a page took 124 ms, not 34.
+Measured with the swap file on a USB stick (ROM 2.20), the whole run, plain and through mxswap:
+`vm11` 10.5 and 3.2 s, `vm16` 6.4 and 2.4, `k82` 8.3 and 2.2, `vm45` (pages that do not compress,
+more than the stick takes) 33.0 and 32.9. `tests/ps2/k87_mxswap.c`; on PCSX2 with
+`make emu SWAP_IOP_TEST=1` (`host:mxswap.irx`).
+
 Version 48: the sound is the process's in front (`MXSND_VERSION` 2; every program with sound is
 built again, and the card's `mxsnd.irx` goes with the kernel). Before, a second `mx_snd_init`
 took mxsnd over for good: the first program's counts stood still after it, its commands were
@@ -571,7 +592,7 @@ the open's and the write's results and tried again 2 s later when the card drive
 free (-24), else 30 s later (the card may be out). Without a store the old files are imported
 once: `IPCONFIG.DAT` (`net.ip`, `net.mask`, `net.gw`), `SWAP.CFG` (`swap.path`, `swap.size`),
 `SHELL.CFG` (`shell.path`), `SERVICES.CFG` (`service`); they are not read again after that. The
-kernel's keys: those, `system.root` (version 47), `storage.usb`, `storage.ata` (`off`: not loaded),
+kernel's keys: those, `system.root` (version 47), `swap.iop` (version 49), `storage.usb`, `storage.ata` (`off`: not loaded),
 `storage.mx4sio` (`on`: `mx4sio_bd` loaded at the boot) and `pad.swap_ports`,
 `pad.swap_xo` (the home menu's toggles, saved). `mx_setting_get`, `mx_setting_list` (the changes
 after a seq, in their order; a removed key is listed with "") and `mx_setting_seq` for every

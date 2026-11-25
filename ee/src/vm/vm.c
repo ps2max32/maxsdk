@@ -45,11 +45,20 @@
 #include <mx/debug.h>
 #include <mx/mx.h>
 #include <mx/sif.h>
+#include <mx/string.h>
 #include <mx/thread.h>
 #include <mx/timer.h>
 #include <mx/vm.h>
 
 #include "vm_int.h"
+#include "lz4.h"
+#include <mxswap.h>
+
+/* the swap file on the IOP (below, at swap_io1) */
+static int xs_open(int fd, const char *path);
+static void xs_close(int fd);
+static u32 slot_limit;
+void mx__vm_frames_owner(void *p, u32 bytes, u32 space);
 
 void mx__thread_keep(int id); /* thread.c: mx_exit leaves it */
 
@@ -973,6 +982,7 @@ int mx__vm_swap_open(const char *cfg_swap) {
     return -1;
   }
   vm.fd = fd;
+  xs_open(fd, swap);
   /* the program's own file (not MXOS's): it goes with the program's space
      (on the PS2 a host: file goes with the host's run) */
   swap_owner = mx__loader_swap ? 0 : vs;
@@ -1160,8 +1170,10 @@ void mx__vm_space_free(struct vm_space *n) {
   }
   mx_irq_restore(was);
   unlock();
-  if (swap_close >= 0)
+  if (swap_close >= 0) {
+    xs_close(swap_close);
     mx_fio_close(swap_close);
+  }
   /* its ELF and mapped files: the space's own (the kernel's end of a
      program no longer closes every descriptor, mx__vm_uses_fd) */
   for (u32 i = 0; i < n->nseg; i++)
@@ -1194,8 +1206,10 @@ int mx__vm_uses_fd(int fd) {
 /* After mx__vm_shutdown, at a normal end: on FAT and exFAT a file that is not
    closed keeps its old size, and its clusters stay taken. */
 void mx__vm_swap_close(void) {
-  if (swap_left >= 0)
+  if (swap_left >= 0) {
+    xs_close(swap_left);
     mx_fio_close(swap_left);
+  }
   swap_left = -1;
 }
 
@@ -1452,11 +1466,13 @@ static void io_end(struct io_mark m, u32 *us) {
 /* The swap file's seek and transfer go together: the writer thread and a
    faulting thread may both use it (each call of the file server is one at
    a time, a seek and the transfer after it are not). */
-static void swap_io1(struct vm_space *s, u32 pg, u32 f, int out);
+static int swap_io1(struct vm_space *s, u32 pg, u32 f, int out);
+static int xs_room(u32 bytes);
 /* The swap file's I/O is one at a time (one file server). A fault's page
    that comes while the writer's write is under way waits for it: counted
    (us_behind, the VM's report), as it is what the writer costs. */
 static int wthread;
+#define XS_FULL_US 4000u /* a write on USB takes some 40 ms */
 static u32 us_behind;
 static void swap_io_s(struct vm_space *s, u32 pg, u32 f, int out) {
   struct io_mark m = io_begin();
@@ -1464,15 +1480,166 @@ static void swap_io_s(struct vm_space *s, u32 pg, u32 f, int out) {
   mx_bios_wait_sema(vm.swapsema);
   if (wthread && mx_thread_self() != wthread)
     us_behind += (mx_count() - t0) / (MX_EE_HZ / 1000000u);
-  swap_io1(s, pg, f, out);
+  /* mxswap's queue full: the swap file is let go while this waits for room,
+     so another thread's page comes in meanwhile */
+  for (int n; (n = swap_io1(s, pg, f, out)) > 0;) {
+    do {
+      mx_bios_signal_sema(vm.swapsema);
+      mx_sleep_us(XS_FULL_US);
+      mx_bios_wait_sema(vm.swapsema);
+    } while (!xs_room((u32)n));
+  }
   mx_bios_signal_sema(vm.swapsema);
   io_end(m, out ? &vm.st.us_swap_out : &vm.st.us_swap_in);
 }
 
 static void swap_io(u32 pg, u32 f, int out) { swap_io_s(vs, pg, f, out); }
 
-static void swap_io1(struct vm_space *s, u32 pg, u32 f, int out) {
+/* ---- the swap file on the IOP (mxswap.irx, kernel version 49) --------------
+
+   With mx__vm_swap_iop set (the kernel's setting swap.iop) the swap file
+   opened by mx__vm_swap_open is opened by mxswap.irx too, and the pages go
+   through it: compressed here (LZ4, lz4.c), put into its queue in IOP memory
+   (the EE does not wait for the write), written by its thread of low
+   priority at the page's slot; read back by its RPC thread (high priority:
+   a read waits at most for the write under way), or from its queue when the
+   page is still there, and decompressed here. A slot's compressed size is
+   kept here (xs_bytes; 0: written the plain way). The file is closed by
+   xs_close, which writes the queue first. */
+int mx__vm_swap_iop; /* 1: on; 2: also for host: (PCSX2's host files, a test) */
+static struct mx_sif_client xs;
+static int xs_fd = -1; /* the vm.fd it serves; -1: off */
+static u16 xs_bytes[MAX_SLOTS];
+/* one buffer for the calls (the swap file's I/O is one at a time: swapsema),
+   two frames out of the pool while mxswap serves, not the kernel's memory;
+   a GET's words in their own line, the answer over the buffer */
+#define XS_BUF (2 * PAGE)
+static u8 *xs_buf;
+static u32 xs_head[16] MX_ALIGNED(64);
+#define xs_send xs_buf
+#define xs_recv xs_buf
+static struct {
+  u32 puts, gets, in, out;
+} xs_st;
+
+/* The buffer, taken once at the kernel's boot (swap.c), while the pool is
+   empty: no page is moved for it (taken later, while a program ran, the
+   pages moved out of the way left the VM's tables' TLB entry missing at the
+   next vblank on a SCPH-90006). Frames of space 0, which stays. */
+void mx__vm_swap_iop_buf(void) {
+  if (xs_buf || !vm.active)
+    return;
+  xs_buf = mx__vm_frames_take_aligned(XS_BUF, 64);
+  if (xs_buf)
+    mx__vm_frames_owner(xs_buf, XS_BUF, 0);
+}
+
+static int xs_call_from(int fno, const void *send, u32 ssize, u32 rsize) {
+  int r = mx_sif_call(&xs, fno, send, (ssize + 15) & ~15u, (void *)MX_UNCACHED(xs_recv),
+                      (rsize + 15) & ~15u);
+  return r < 0 ? r : ((volatile s32 *)MX_UNCACHED(xs_recv))[0];
+}
+static int xs_call(int fno, u32 ssize, u32 rsize) { return xs_call_from(fno, xs_send, ssize, rsize); }
+
+/* the file fd (vm.fd, opened as path) through mxswap too: 0, or -1 (the
+   plain way then) */
+static int xs_open(int fd, const char *path) {
+  /* not host: (ps2link's driver on the IOP lost the pages; mxio's fast
+     path is mxio's own): the plain way, through mxio */
+  if (!mx__vm_swap_iop || xs_fd >= 0 || (mx__vm_swap_iop < 2 && !__builtin_strncmp(path, "host:", 5)))
+    return -1;
+  /* bound again at every open: the client is the VM's, kept over the
+     kernel's restart, but the IOP may have been reset and mxswap loaded
+     elsewhere (its old receive buffer, inside another module by then, was
+     written by every put: the IOP crashed later) */
+  __builtin_memset(&xs, 0, sizeof xs);
+  if (mx_sif_bind_tries(&xs, MXSWAP_SID, 2) < 0 || !xs.server) {
+    mx_printf("VM: no mxswap on the IOP: the swap file the plain way\n");
+    return -1;
+  }
+  u32 n = (u32)strlen(path) + 1;
+  if (n > 256)
+    return -1;
+  if (!xs_buf)
+    return -1; /* no buffer (mx__vm_swap_iop_buf at the boot) */
+  /* the file's size: mxswap makes it that long at once, so every write
+     is inside it (a seek past the end on FAT left reads of 0xff) */
+  ((u32 *)xs_send)[0] = slot_limit * PAGE, ((u32 *)xs_send)[1] = ((u32 *)xs_send)[2] = ((u32 *)xs_send)[3] = 0;
+  __builtin_memcpy(xs_send + 16, path, n);
+  int r = xs_call(MXSWAP_OPEN, 16 + n, 16);
+  if (r < 0) {
+    mx_printf("VM: mxswap cannot open %s (%d): the swap file the plain way\n", path, r);
+    return -1;
+  }
+  __builtin_memset(xs_bytes, 0, sizeof xs_bytes);
+  xs_fd = fd;
+  mx_printf("VM: the swap file %s through the IOP, compressed\n", path);
+  return 0;
+}
+/* before fd is closed: mxswap's queue written, its handle closed */
+static void xs_close(int fd) {
+  if (xs_fd < 0 || fd != xs_fd)
+    return;
+  xs_call(MXSWAP_CLOSE, 16, 16);
+  xs_fd = -1;
+}
+
+/* a put of that many bytes fits now (or mxswap's file was closed meanwhile:
+   the put itself says so) */
+static int xs_room(u32 bytes) {
+  if (xs_fd < 0)
+    return 1;
+  xs_head[0] = bytes, xs_head[1] = xs_head[2] = xs_head[3] = 0;
+  return xs_call_from(MXSWAP_ROOM, xs_head, 16, 16) != 0;
+}
+
+/* page pg's frame f to or from the swap file through mxswap: 0, or the bytes
+   to put when its queue has no room now (nothing done) */
+static int xs_io(struct vm_space *s, u32 pg, u32 f, int out) {
+  u32 slot = SLOT_OF(s, pg) - 1u;
+  u32 *h = (u32 *)xs_send;
+  if (out) {
+    u32 n = mx__lz4_compress(frame_ptr(f), PAGE, xs_send + MXSWAP_HEAD, PAGE);
+    if (!n || n >= PAGE) /* does not compress: as it is */
+      __builtin_memcpy(xs_send + MXSWAP_HEAD, frame_ptr(f), n = PAGE);
+    h[0] = slot, h[1] = n, h[2] = h[3] = 0;
+    int r = xs_call(MXSWAP_PUT, MXSWAP_HEAD + n, 16);
+    if (r == MXSWAP_FULL)
+      return (int)n;
+    if (r < 0) {
+      mx_printf("\nVM: mxswap's put of slot %u: %d\n", slot, r);
+      vm_fatal("swap file write failed", pg);
+    }
+    xs_bytes[slot] = (u16)(n == PAGE ? 0xFFFF : n);
+    xs_st.puts++, xs_st.in += PAGE, xs_st.out += n;
+    return 0;
+  }
+  u32 n = xs_bytes[slot] == 0xFFFF ? PAGE : xs_bytes[slot];
+  xs_head[0] = slot, xs_head[1] = n, xs_head[2] = xs_head[3] = 0;
+  int r = xs_call_from(MXSWAP_GET, xs_head, 16, MXSWAP_HEAD + n);
+  if (r < 0) {
+    mx_printf("\nVM: mxswap's get of slot %u (%u bytes): %d\n", slot, n, r);
+    vm_fatal("swap file read failed", pg);
+  }
+  mx_dcache_invalidate(xs_recv, MXSWAP_HEAD + n);
+  const u8 *c = xs_recv + MXSWAP_HEAD;
+  if (n == PAGE)
+    __builtin_memcpy(frame_ptr(f), c, PAGE);
+  else if (mx__lz4_decompress(c, n, frame_ptr(f), PAGE) != PAGE) {
+    mx_printf("\nVM: slot %u (%u bytes) does not decompress (from the %s)\n", slot, n,
+              ((volatile s32 *)MX_UNCACHED(xs_recv))[1] ? "queue" : "file");
+    vm_fatal("swap file read failed", pg);
+  }
+  xs_st.gets++;
+  return 0;
+}
+
+static int swap_io1(struct vm_space *s, u32 pg, u32 f, int out) {
   irq_check(0x10);
+  /* through mxswap, but a slot written the plain way before it */
+  if (xs_fd >= 0 && vm.fd == xs_fd && (out || xs_bytes[SLOT_OF(s, pg) - 1u])) {
+    return xs_io(s, pg, f, out);
+  }
   u32 slot = SLOT_OF(s, pg) - 1u;
   volatile u32 *lg = &mx__vm_swaplog[mx__vm_swapn++ & 7];
   *lg = (u32)out << 31 | slot << 16 | f << 4;
@@ -1492,7 +1659,7 @@ static void swap_io1(struct vm_space *s, u32 pg, u32 f, int out) {
     *lg |= 2;
     irq_check(0x12);
     if (r == (out ? 0 : (int)PAGE))
-      return;
+      return 0;
   }
   mx_printf("\nVM: swap file %s of slot %u (of %u): seek %d, %s %d; the file has %d bytes\n",
             out ? "write" : "read", slot, vm.nslots, at, out ? "write" : "read", r,
@@ -1577,7 +1744,7 @@ u32 mx_vm_unpin_done(void);
    the kernel's, mx__vm_swap_size): which are taken, up to the size; a
    space's go back with it (mx__vm_space_free), so the file does not grow
    with each program. */
-static u32 slot_limit = MAX_SLOTS;
+static u32 slot_limit = MAX_SLOTS; /* (declared at the top for xs_open) */
 void mx__vm_swap_size(u32 bytes) {
   u32 n = bytes / PAGE;
   slot_limit = n && n < MAX_SLOTS ? n : MAX_SLOTS;
@@ -3056,8 +3223,10 @@ static void undo_init(void) {
   if (bsema >= 0)
     mx_bios_delete_sema(bsema);
   vm.lock = vm.swapsema = bsema = -1;
-  if (vm.fd >= 0)
+  if (vm.fd >= 0) {
+    xs_close(vm.fd);
     mx_fio_close(vm.fd);
+  }
   vm.fd = -1;
   mx__heap_untake();
 }
@@ -3366,6 +3535,7 @@ int mx__vm_swap_detach(void) {
   unlock();
   if (fd < 0)
     return -1;
+  xs_close(fd);
   mx_fio_close(fd);
   return 0;
 }
