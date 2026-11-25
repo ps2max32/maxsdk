@@ -9,6 +9,8 @@
 
 #include <mx/cpu.h>
 #include <mx/iop.h>
+#include <mx/kernel.h>
+#include <mx/proc.h>
 #include <mx/sif.h>
 #include <mx/snd.h>
 #include <mx/string.h>
@@ -37,14 +39,16 @@ static struct mxsnd_cmd cbuf[64] MX_DMA_LINES;  /* commands not sent yet */
 static u8 stage[STAGE + 32] MX_DMA_LINES;       /* the stream's bytes on their way */
 static u8 bounce[MXSND_UPLOAD_BYTES] MX_DMA_LINES;
 static int ready, ncmd;
+static u32 owner, spu_gen; /* mxsnd's numbers for this program, for what it has in SPU RAM */
+static void (*lost_fn)(void);
 static u32 iop_area, stream_w, cmd_w, stream_r0, cmd_r0;
 static u8 line[16]; /* the stream's bytes of the line stream_w is in (not a whole one yet) */
 volatile u32 mx__snd_dropped; /* commands left out: the ring was full */
 
 static int call(int fno, u32 a, u32 b) {
   volatile u32 *w = MX_UNCACHED(arg);
-  w[0] = a, w[1] = b, w[2] = w[3] = 0;
-  if (mx_sif_call(&srv, fno, (void *)w, 16, (void *)MX_UNCACHED(res), 16) < 0)
+  w[0] = a, w[1] = b, w[2] = owner, w[3] = 0;
+  if (mx_sif_call(&srv, fno, (void *)w, 16, (void *)MX_UNCACHED(res), 32) < 0)
     return -1;
   return (int)MX_UNCACHED(res)[0];
 }
@@ -69,12 +73,22 @@ static struct mxsnd_status status(void) {
   }
   const volatile struct mxsnd_status *n = (s32)(a - b) > 0 ? &s[0] : &s[1];
   r.seq = n->seq, r.stream_r = n->stream_r, r.cmd_r = n->cmd_r;
-  r.endx0 = n->endx0, r.endx1 = n->endx1, r.frames = n->frames, r.starved = n->starved;
+  r.endx0 = n->endx0, r.endx1 = n->endx1, r.frames = n->frames, r.starved = n->starved, r.lost = n->lost;
   return r;
 }
 
 /* the commands in cbuf into the ring, then the head */
+/* the sound is another process's: the last record mxsnd wrote here says so */
+static int lost(void) {
+  const volatile struct mxsnd_status *s = MX_UNCACHED(area.s);
+  return (s[0].lost | s[1].lost) != 0;
+}
+
 static void send(void) {
+  if (lost()) { /* not the rings of this program: what it wanted is left out */
+    ncmd = 0;
+    return;
+  }
   if (ncmd) {
     struct mxsnd_status s = status();
     u32 room = MXSND_CMDS - (cmd_w - s.cmd_r);
@@ -90,7 +104,7 @@ static void send(void) {
     ncmd = 0;
   }
   volatile struct mxsnd_head *h = MX_UNCACHED(&head);
-  h->stream_w = stream_w, h->cmd_w = cmd_w;
+  h->stream_w = stream_w, h->cmd_w = cmd_w, h->owner = owner;
   mx_iop_write(AREA(head), (const void *)h, 16);
 }
 
@@ -106,6 +120,25 @@ static struct mxsnd_cmd *cmd(int op, int voice) {
 static void voices_reset(void);
 static void voices_off(void);
 
+static void settings(void);
+static int blocks_lost(void);
+
+/* mxsnd this program's: its counts and numbers */
+static int take(int fno) {
+  memset(MX_UNCACHED(&area), 0, sizeof area);
+  if (call(fno, mx_paddr_of(&area).v, (u32)mx_proc_self()) < 0)
+    return -1;
+  const volatile struct mxsnd_init *in = (const volatile struct mxsnd_init *)MX_UNCACHED(res);
+  if (in->version != MXSND_VERSION)
+    return -1;
+  iop_area = in->area;
+  stream_w = stream_r0 = in->stream_r;
+  cmd_w = cmd_r0 = in->cmd_r;
+  owner = in->owner, spu_gen = in->spu_gen;
+  ncmd = 0;
+  return 0;
+}
+
 int mx_snd_init(void) {
   if (ready)
     return 0;
@@ -120,23 +153,57 @@ int mx_snd_init(void) {
     if (mx_sif_bind_tries(&srv, MXSND_SID, 100) < 0 || !srv.server)
       return -1;
   }
-  memset(MX_UNCACHED(&area), 0, sizeof area);
-  if (call(MXSND_INIT, mx_paddr_of(&area).v, 0) < 0)
+  if (take(MXSND_INIT) < 0)
     return -1;
-  const volatile struct mxsnd_init *in = (const volatile struct mxsnd_init *)MX_UNCACHED(res);
-  if (in->version != MXSND_VERSION)
-    return -1;
-  iop_area = in->area;
-  stream_w = stream_r0 = in->stream_r;
-  cmd_w = cmd_r0 = in->cmd_r;
-  ncmd = 0;
   voices_reset();
   ready = 1;
   return 0;
 }
 
+/* The sound is the process's that called INIT or RESUME last: a child's that
+   opened it, until it ends, or longer (a program at the home menu beside it).
+   Lost, it is taken back by the first call made in front: the counts are
+   mxsnd's, the voices are silent, the settings sent again. Called by
+   everything that uses mxsnd, on the program's own thread. 0: not now.
+   Back in front after mx__snd_quiet, lost or not, mx__snd_front is called
+   once, with the sound this program's again (for what goes on by itself,
+   as a song; none yet). */
+extern void mx__snd_front(void) __attribute__((weak));
+static int quieted;
+static int in_front(void) {
+  return !mx__kernel || mx__kernel->version < 48 || mx__kernel->proc_in_front();
+}
+static int own(void) {
+  if (!ready)
+    return 0;
+  int gone = lost();
+  if (!gone && !quieted)
+    return 1;
+  if (!in_front())
+    return !gone;
+  if (!gone) {
+    quieted = 0;
+    if (mx__snd_front)
+      mx__snd_front();
+    return 1;
+  }
+  u32 gen = spu_gen;
+  if (take(MXSND_RESUME) < 0) {
+    ((volatile struct mxsnd_status *)MX_UNCACHED(area.s))->lost = 1; /* still */
+    return 0;
+  }
+  voices_off();
+  settings();
+  quieted = 0;
+  if (gen != spu_gen && blocks_lost() && lost_fn)
+    lost_fn();
+  if (mx__snd_front)
+    mx__snd_front();
+  return 1;
+}
+
 void mx_snd_commit(void) {
-  if (ready)
+  if (own())
     send();
 }
 
@@ -144,10 +211,18 @@ void mx_snd_commit(void) {
 
 /* the most queued: about 100 ms of the format, as audsrv kept */
 static u32 fill = 19200, frame_bytes = 4;
+/* the settings as they were sent, for settings() */
+static struct {
+  u32 rate;
+  u16 bits, chans, vol, rdepth, rtime;
+  u8 rmode, rstream;
+} set = {48000, 16, 2, MX_SND_VOL_MAX, 0, 0, 0, 0};
 
 int mx_snd_stream_format(u32 rate, int bits, int channels) {
   if (!ready || !rate || rate > 48000 || (bits != 8 && bits != 16) || (channels != 1 && channels != 2))
     return -1;
+  set.rate = rate, set.bits = (u16)bits, set.chans = (u16)channels;
+  own();
   struct mxsnd_cmd *c = cmd(MXSND_C_FORMAT, 0);
   c->addr = rate, c->voll = (u16)bits, c->volr = (u16)channels;
   frame_bytes = (u32)(bits / 8 * channels);
@@ -159,13 +234,13 @@ int mx_snd_stream_format(u32 rate, int bits, int channels) {
 }
 
 u32 mx_snd_stream_queued(void) {
-  if (!ready)
+  if (!own())
     return 0;
   return stream_w - status().stream_r;
 }
 
 u32 mx_snd_stream_room(void) {
-  if (!ready)
+  if (!own())
     return 0;
   u32 q = mx_snd_stream_queued();
   return q < fill ? fill - q : 0;
@@ -199,7 +274,7 @@ u32 mx_snd_stream_queue(const void *data, u32 bytes) {
 }
 
 void mx_snd_stream_stop(void) {
-  if (!ready)
+  if (!own())
     return;
   cmd(MXSND_C_STREAM_DROP, 0)->addr = stream_w;
   send();
@@ -209,17 +284,21 @@ void mx_snd_stream_stop(void) {
    in front's): the stream and the voices silenced while another is in front;
    the voices count as stopped (a loop is played again when wanted) */
 void mx__snd_quiet(void) {
-  if (!ready)
+  if (!ready || lost())
     return;
   cmd(MXSND_C_SILENCE, 0);
   voices_off();
-  mx_snd_stream_stop();
+  cmd(MXSND_C_STREAM_DROP, 0)->addr = stream_w;
+  send();
+  quieted = 1;
 }
 
 void mx_snd_stream_volume(int volume) {
   if (!ready)
     return;
-  cmd(MXSND_C_STREAM_VOL, 0)->voll = (u16)(volume < 0 ? 0 : volume > MX_SND_VOL_MAX ? MX_SND_VOL_MAX : volume);
+  set.vol = (u16)(volume < 0 ? 0 : volume > MX_SND_VOL_MAX ? MX_SND_VOL_MAX : volume);
+  own();
+  cmd(MXSND_C_STREAM_VOL, 0)->voll = set.vol;
   send();
 }
 
@@ -327,7 +406,7 @@ static u16 pitch(u32 rate) {
 /* SPU RAM: the samples' blocks, by address */
 #define MAX_BLOCKS 1024
 static struct {
-  u32 at, size;
+  u32 at, size, lost; /* lost: another program wrote SPU RAM since it was loaded */
 } blk[MAX_BLOCKS];
 static int nblk;
 
@@ -342,14 +421,38 @@ static u32 spu_alloc(u32 size) {
   if (nblk == MAX_BLOCKS || (i == nblk && MXSND_SPU_END - at < size))
     return 0;
   memmove(&blk[i + 1], &blk[i], (u32)(nblk - i) * sizeof blk[0]);
-  blk[i].at = at, blk[i].size = size;
+  blk[i].at = at, blk[i].size = size, blk[i].lost = 0;
   nblk++;
   return at;
+}
+
+static int nlost;
+
+/* every sample's data is gone (own): how many */
+static int blocks_lost(void) {
+  for (int i = 0; i < nblk; i++)
+    blk[i].lost = 1;
+  return nlost = nblk;
+}
+/* the block at at: -1 none */
+static int block(u32 at) {
+  for (int i = 0; i < nblk; i++)
+    if (blk[i].at == at)
+      return i;
+  return -1;
+}
+/* a sample whose data is gone is not played: it would be another's */
+static int stale(const struct mx_snd_sample *s) {
+  if (!nlost)
+    return 0;
+  int i = block(s->spu);
+  return i >= 0 && blk[i].lost;
 }
 
 static void spu_free(u32 at) {
   for (int i = 0; i < nblk; i++)
     if (blk[i].at == at) {
+      nlost -= blk[i].lost != 0;
       memmove(&blk[i], &blk[i + 1], (u32)(nblk - i - 1) * sizeof blk[0]);
       nblk--;
       return;
@@ -406,25 +509,43 @@ static int vol(int v) { return v < 0 ? 0 : v > MX_SND_VOL_MAX ? MX_SND_VOL_MAX :
 
 /* mxsnd takes the ADPCM in pieces of its upload buffer, padded to 64 bytes
    (the SPU2 DMA's block) with silence */
-int mx_snd_load(struct mx_snd_sample *s, const void *adpcm, u32 size, u32 rate) {
-  if (!ready || !size)
-    return -1;
+static int upload(u32 at, const void *adpcm, u32 size) {
   u32 total = (size + 63) & ~63u;
-  u32 at = spu_alloc(total);
-  if (!at)
-    return -1;
   const u8 *src = adpcm;
   for (u32 o = 0; o < total; o += MXSND_UPLOAD_BYTES) {
     u32 n = total - o < MXSND_UPLOAD_BYTES ? total - o : MXSND_UPLOAD_BYTES;
     u32 have = size - o < n ? size - o : n;
     memcpy(bounce, src + o, have);
     memset(bounce + have, 0, n - have);
-    if (mx_iop_write(AREA(upload), bounce, n) < 0 || call(MXSND_UPLOAD, at + o, n) != 0) {
-      spu_free(at);
+    if (mx_iop_write(AREA(upload), bounce, n) < 0 || call(MXSND_UPLOAD, at + o, n) != 0)
       return -1;
-    }
+    spu_gen = MX_UNCACHED(res)[1];
   }
-  const u8 *last = src + size - 16;
+  return 0;
+}
+
+/* SPU RAM is the process in front's: one beside it waits to write there */
+static int own_wait(void) {
+  if (own())
+    return 1;
+  if (ready && mx__kernel && mx__kernel->version >= 48) {
+    mx__kernel->front_wait();
+    return own();
+  }
+  return 0;
+}
+
+int mx_snd_load(struct mx_snd_sample *s, const void *adpcm, u32 size, u32 rate) {
+  if (!size || !own_wait())
+    return -1;
+  u32 at = spu_alloc((size + 63) & ~63u);
+  if (!at)
+    return -1;
+  if (upload(at, adpcm, size) < 0) {
+    spu_free(at);
+    return -1;
+  }
+  const u8 *src = adpcm, *last = src + size - 16;
   s->rate = rate;
   s->size = size;
   s->spu = at;
@@ -432,9 +553,25 @@ int mx_snd_load(struct mx_snd_sample *s, const void *adpcm, u32 size, u32 rate) 
   return 0;
 }
 
+int mx_snd_reload(struct mx_snd_sample *s, const void *adpcm) {
+  if (!s->spu || !own_wait())
+    return -1;
+  int i = block(s->spu);
+  if (i < 0 || upload(s->spu, adpcm, s->size) < 0)
+    return -1;
+  nlost -= blk[i].lost != 0;
+  blk[i].lost = 0;
+  return 0;
+}
+
+void mx_snd_on_lost(void (*fn)(void)) { lost_fn = fn; }
+
+int mx_snd_lost(const struct mx_snd_sample *s) { return own() && s->spu && stale(s); }
+
 int mx_snd_free(struct mx_snd_sample *s) {
   if (!ready || !s->spu)
     return -1;
+  own(); /* else its voices are silent, and send leaves the commands out */
   for (int v = 0; v < MXSND_VOICES; v++)
     if (vs[v].on && vs[v].s == s) {
       cmd(MXSND_C_STOP, v);
@@ -447,7 +584,7 @@ int mx_snd_free(struct mx_snd_sample *s) {
 }
 
 int mx_snd_play(const struct mx_snd_sample *s, int voice) {
-  if (!ready || !s->spu)
+  if (!own() || !s->spu || stale(s))
     return -1;
   if (voice < 0) {
     struct mxsnd_status st = status();
@@ -464,14 +601,14 @@ int mx_snd_play(const struct mx_snd_sample *s, int voice) {
 }
 
 int mx_snd_playing(int voice, const struct mx_snd_sample *s) {
-  if (!ready || voice < 0 || voice >= MXSND_VOICES || vs[voice].s != s)
+  if (!own() || voice < 0 || voice >= MXSND_VOICES || vs[voice].s != s)
     return 0;
   struct mxsnd_status st = status();
   return sounding(voice, &st);
 }
 
 void mx_snd_voice_volume(int voice, int left, int right) {
-  if (!ready || voice < 0 || voice >= MXSND_VOICES)
+  if (!own() || voice < 0 || voice >= MXSND_VOICES)
     return;
   vs[voice].vl = (u16)vol(left), vs[voice].vr = (u16)vol(right);
   struct mxsnd_cmd *c = cmd(MXSND_C_SET, voice);
@@ -484,13 +621,13 @@ void mx_snd_voice_volume(int voice, int left, int right) {
 /* a handle: the voice + 1 in the low byte, its gen above */
 static int ch_voice(int ch) {
   int v = (ch & 0xFF) - 1;
-  if (!ready || v < 0 || v >= MXSND_VOICES || (u16)(ch >> 8) != vs[v].gen || !vs[v].on)
+  if (!own() || v < 0 || v >= MXSND_VOICES || (u16)(ch >> 8) != vs[v].gen || !vs[v].on)
     return -1;
   return v;
 }
 
 int mx_snd_ch_play(const struct mx_snd_sample *s, u32 rate, int left, int right, int priority) {
-  if (!ready || !s->spu)
+  if (!own() || !s->spu || stale(s))
     return 0;
   left = vol(left), right = vol(right);
   int loud = left > right ? left : right;
@@ -555,22 +692,41 @@ void mx_snd_ch_reverb(int ch, int on) {
   cmd(MXSND_C_WET, v)->voll = (u16)(on != 0);
 }
 
+static void reverb_cmd(void) {
+  struct mxsnd_cmd *c = cmd(MXSND_C_REVERB, set.rstream);
+  c->addr = set.rmode, c->voll = set.rdepth, c->volr = set.rtime;
+}
+
 void mx_snd_reverb(int mode, int depth, int delay, int feedback, int stream) {
   if (!ready || mode < 0 || mode > MX_SND_REVERB_PIPE)
     return;
-  struct mxsnd_cmd *c = cmd(MXSND_C_REVERB, stream != 0);
-  c->addr = (u32)mode;
-  c->voll = (u16)(depth < 0 ? 0 : depth > 0x7FFF ? 0x7FFF : depth);
   delay = delay < 0 ? 0 : delay > 127 ? 127 : delay;
   feedback = feedback < 0 ? 0 : feedback > 127 ? 127 : feedback;
-  c->volr = (u16)(delay | feedback << 8);
+  set.rmode = (u8)mode, set.rstream = stream != 0;
+  set.rdepth = (u16)(depth < 0 ? 0 : depth > 0x7FFF ? 0x7FFF : depth);
+  set.rtime = (u16)(delay | feedback << 8);
+  own();
+  reverb_cmd();
+  send();
+}
+
+/* what INIT and RESUME put back to their defaults, as this program had it */
+static void settings(void) {
+  struct mxsnd_cmd *c = cmd(MXSND_C_FORMAT, 0);
+  c->addr = set.rate, c->voll = set.bits, c->volr = set.chans;
+  cmd(MXSND_C_STREAM_VOL, 0)->voll = set.vol;
+  if (set.rmode)
+    reverb_cmd();
+  for (int v = 0; v < MXSND_VOICES; v++)
+    if (vs[v].dry)
+      cmd(MXSND_C_WET, v);
   send();
 }
 
 /* SPU RAM at spu (bytes, 64-byte multiples, up to MXSND_UPLOAD_BYTES) into
    dst (tests: the voices' mix, MXSND_SPU_MIX0 / MIX1) */
 int mx__snd_peek(u32 spu, void *dst, u32 bytes) {
-  if (!ready || call(MXSND_PEEK, spu, bytes) != 0)
+  if (!own() || call(MXSND_PEEK, spu, bytes) != 0)
     return -1;
   return mx_iop_read(AREA(upload), dst, bytes);
 }

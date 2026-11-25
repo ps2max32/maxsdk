@@ -18,7 +18,7 @@
 #define MXSND_H
 
 #define MXSND_SID 0x4D58534E /* "MXSN" */
-#define MXSND_VERSION 1
+#define MXSND_VERSION 2
 #define MXSND_VOICES 48 /* 0 .. 23 core 0, 24 .. 47 core 1 */
 
 #define MXSND_STREAM_BYTES 32768 /* a power of two */
@@ -31,19 +31,22 @@
 #define MXSND_SPU_END 0x1C7000u
 
 enum {
-  MXSND_INIT,   /* in: status area (EE physical address, 64-byte aligned; 0: stop
-                   writing it, for a program's end); answer: struct mxsnd_init.
-                   Silences the voices and the stream */
+  MXSND_INIT,   /* in: status area (EE physical address, 64-byte aligned), the
+                   process; answer: struct mxsnd_init. The sound is this
+                   process's from now on (the owner before is told: lost in
+                   its status); the voices and the stream silent */
   MXSND_UPLOAD, /* in: SPU address, bytes (the area's upload buffer, 64-byte
-                   multiple); answer: 0, < 0 */
+                   multiple), the owner's number; answer: 0, < 0 (not the
+                   owner: too), then spu_gen */
   MXSND_PEEK,   /* in: SPU address, bytes (64-byte multiples): SPU RAM into the
                    upload buffer (tests: the voices' mix in the output area);
                    answer: 0, < 0 */
-  MXSND_STOP,   /* in: EE physical start, end (a program's memory, for its end):
-                   when the status area is in [start, end), its writes stop and
-                   the voices and the stream are silenced; answer: 1, else 0 (it
-                   belongs to another program) */
+  MXSND_STOP,   /* in: a process that ended (MXSND_ALL: all did): when the sound is
+                   its, the status writes stop and the voices and the stream are
+                   silenced; answer: 1, else 0 */
+  MXSND_RESUME, /* as MXSND_INIT, by a process that lost the sound to another */
 };
+#define MXSND_ALL 0xFFFFFFFFu
 /* the output area: each core's dry mix of its voices, 512 samples (two halves
    of 256, written in turn), left then right */
 #define MXSND_SPU_MIX0 0x2000u
@@ -53,6 +56,8 @@ struct mxsnd_init {
   unsigned int version; /* MXSND_VERSION */
   unsigned int area;    /* IOP address of struct mxsnd_iop */
   unsigned int stream_r, cmd_r; /* the counts read so far: the EE goes on from there */
+  unsigned int owner;   /* its number, in each head and upload */
+  unsigned int spu_gen; /* moves when SPU RAM is written by another owner than last */
 };
 
 /* a command, 16 bytes */
@@ -82,7 +87,8 @@ enum {
 struct mxsnd_head {
   unsigned int stream_w; /* bytes */
   unsigned int cmd_w;    /* commands */
-  unsigned int pad[2];
+  unsigned int owner;    /* struct mxsnd_init's: another's head is not taken */
+  unsigned int pad;
 };
 
 struct mxsnd_iop {
@@ -102,7 +108,7 @@ struct mxsnd_status {
   unsigned int endx1;    /* voices 24 .. 47 */
   unsigned int frames;   /* 48 kHz frames played */
   unsigned int starved;  /* frames the stream had no bytes for while it played */
-  unsigned int pad;
+  unsigned int lost;     /* 1: the sound is another process's (the last record) */
 };
 _Static_assert(sizeof(struct mxsnd_status) == 32, "struct mxsnd_status");
 _Static_assert(sizeof(struct mxsnd_cmd) == 16, "struct mxsnd_cmd");

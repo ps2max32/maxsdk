@@ -31,6 +31,9 @@ static u32 rpc_out[16] __attribute__((aligned(16)));
 
 static int block_sema, lock;
 static u32 ee_status;   /* EE physical address of struct mxsnd_area, 0: none */
+static u32 owner, owner_proc; /* the owner's number (one for each INIT, RESUME), its process */
+static u32 spu_owner, spu_gen; /* who wrote SPU RAM last; how often that was another */
+static struct mxsnd_head got; /* the owner's last head */
 static u32 seq;
 static struct mxsnd_status st[2] __attribute__((aligned(16)));
 static int st_dma[2];
@@ -103,8 +106,18 @@ static void silence(void) {
   }
 }
 
+/* the owner's head: a program that lost the sound may still send one */
+static void head(void) {
+  volatile struct mxsnd_head *h = &area.head;
+  if (!owner || h->owner != owner)
+    return;
+  u32 s = h->stream_w, c = h->cmd_w;
+  if (h->owner == owner)
+    got.stream_w = s, got.cmd_w = c;
+}
+
 static void commands(void) {
-  u32 w = area.head.cmd_w, r = st[seq & 1].cmd_r;
+  u32 w = got.cmd_w, r = st[seq & 1].cmd_r;
   u32 kon[2] = {0, 0}, koff[2] = {0, 0};
   for (; r != w; r++) {
     const struct mxsnd_cmd *c = &area.cmd[r & (MXSND_CMDS - 1)];
@@ -183,7 +196,7 @@ static void frame(u32 r, u32 i, s16 *l, s16 *rt) {
    its rate to 48 kHz; silence for what has not come */
 static void render(u8 *out) {
   s16 *lo = (s16 *)out, *ro = (s16 *)(out + 512);
-  u32 r = st[seq & 1].stream_r, w = area.head.stream_w;
+  u32 r = st[seq & 1].stream_r, w = got.stream_w;
   u32 have = (w - r) / (u32)fbytes; /* whole source frames queued */
   if (have)
     playing = 1;
@@ -245,6 +258,7 @@ static void play(void *arg) {
     WaitSema(block_sema);
     WaitSema(lock);
     int half = 1 - (int)(sceSdBlockTransStatus(BLOCK_CH, 0) >> 24);
+    head();
     commands();
     render(block_buf + half * 2048);
     status();
@@ -257,17 +271,30 @@ static void *rpc(int fno, void *data, int size) {
   (void)size;
   rpc_out[0] = (u32)-22;
   switch (fno) {
+  case MXSND_RESUME:
   case MXSND_INIT: {
     WaitSema(lock);
+    if (ee_status && ee_status != a[0]) {
+      /* the owner before: its last record, there before this one's first */
+      st[seq & 1].lost = 1;
+      int slot = (int)((seq + 1) & 1);
+      status();
+      st[seq & 1].lost = 0;
+      while (st_dma[slot] && sceSifDmaStat(st_dma[slot]) >= 0)
+        DelayThread(50);
+    }
     ee_status = a[0];
+    owner_proc = a[1];
+    if (!++owner)
+      owner = 1;
     silence();
     wet[0] = wet[1] = 0xFFFFFF;
     reverb_stream = 0;
     reverb(0, 0, 0, 0);
     struct mxsnd_status *s = &st[seq & 1];
     /* the rings go on from where they are: the EE's counts start there */
-    s->stream_r = area.head.stream_w;
-    s->cmd_r = area.head.cmd_w;
+    s->stream_r = got.stream_w;
+    s->cmd_r = got.cmd_w;
     s->starved = 0;
     frac = 0, last_l = last_r = 0, playing = 0;
     set_format(48000, 16, 2);
@@ -278,6 +305,8 @@ static void *rpc(int fno, void *data, int size) {
     in->area = (u32)&area;
     in->stream_r = s->stream_r;
     in->cmd_r = s->cmd_r;
+    in->owner = owner;
+    in->spu_gen = spu_gen;
     SignalSema(lock);
     break;
   }
@@ -288,19 +317,28 @@ static void *rpc(int fno, void *data, int size) {
       break;
     }
     WaitSema(lock); /* the reverb's clear (the play thread) uses DMA channel 0 too */
+    if (!ee_status || a[2] != owner) {
+      SignalSema(lock);
+      break;
+    }
+    if (spu_owner != owner)
+      spu_owner = owner, spu_gen++;
     sceSdVoiceTrans(VOICE_CH, SD_TRANS_WRITE | SD_TRANS_MODE_DMA, area.upload, (u32 *)spu, n);
     sceSdVoiceTransStatus(VOICE_CH, 1); /* waits */
-    SignalSema(lock);
     rpc_out[0] = 0;
+    rpc_out[1] = spu_gen;
+    SignalSema(lock);
     break;
   }
   case MXSND_STOP:
     WaitSema(lock);
-    rpc_out[0] = ee_status && ee_status >= a[0] && ee_status < a[1];
+    rpc_out[0] = ee_status && (a[0] == MXSND_ALL || owner_proc == a[0]);
     if (rpc_out[0]) {
       ee_status = 0;
+      head(); /* what it sent last is not the next one's */
       silence();
-      st[seq & 1].stream_r = area.head.stream_w; /* what was queued is dropped */
+      st[seq & 1].stream_r = got.stream_w; /* what was queued is dropped */
+      st[seq & 1].cmd_r = got.cmd_w;
       frac = 0, last_l = last_r = 0, playing = 0;
     }
     SignalSema(lock);

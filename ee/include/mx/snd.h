@@ -51,6 +51,19 @@ void mx_snd_stream_volume(int volume);
 
 /* ---- samples ----------------------------------------------------------------- */
 
+/* Under the kernel the sound is the process's in front, and SPU RAM with it
+   (as GS memory: not kept). A program that comes back in front takes it again
+   at its next call here: its voices and stream are silent, its settings as
+   they were. When another program wrote SPU RAM meanwhile its samples are
+   lost: they do not play (a play returns < 0 or 0) until they are loaded again.
+   fn is called once then, within that call: it may call mx_snd_reload. */
+void mx_snd_on_lost(void (*fn)(void));
+/* A lost sample's data again, the same as it was loaded with, at its place:
+   0, < 0 if it fails. */
+struct mx_snd_sample;
+int mx_snd_reload(struct mx_snd_sample *s, const void *adpcm);
+int mx_snd_lost(const struct mx_snd_sample *s);
+
 /* Bytes of ADPCM for n samples. */
 #define MX_SND_ADPCM_SIZE(n) ((((n) + 27) / 28) * 16)
 /* Encode n samples (16-bit mono) to SPU ADPCM in out (MX_SND_ADPCM_SIZE(n)
