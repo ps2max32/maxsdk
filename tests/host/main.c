@@ -15,6 +15,8 @@ int main(void) {
   test_crtc();
   test_tex();
   test_vcache();
+  test_midi();
+  test_midiseq();
   test_failures += test_malloc();
   if (test_failures) {
     printf("host tests: %d FAILED\n", test_failures);

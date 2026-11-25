@@ -12,9 +12,11 @@
 #include <sifman.h>
 #include <sifrpc.h>
 #include <sysclib.h>
+#include <sysmem.h>
 #include <thbase.h>
 #include <thsemap.h>
 #include <mxsnd.h>
+#include "midi.h"
 
 IRX_ID("mxsnd", 1, 0);
 
@@ -106,6 +108,139 @@ static void silence(void) {
   }
 }
 
+/* key on and off, sent at the end of a step */
+static u32 kon[2], koff[2];
+static void keys(void) {
+  for (int core = 0; core < 2; core++) {
+    if (koff[core])
+      sceSdSetSwitch(core | SD_SWITCH_KOFF, koff[core]);
+    if (kon[core])
+      sceSdSetSwitch(core | SD_SWITCH_KON, kon[core]);
+    kon[core] = koff[core] = 0;
+  }
+}
+
+/* ---- music: midi.c on core 1's voices ---- */
+
+static struct {
+  void *mem[2]; /* MXSND_M_BANK, MXSND_M_SONG */
+  u32 size[2], have[2];
+  u8 set[2];
+  u32 proc;         /* whose they are */
+  u8 paused, held;  /* by the program, by a handover */
+} music;
+
+void midi_voice_set(int v, unsigned int pitch, unsigned int l, unsigned int r) {
+  voice_reg(MXSND_MUSIC_VOICE + v, SD_VPARAM_PITCH, pitch);
+  voice_reg(MXSND_MUSIC_VOICE + v, SD_VPARAM_VOLL, l);
+  voice_reg(MXSND_MUSIC_VOICE + v, SD_VPARAM_VOLR, r);
+}
+void midi_voice_on(int v, unsigned int spu, unsigned int pitch, unsigned int l, unsigned int r, unsigned int adsr1,
+                   unsigned int adsr2) {
+  midi_voice_set(v, pitch, l, r);
+  voice_reg(MXSND_MUSIC_VOICE + v, SD_VPARAM_ADSR1, adsr1);
+  voice_reg(MXSND_MUSIC_VOICE + v, SD_VPARAM_ADSR2, adsr2);
+  sceSdSetAddr(SD_VOICE(SD_CORE_1, v) | SD_VADDR_SSA, spu);
+  kon[1] |= 1u << v, koff[1] &= ~(1u << v);
+}
+void midi_voice_off(int v) { koff[1] |= 1u << v, kon[1] &= ~(1u << v); }
+int midi_voice_ended(int v) { return (sceSdGetSwitch(SD_CORE_1 | SD_SWITCH_ENDX) >> v) & 1; }
+
+static void music_pause(void) { midi_pause(music.paused || music.held); }
+/* the voices were silenced (silence): the song waits for MXSND_MO_FRONT */
+static void music_hold(void) {
+  music.held = 1;
+  music_pause();
+  midi_forget();
+  kon[1] = koff[1] = 0;
+}
+
+static void music_free(int what) {
+  if (what == MXSND_M_BANK)
+    midi_bank(0, 0, 0);
+  else
+    midi_song(0, 0);
+  keys();
+  if (music.mem[what])
+    FreeSysMemory(music.mem[what]);
+  music.mem[what] = 0;
+  music.size[what] = music.have[what] = 0;
+  music.set[what] = 0;
+  if (what == MXSND_M_BANK) /* its voices silent at once: their samples may go */
+    for (int v = 0; v < MIDI_VOICES; v++)
+      midi_voice_set(v, 0, 0, 0);
+}
+
+static int music_alloc(u32 what, u32 bytes, u32 proc) {
+  if (what > MXSND_M_SONG || bytes > 0x80000)
+    return -22;
+  if (music.proc != proc) {
+    if (!bytes)
+      return 0; /* nothing of its own */
+    music_free(MXSND_M_SONG);
+    music_free(MXSND_M_BANK);
+  }
+  music_free((int)what);
+  music.proc = proc;
+  if (!bytes)
+    return 0;
+  if (what == MXSND_M_BANK)
+    music.paused = music.held = 0;
+  music.mem[what] = AllocSysMemory(ALLOC_FIRST, (int)bytes, 0);
+  if (!music.mem[what])
+    return -12;
+  music.size[what] = bytes;
+  return 0;
+}
+
+static int music_data(u32 what, u32 bytes) {
+  if (what > MXSND_M_SONG || music.set[what] || bytes > MXSND_UPLOAD_BYTES ||
+      bytes > music.size[what] - music.have[what])
+    return -22;
+  memcpy((u8 *)music.mem[what] + music.have[what], area.upload, bytes);
+  music.have[what] += bytes;
+  return 0;
+}
+
+static int music_set(u32 what, u32 spu) {
+  if (what > MXSND_M_SONG || !music.mem[what] || music.set[what] || music.have[what] != music.size[what])
+    return -22;
+  int r = what == MXSND_M_BANK ? midi_bank(music.mem[what], music.size[what], spu)
+                               : midi_song(music.mem[what], music.size[what]);
+  if (r < 0) {
+    music_free((int)what);
+    return -22;
+  }
+  music.set[what] = 1;
+  return 0;
+}
+
+static void music_command(u32 op, u32 value) {
+  if (music.proc != owner_proc)
+    return;
+  switch (op) {
+  case MXSND_MO_STOP:
+    midi_stop();
+    break;
+  case MXSND_MO_PLAY:
+    midi_play(value != 0);
+    music.paused = 0;
+    music_pause();
+    break;
+  case MXSND_MO_PAUSE:
+    music.paused = value != 0;
+    music_pause();
+    break;
+  case MXSND_MO_VOLUME:
+    midi_volume((int)value);
+    break;
+  case MXSND_MO_FRONT:
+    music.held = 0;
+    music_pause();
+    break;
+  }
+}
+
 /* the owner's head: a program that lost the sound may still send one */
 static void head(void) {
   volatile struct mxsnd_head *h = &area.head;
@@ -118,7 +253,6 @@ static void head(void) {
 
 static void commands(void) {
   u32 w = got.cmd_w, r = st[seq & 1].cmd_r;
-  u32 kon[2] = {0, 0}, koff[2] = {0, 0};
   for (; r != w; r++) {
     const struct mxsnd_cmd *c = &area.cmd[r & (MXSND_CMDS - 1)];
     int v = c->voice, core = v / 24;
@@ -145,7 +279,8 @@ static void commands(void) {
       break;
     case MXSND_C_SILENCE:
       silence();
-      kon[0] = kon[1] = koff[0] = koff[1] = 0;
+      kon[0] = koff[0] = 0;
+      music_hold();
       break;
     case MXSND_C_FORMAT:
       set_format(c->addr, c->voll, c->volr);
@@ -162,6 +297,9 @@ static void commands(void) {
       reverb_stream = c->voice == 1;
       reverb(c->addr <= 9 ? (int)c->addr : 0, c->voll & 0x7FFF, c->volr & 0x7F, (c->volr >> 8) & 0x7F);
       break;
+    case MXSND_C_MUSIC:
+      music_command(c->voice, c->addr);
+      break;
     case MXSND_C_WET:
       if (v < MXSND_VOICES) {
         wet[core] = c->voll ? wet[core] | bit : wet[core] & ~bit;
@@ -172,12 +310,6 @@ static void commands(void) {
     }
   }
   st[seq & 1].cmd_r = r;
-  for (int core = 0; core < 2; core++) {
-    if (koff[core])
-      sceSdSetSwitch(core | SD_SWITCH_KOFF, koff[core]);
-    if (kon[core])
-      sceSdSetSwitch(core | SD_SWITCH_KON, kon[core]);
-  }
 }
 
 /* frame i of the stream from position r (bytes) */
@@ -232,6 +364,7 @@ static void status(void) {
   s->endx0 = sceSdGetSwitch(SD_CORE_0 | SD_SWITCH_ENDX);
   s->endx1 = sceSdGetSwitch(SD_CORE_1 | SD_SWITCH_ENDX);
   s->frames += HALF;
+  s->flags = (s->flags & MXSND_F_LOST) | (midi_playing() && music.proc == owner_proc ? MXSND_F_SONG : 0);
   s->seq = seq + 1;
   int slot = (int)(s->seq & 1);
   if (ee_status) {
@@ -260,6 +393,8 @@ static void play(void *arg) {
     int half = 1 - (int)(sceSdBlockTransStatus(BLOCK_CH, 0) >> 24);
     head();
     commands();
+    midi_step();
+    keys();
     render(block_buf + half * 2048);
     status();
     SignalSema(lock);
@@ -276,10 +411,10 @@ static void *rpc(int fno, void *data, int size) {
     WaitSema(lock);
     if (ee_status && ee_status != a[0]) {
       /* the owner before: its last record, there before this one's first */
-      st[seq & 1].lost = 1;
+      st[seq & 1].flags = MXSND_F_LOST;
       int slot = (int)((seq + 1) & 1);
       status();
-      st[seq & 1].lost = 0;
+      st[seq & 1].flags = 0;
       while (st_dma[slot] && sceSifDmaStat(st_dma[slot]) >= 0)
         DelayThread(50);
     }
@@ -288,6 +423,11 @@ static void *rpc(int fno, void *data, int size) {
     if (!++owner)
       owner = 1;
     silence();
+    music_hold();
+    if (fno == MXSND_INIT && music.proc == owner_proc) {
+      music_free(MXSND_M_SONG);
+      music_free(MXSND_M_BANK);
+    }
     wet[0] = wet[1] = 0xFFFFFF;
     reverb_stream = 0;
     reverb(0, 0, 0, 0);
@@ -330,13 +470,30 @@ static void *rpc(int fno, void *data, int size) {
     SignalSema(lock);
     break;
   }
+  case MXSND_M_ALLOC:
+  case MXSND_M_DATA:
+  case MXSND_M_SET:
+  case MXSND_M_MINE:
+    WaitSema(lock);
+    if (ee_status && a[2] == owner)
+      rpc_out[0] = (u32)(fno == MXSND_M_ALLOC  ? music_alloc(a[0], a[1], owner_proc)
+                         : fno == MXSND_M_DATA ? music_data(a[0], a[1])
+                         : fno == MXSND_M_SET  ? music_set(a[0], a[1])
+                                               : music.proc == owner_proc && music.set[0] && music.set[1]);
+    SignalSema(lock);
+    break;
   case MXSND_STOP:
     WaitSema(lock);
+    if (a[0] == MXSND_ALL || music.proc == a[0]) { /* also one that lost the sound */
+      music_free(MXSND_M_SONG);
+      music_free(MXSND_M_BANK);
+    }
     rpc_out[0] = ee_status && (a[0] == MXSND_ALL || owner_proc == a[0]);
     if (rpc_out[0]) {
       ee_status = 0;
       head(); /* what it sent last is not the next one's */
       silence();
+      music_hold();
       st[seq & 1].stream_r = got.stream_w; /* what was queued is dropped */
       st[seq & 1].cmd_r = got.cmd_w;
       frac = 0, last_l = last_r = 0, playing = 0;
@@ -370,7 +527,7 @@ static void rpc_thread(void *arg) {
 }
 
 static int start_thread(void (*fn)(void *), int prio) {
-  iop_thread_t t = {TH_C, 0, fn, 0x800, prio};
+  iop_thread_t t = {TH_C, 0, fn, 0x1000, prio};
   int id = CreateThread(&t);
   if (id > 0)
     StartThread(id, 0);

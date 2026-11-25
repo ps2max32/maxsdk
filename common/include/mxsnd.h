@@ -45,7 +45,17 @@ enum {
                    its, the status writes stop and the voices and the stream are
                    silenced; answer: 1, else 0 */
   MXSND_RESUME, /* as MXSND_INIT, by a process that lost the sound to another */
+  /* music (iop/sound/mxsnd/src/midi.c): a bank's tables and a song, each in IOP
+     memory of its size; in: MXSND_M_*, bytes, the owner's number; answer: 0, < 0 */
+  MXSND_M_ALLOC, /* memory for it, the one before freed (the song stopped; a bank
+                    of another process: its song too); bytes 0: freed only */
+  MXSND_M_DATA,  /* bytes of it, after those before, from the upload buffer */
+  MXSND_M_SET,   /* all there: it is taken; a bank: bytes is its samples' SPU address */
+  MXSND_M_MINE,  /* answer: 1 when both are there, this process's */
 };
+enum { MXSND_M_BANK, MXSND_M_SONG };
+/* while a bank is loaded the music has the voices from here on */
+#define MXSND_MUSIC_VOICE 24
 #define MXSND_ALL 0xFFFFFFFFu
 /* the output area: each core's dry mix of its voices, 512 samples (two halves
    of 256, written in turn), left then right */
@@ -80,7 +90,17 @@ enum {
                          depth (0 .. 0x7FFF), volr delay | feedback << 8 (0 .. 127, echo
                          and delay), voice 1: the stream into it too; its work area
                          cleared */
-  MXSND_C_WET         /* voice: voll 1 into the reverb (the default), 0 dry only */
+  MXSND_C_WET,        /* voice: voll 1 into the reverb (the default), 0 dry only */
+  MXSND_C_MUSIC       /* voice: MXSND_MO_*, addr its value; MXSND_C_SILENCE pauses the
+                         song until MXSND_MO_FRONT */
+};
+
+enum {
+  MXSND_MO_STOP,
+  MXSND_MO_PLAY,   /* 1: loop */
+  MXSND_MO_PAUSE,  /* 1: on */
+  MXSND_MO_VOLUME, /* 0 .. 256 */
+  MXSND_MO_FRONT   /* the program is in front again: a song that plays goes on */
 };
 
 /* the head: counts, free running (positions are counts mod the ring's size) */
@@ -108,8 +128,10 @@ struct mxsnd_status {
   unsigned int endx1;    /* voices 24 .. 47 */
   unsigned int frames;   /* 48 kHz frames played */
   unsigned int starved;  /* frames the stream had no bytes for while it played */
-  unsigned int lost;     /* 1: the sound is another process's (the last record) */
+  unsigned int flags;    /* MXSND_F_* */
 };
+#define MXSND_F_LOST 1u /* the sound is another process's (the last record) */
+#define MXSND_F_SONG 2u /* a song plays, or is paused */
 _Static_assert(sizeof(struct mxsnd_status) == 32, "struct mxsnd_status");
 _Static_assert(sizeof(struct mxsnd_cmd) == 16, "struct mxsnd_cmd");
 

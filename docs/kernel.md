@@ -227,6 +227,9 @@ dropped, and the kernel's stop by address range missed the one in front after a 
   call in front, with its settings. `mx_snd_load` waits for that (`front_wait`).
 - SPU RAM is not kept, as GS memory: when another owner wrote it (`spu_gen`) the samples are lost
   and do not play until `mx_snd_reload`; `mx_snd_on_lost` tells the program.
+- A MIDI song (`<mx/midi.h>`) and its bank in IOP memory are one process's: held while another has
+  the sound, freed at its MXSND_STOP whoever has the sound, or when another process loads music;
+  `mx__snd_front` (`ee/src/base/midi.c`) goes on with it or hands it over again.
 - `mx__snd_front` (weak): called once when a program is in front again after `mx__snd_quiet`.
 - The kernel: `MXSND_STOP` with the process, also from `side_end_now`; after a restart
   `MXSND_ALL`. `exec_end_range` is gone.

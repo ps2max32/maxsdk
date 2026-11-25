@@ -35,6 +35,8 @@ PS2MAX_IRX ?= $(PS2MAX)/../ps2dev/install/ps2sdk/iop/irx
 LIB_IRX  := libsd
 IOP_OUT  ?= $(PS2MAX)/build/libs/maxsdk/iop
 $(OUT)/obj/ee/src/base/snd.c.o: CFLAGS += --embed-dir=$(PS2MAX_IRX) --embed-dir=$(IOP_OUT) -I$(HERE)/common/include
+$(OUT)/obj/ee/src/base/midi.c.o: CFLAGS += -I$(HERE)/common/include
+$(OUT)/obj/ee/src/base/midi.c.o: $(HERE)/common/include/mxsnd.h
 $(OUT)/obj/ee/src/base/snd.c.o: $(LIB_IRX:%=$(PS2MAX_IRX)/%.irx) $(IOP_OUT)/mxsnd.irx $(HERE)/common/include/mxsnd.h
 # the VM's swap file on the IOP (mxswap.irx): its calls
 $(OUT)/obj/ee/src/vm/vm.c.o: CFLAGS += -I$(HERE)/common/include
@@ -130,7 +132,7 @@ $(VM_TESTS:%=$(OUT)/tests/%.elf): $(LIBK) $(HERE)/ee/ld/maxsdk-vm.ld
 # (frame.c, fpresent.c under the kernel) as well: the frame pipeline without VM is the
 # standalone frame and fpresent's
 K_TESTS = k37_iopchan k43_phys k44_read k45_alldir k40_frame k41_present
-K_STAY_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k38_service k42_timers k46_spawnloop k47_sideend k48_turns k49_three k50_home k51_notify k52_settings k53_pads k54_isshell k55_homeshell k56_time k57_net k58_faults k59_video k60_mclog k61_mcwrite k62_bios k63_frames k64_homepic k65_frontwait k66_lost k67_hist k68_resmap k69_procmem k70_tlbhalf k71_framerun k72_hiresyield k73_drawfront k74_hireslost k75_cwd k76_sndfront k77_killpaused k78_hiresdisp k80_region k81_refill k82_clean k83_ioread k84_vuend k85_init k86_irqcost k87_root k89_sndowner k87_mxswap k92_files
+K_STAY_TESTS = k29_stay k31_beside k32_port k33_spawn k35_events k36_log k38_service k42_timers k46_spawnloop k47_sideend k48_turns k49_three k50_home k51_notify k52_settings k53_pads k54_isshell k55_homeshell k56_time k57_net k58_faults k59_video k60_mclog k61_mcwrite k62_bios k63_frames k64_homepic k65_frontwait k66_lost k67_hist k68_resmap k69_procmem k70_tlbhalf k71_framerun k72_hiresyield k73_drawfront k74_hireslost k75_cwd k76_sndfront k77_killpaused k78_hiresdisp k80_region k81_refill k82_clean k83_ioread k84_vuend k85_init k86_irqcost k87_root k89_sndowner k90_music k87_mxswap k92_files
 $(K_TESTS:%=$(OUT)/tests/%.elf): MX_TARGET = mxos
 $(K_TESTS:%=$(OUT)/tests/%.elf): MX_VM_TEXT = core
 $(K_TESTS:%=$(OUT)/tests/%.elf): $(LIBK) $(HERE)/ee/ld/maxsdk-vm-coretext.ld
@@ -311,7 +313,7 @@ batch: $(OUT)/batch/ps2batch.elf
 HOST_SRCS := $(wildcard $(HERE)/tests/host/*.c) $(HERE)/ee/src/pkt/pkt.c $(HERE)/ee/src/pkt/chain.c \
              $(HERE)/ee/src/gs/shader.c $(HERE)/ee/src/gs/rt.c $(HERE)/ee/src/gs/display.c \
              $(HERE)/ee/src/gs/video.c $(HERE)/ee/src/gs/crtc.c $(HERE)/ee/src/gs/tex.c $(HERE)/ee/src/gs/vram.c \
-             $(HERE)/ee/src/gs/vcache.c $(HERE)/ee/libc/malloc.c
+             $(HERE)/ee/src/gs/vcache.c $(HERE)/ee/libc/malloc.c $(HERE)/iop/sound/mxsnd/src/midi.c
 HOST_BIN   = $(OUT)/host/test_host
 
 $(HOST_BIN): $(HOST_SRCS) $(wildcard $(HERE)/tests/host/*.h) $(HDRS)

@@ -22,5 +22,7 @@ void test_video(void);
 void test_crtc(void);
 void test_tex(void);
 void test_vcache(void);
+void test_midi(void);
+void test_midiseq(void);
 
 #endif

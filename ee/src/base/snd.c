@@ -73,7 +73,7 @@ static struct mxsnd_status status(void) {
   }
   const volatile struct mxsnd_status *n = (s32)(a - b) > 0 ? &s[0] : &s[1];
   r.seq = n->seq, r.stream_r = n->stream_r, r.cmd_r = n->cmd_r;
-  r.endx0 = n->endx0, r.endx1 = n->endx1, r.frames = n->frames, r.starved = n->starved, r.lost = n->lost;
+  r.endx0 = n->endx0, r.endx1 = n->endx1, r.frames = n->frames, r.starved = n->starved, r.flags = n->flags;
   return r;
 }
 
@@ -81,7 +81,7 @@ static struct mxsnd_status status(void) {
 /* the sound is another process's: the last record mxsnd wrote here says so */
 static int lost(void) {
   const volatile struct mxsnd_status *s = MX_UNCACHED(area.s);
-  return (s[0].lost | s[1].lost) != 0;
+  return ((s[0].flags | s[1].flags) & MXSND_F_LOST) != 0;
 }
 
 static void send(void) {
@@ -189,7 +189,7 @@ static int own(void) {
   }
   u32 gen = spu_gen;
   if (take(MXSND_RESUME) < 0) {
-    ((volatile struct mxsnd_status *)MX_UNCACHED(area.s))->lost = 1; /* still */
+    ((volatile struct mxsnd_status *)MX_UNCACHED(area.s))->flags = MXSND_F_LOST; /* still */
     return 0;
   }
   voices_off();
@@ -467,6 +467,7 @@ static struct {
   u8 on, prio, dry;
   u16 vl, vr, pitch;
 } vs[MXSND_VOICES];
+static int nvoices = MXSND_VOICES; /* this file's: those below (the music has the others) */
 
 /* mxsnd silenced them (INIT): none on, all into the reverb */
 static void voices_reset(void) { memset(vs, 0, sizeof vs); }
@@ -588,12 +589,12 @@ int mx_snd_play(const struct mx_snd_sample *s, int voice) {
     return -1;
   if (voice < 0) {
     struct mxsnd_status st = status();
-    for (int v = 0; v < MXSND_VOICES && voice < 0; v++)
+    for (int v = 0; v < nvoices && voice < 0; v++)
       if (!sounding(v, &st))
         voice = v;
     if (voice < 0)
       return -1;
-  } else if (voice >= MXSND_VOICES)
+  } else if (voice >= nvoices)
     return -1;
   voice_play(voice, s, s->rate, MX_SND_VOL_MAX, MX_SND_VOL_MAX, 255);
   send();
@@ -608,7 +609,7 @@ int mx_snd_playing(int voice, const struct mx_snd_sample *s) {
 }
 
 void mx_snd_voice_volume(int voice, int left, int right) {
-  if (!own() || voice < 0 || voice >= MXSND_VOICES)
+  if (!own() || voice < 0 || voice >= nvoices)
     return;
   vs[voice].vl = (u16)vol(left), vs[voice].vr = (u16)vol(right);
   struct mxsnd_cmd *c = cmd(MXSND_C_SET, voice);
@@ -634,7 +635,7 @@ int mx_snd_ch_play(const struct mx_snd_sample *s, u32 rate, int left, int right,
   priority = priority < 0 ? 0 : priority > 255 ? 255 : priority;
   struct mxsnd_status st = status();
   int v = -1, worst = -1;
-  for (int i = 0; i < MXSND_VOICES; i++) {
+  for (int i = 0; i < nvoices; i++) {
     if (!sounding(i, &st)) {
       v = i;
       break;
@@ -735,4 +736,59 @@ int mx__snd_peek(u32 spu, void *dst, u32 bytes) {
 void mx__snd_counts(u32 *frames, u32 *starved) {
   struct mxsnd_status st = status();
   *frames = st.frames, *starved = st.starved;
+}
+
+/* ---- music: for midi.c -------------------------------------------------------- */
+
+/* on: the voices from MXSND_MUSIC_VOICE are the music's */
+void mx__snd_music(int on) {
+  nvoices = on ? MXSND_MUSIC_VOICE : MXSND_VOICES;
+  if (!on || !own())
+    return;
+  for (int v = nvoices; v < MXSND_VOICES; v++)
+    if (vs[v].on) {
+      cmd(MXSND_C_STOP, v);
+      vs[v].on = 0, vs[v].s = 0;
+    }
+  send();
+}
+
+/* a bank's tables or a song into IOP memory (bytes 0: freed); spu: the bank's
+   samples. 0, < 0 */
+int mx__snd_music_data(int what, const void *data, u32 bytes, u32 spu) {
+  if (!own_wait() || call(MXSND_M_ALLOC, (u32)what, bytes) != 0)
+    return -1;
+  if (!bytes)
+    return 0;
+  for (u32 o = 0; o < bytes;) {
+    u32 n = bytes - o < MXSND_UPLOAD_BYTES ? bytes - o : MXSND_UPLOAD_BYTES;
+    memcpy(bounce, (const u8 *)data + o, n);
+    if (mx_iop_write(AREA(upload), bounce, (n + 15) & ~15u) < 0 || call(MXSND_M_DATA, (u32)what, n) != 0) {
+      call(MXSND_M_ALLOC, (u32)what, 0);
+      return -1;
+    }
+    o += n;
+  }
+  return call(MXSND_M_SET, (u32)what, spu) != 0 ? -1 : 0;
+}
+
+int mx__snd_music_mine(void) { return own() && call(MXSND_M_MINE, 0, 0) == 1; }
+
+/* 0: sent, *at: the count it is done at */
+int mx__snd_music_cmd(int op, u32 value, u32 *at) {
+  if (!own())
+    return -1;
+  cmd(MXSND_C_MUSIC, op)->addr = value;
+  send();
+  *at = cmd_w;
+  return 0;
+}
+
+/* the status: the commands up to at done? a song? -1: not this program's now */
+int mx__snd_music_status(u32 at, int *done) {
+  if (!own())
+    return -1;
+  struct mxsnd_status st = status();
+  *done = (s32)(st.cmd_r - at) >= 0;
+  return (st.flags & MXSND_F_SONG) != 0;
 }

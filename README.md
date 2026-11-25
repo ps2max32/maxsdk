@@ -79,7 +79,7 @@ the PS2; the measurements are in `docs/`. maxsdk is built with clang only.
 | Path | |
 |---|---|
 | `ee/include/mx/` | public headers; `hw/` is generated from `ee/gen/hw_desc.py` |
-| `ee/src/base/` | syscall stubs, startup, mini C runtime, printf, SIF client (tty, files, IOP modules), cache ops; IOP memory over SIF and the patches of the ROM modules, after ps2sdk's sbv (`<mx/iop.h>`, `iop.c`) |
+| `ee/src/base/` | syscall stubs, startup, mini C runtime, printf, SIF client (tty, files, IOP modules), cache ops; IOP memory over SIF and the patches of the ROM modules, after ps2sdk's sbv (`<mx/iop.h>`, `iop.c`); sound through mxsnd (`<mx/snd.h>`), MIDI music played by it on the IOP (`<mx/midi.h>`) |
 | `ee/src/irq/`, `ee/src/dma/` | interrupt dispatcher, DMA channels and the DMA engine |
 | `ee/src/pkt/`, `ee/src/gs/` | DMA/VIF/GIF packets, chains (`<mx/chain.h>`: built once, sent or called many times), GS setup and interrupts, the VIF packets of HLSL programs and their mesh chains (`shader.c`) |
 | `ee/src/vu/` | VU control, kernels and streaming |
@@ -96,7 +96,7 @@ the PS2; the measurements are in `docs/`. maxsdk is built with clang only.
 | `probe/` | one ELF per hardware question; results go to `docs/` |
 | `examples/<name>/` | the examples, one directory each |
 | `mk/maxsdk.mk` | what a program on maxsdk includes: flags, link, the VU and HLSL rules |
-| `tools/` | `symbolize.py` (exception backtraces), `prof.py` (`<mx/prof.h>`'s PC samples as functions), `trace.py`, `vusched/` (hand-scheduled VU1 kernels), `vscode-vsm/` |
+| `tools/` | `sf2bank.c` (a SoundFont 2 file as `<mx/midi.h>`'s bank), `symbolize.py` (exception backtraces), `prof.py` (`<mx/prof.h>`'s PC samples as functions), `trace.py`, `vusched/` (hand-scheduled VU1 kernels), `vscode-vsm/` |
 
 ## Decisions (PLAN_MAXSDK.md section 7)
 

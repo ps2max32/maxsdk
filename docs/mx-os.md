@@ -326,7 +326,8 @@ ends); what it drew in GS memory is not kept. So is the sound: at each handover 
 wants plays again when it asks (`mx_snd_ch_playing` says 0). Beside another program that has the
 sound a program is silent, and takes the sound back by itself once in front (kernel version 48); SPU
 RAM is not kept: when another program wrote it the samples are to be loaded again
-(`mx_snd_on_lost`, `mx_snd_reload`). The drawing hardware is the process in front's
+(`mx_snd_on_lost`, `mx_snd_reload`). MIDI music (`<mx/midi.h>`, played on the IOP) pauses then, and goes on at the
+program's first sound call in front: call `mx_snd_commit` once a frame. The drawing hardware is the process in front's
 (kernel version 39, `<mx/draw.h>`): only it gets those interrupts, a program's handlers are
 for the drawing hardware only, and maxsdk takes the graphics up again when the program is in
 front again (beam racing too); `mx_draw_open`'s lost function is for what the program keeps in
