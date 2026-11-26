@@ -1173,11 +1173,18 @@ static int mxio_call(int fno, const void *send, u32 ssize) {
   return r[0];
 }
 
+/* The kernel's (version 50): the process of the thread that calls, 0 for
+   its own. Programs' file calls are the kernel's (mx_fio_open is in its
+   table), on their threads; mxio keeps each file's process for the
+   cleanup when another program ends. */
+int (*mx__fio_proc)(void);
+
 static int mxio_open(const char *path, int flags) {
   volatile u32 *a = MX_UNCACHED(mxio_arg);
   volatile char *d = (volatile char *)(a + 1);
   u32 i = 0;
-  a[0] = (u32)flags;
+  u32 owner = mx__fio_proc ? (u32)mx__fio_proc() & 0xFF : 0;
+  a[0] = (u32)flags | owner << 16;
   for (; path[i] && i < 250; i++)
     d[i] = path[i];
   d[i] = 0;
@@ -1873,11 +1880,13 @@ int mx_fio_dclose(int fd) {
    handles mxio holds for its files on a driver (a card, USB): closing every
    number of FILEIO's closes mxio's files behind its back, and the next file
    opened gets the handle (the VM's swap file was a file of the next game).
-   So with files to keep, only what was opened through here is closed, and
-   mxio's one by one. With none to keep, every number and all of mxio's:
-   also what a kernel before this one left open. A call without an answer
-   (the kernel's limit, mx__sif_wait_limit) ends it. */
-void mx__fio_cleanup(int (*keep)(int fd)) {
+   So with files to keep, only what was opened through here is closed. With
+   none to keep, every number: also what a kernel before this one left open.
+   mxio's go with one MXIO_CLOSE_ALL, which keeps the VM's and those of the
+   processes in live (0-terminated, NULL: none; mxio knows each file's
+   process). A call without an answer (the kernel's limit,
+   mx__sif_wait_limit) ends it. */
+void mx__fio_cleanup(int (*keep)(int fd), const u8 *live) {
   u32 kept_fio = 0, kept_mxio = 0, timeouts = mx__sif_timeouts;
   for (int f = 0; keep && f < 32; f++) {
     kept_fio |= (u32)(keep(f) != 0) << f;
@@ -1896,17 +1905,13 @@ void mx__fio_cleanup(int (*keep)(int fd)) {
     return;
   fio_lock();
   volatile u32 *a = MX_UNCACHED(mxio_arg);
-  if (all) {
-    a[0] = 0;
-    mxio_call(MXIO_CLOSE_ALL, (void *)a, 16);
-  } else {
-    /* one that is not open answers -9 */
-    for (int f = 0; f < MXIO_FILES && mx__sif_timeouts == timeouts; f++)
-      if (!(kept_mxio >> f & 1)) {
-        a[0] = (u32)f;
-        mxio_call(MXIO_CLOSE, (void *)a, 16);
-      }
-  }
+  /* those kept and those of the processes that go on stay (mxio knows
+     whose each file is) */
+  a[0] = all && !(live && live[0]) ? 0 : 1, a[1] = kept_mxio;
+  volatile u8 *l = (volatile u8 *)(a + 2);
+  for (int i = 0; i < MXIO_LIVE; i++)
+    l[i] = live && i < MXIO_LIVE ? live[i] : 0;
+  mxio_call(MXIO_CLOSE_ALL, (void *)a, 8 + MXIO_LIVE);
   fio_unlock();
 }
 

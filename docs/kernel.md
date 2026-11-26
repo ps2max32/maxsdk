@@ -778,12 +778,18 @@ file goes with the host's run, and the next run's descriptors took its number, s
 program wrote its pages into its own ELF). At a program's end the kernel closes the program's
 descriptors but the VM's (`mx__vm_uses_fd`: the swap file, the ELF and mapped files of the
 spaces that go on), FILEIO's and mxio's (sif.c's `mx__fio_cleanup`). When the VM keeps none,
-that is every FILEIO number 3..31 and one `MXIO_CLOSE_ALL`. When it keeps files, only the
-FILEIO descriptors the EE opened itself (sif.c keeps a mask of them) and mxio's slots one by
-one but the VM's: FILEIO's numbers are ioman's, and mxio holds ioman handles of its own for
-its files on a driver (`usb0:`, `mc0:`), so closing every number closed the VM's files behind
-mxio's back (`tests/ps2/vm43_keep.c` for `host:` files, `vm44_keepdev.c` for a file on the
-card). A space closes its own files when it is freed. A
+that is every FILEIO number 3..31. When it keeps files, only the FILEIO descriptors the EE
+opened itself (sif.c keeps a mask of them): FILEIO's numbers are ioman's, and mxio holds ioman
+handles of its own for its files on a driver (`usb0:`, `mc0:`), so closing every number closed
+the VM's files behind mxio's back (`tests/ps2/vm43_keep.c` for `host:` files, `vm44_keepdev.c`
+for a file on the card). mxio's files go with one `MXIO_CLOSE_ALL` that names what stays: the
+VM's slots (a mask) and the processes that go on (version 50, `ptab_live`: every process that
+has not ended, but the one a launch in its place ended). mxio keeps each file's process: the
+kernel's `mx_fio_open`, which programs call through its table, sends the calling thread's
+process with `MXIO_OPEN` (`mx__fio_proc`; 0 for the kernel's own files, which only the VM's
+mask keeps). Before version 50 every mxio file but the VM's was closed, a waiting parent's too:
+after a child ended its reads failed (-9) and left their buffers as they were
+(`tests/ps2/k92_files.c`). A space closes its own files when it is freed. A
 program without VM that takes all memory (no core heap) does not start while a program with VM
 is parked: `k40_frame` and `k41_present` have a core heap for that.
 

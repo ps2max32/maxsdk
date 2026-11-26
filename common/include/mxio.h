@@ -22,16 +22,22 @@
 #define MXIO_BUFFER (MXIO_HEAD + 24u * 1472u)
 #define MXIO_ANSWER 4
 #define MXIO_FILES 32
+#define MXIO_LIVE 16
 
 enum {
-  MXIO_OPEN,  /* flags (ioman's), path; answer: fd or < 0, stride, chunk */
+  MXIO_OPEN,  /* flags (ioman's) | the process << 16 (1-255, 0: the kernel's or
+                 not known; kernel version 50), path; answer: fd or < 0, stride,
+                 chunk */
   MXIO_CLOSE, /* fd */
   MXIO_READ,  /* fd, position, size, EE address; answer: bytes or < 0 */
   MXIO_WRITE, /* fd, position, size; data as OPEN said; answer: bytes or < 0 */
   MXIO_SIZE,  /* fd; answer: the file's size or < 0 */
   MXIO_LOG,   /* text, to the host's console; < 0 without a host */
   MXIO_STATS, /* answer: frames, doubles, drops, asked again (the fast path) */
-  MXIO_CLOSE_ALL, /* what a program left open */
+  MXIO_CLOSE_ALL, /* what a program left open: 0, every file; or (kernel
+                     version 50) 1, a mask of the files to keep, then up to
+                     MXIO_LIVE processes (bytes, 0 ends the list): every file
+                     but those kept and those of these processes */
   MXIO_WATCH,     /* EE address of a struct mxio_devs (64-byte aligned); answer:
                      MXIO_DEVS_VERSION. mxio then writes the devices there by DMA
                      at every change (kernel version 26) */

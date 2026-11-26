@@ -24,6 +24,7 @@ IRX_ID("mxio", 1, 0);
 
 static struct {
   int used, host, h;
+  int owner;   /* its process (OPEN's flags >> 16), 0: not known */
   u32 pos;     /* of a driver's file: where it is now */
   char dev[12]; /* its device, "usb0:" (MXIO_WATCH's files) */
 } files[MXIO_FILES];
@@ -73,6 +74,8 @@ static int do_open(int flags, const char *path) {
     return -24;
   files[fd].pos = 0;
   files[fd].host = 0;
+  files[fd].owner = (flags >> 16) & 0xFF;
+  flags &= 0xFFFF;
   if (!memcmp(path, "host:", 5) && fast()) {
     int mode = flags & 2 ? (flags & FIO_O_TRUNC ? 3 : 1) : 0;
     int h = FAST(open, 0)(path + 5, mode);
@@ -417,6 +420,17 @@ static void watch_start(void) {
     StartThread(watch_tid, 0);
 }
 
+/* CLOSE_ALL's a[0] 1: is file fd kept, or of a process that goes on */
+static int live(const u32 *a, int fd) {
+  if (a[1] >> fd & 1)
+    return 1;
+  const u8 *p = (const u8 *)(a + 2);
+  for (int i = 0; i < MXIO_LIVE && p[i]; i++)
+    if (files[fd].owner && p[i] == files[fd].owner)
+      return 1;
+  return 0;
+}
+
 static void *rpc(int fno, void *data, int size) {
   u32 *a = data;
   int fd = (int)a[0];
@@ -452,8 +466,11 @@ static void *rpc(int fno, void *data, int size) {
     }
     break;
   case MXIO_CLOSE_ALL:
+    /* a[0] 1: but the files kept (a[1]) and those of the processes that go
+       on (the bytes from a[2]): another program's files stay open when one
+       ends (a parent waits for its child) */
     for (fd = 0; fd < MXIO_FILES; fd++)
-      if (files[fd].used) {
+      if (files[fd].used && !(a[0] == 1 && live(a, fd))) {
         if (files[fd].host)
           FAST(close, 1)(files[fd].h);
         else
