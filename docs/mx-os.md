@@ -17,8 +17,9 @@ memory: [vm.md](vm.md). Where it goes (a game OS): [mx-os-plan.md](mx-os-plan.md
   `host:` files is its own module beside mxnet (mxfast, which is the console too: to the
   ps2client that serves the fast path, without loss, else by broadcast as udptty sent it).
   Between programs the kernel closes the ended program's files (not the swap file, nor the
-  ELFs of the programs that go on: their pages come from them, nor the files of the programs
-  that go on, a parent that waits for its child among them: kernel version 50), pad ports and sound, and
+  ELFs of the programs that go on: their pages come from them, nor the files and sockets of
+  the programs that go on, a parent that waits for its child among them: kernel versions 50
+  and 51), pad ports and sound, and
   keeps the IOP and the network. USB pads (DualShock 3, DualShock 4, DualSense) run on usbd and
   maxsdk's `mxpad`, loaded at the boot (`docs/pad-bt-plan.md`), and with a Bluetooth dongle on USB
   the pads paired with it (over USB, as a PS3 or PS4 pairs them), kept in `mc0:/MXOS/BTPADS.DAT`. The internal HDD (`mxata`, `docs/iop-drivers.md`) is a FAT32 or exFAT

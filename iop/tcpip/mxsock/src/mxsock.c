@@ -17,6 +17,7 @@ IRX_ID("mxsock", 1, 0);
 
 static struct {
   int fd; /* lwIP's + 1, 0: free */
+  int owner; /* its process (MXSOCK_SOCKET), 0: not known */
   int connecting;
 } sockets[MXSOCK_SOCKETS];
 
@@ -37,12 +38,13 @@ static int ready(int fd, int want) {
   return (FD_ISSET(fd, &r) ? MXSOCK_READ : 0) | (FD_ISSET(fd, &w) ? MXSOCK_WRITE : 0);
 }
 
-static int add(int fd) {
+static int add(int fd, int owner) {
   int on = 1;
   for (int s = 0; s < MXSOCK_SOCKETS; s++)
     if (!sockets[s].fd) {
       lwip_ioctl(fd, FIONBIO, &on);
       sockets[s].fd = fd + 1;
+      sockets[s].owner = owner;
       sockets[s].connecting = 0;
       return s;
     }
@@ -221,6 +223,14 @@ static void watch_thread(void *arg) {
   }
 }
 
+/* is owner one of the processes in p (MXSOCK_CLOSE_ALL) */
+static int live(const u8 *p, int owner) {
+  for (int i = 0; owner && i < MXSOCK_LIVE && p[i]; i++)
+    if (p[i] == owner)
+      return 1;
+  return 0;
+}
+
 static void *rpc(int fno, void *data, int size) {
   u32 *a = data;
   u8 *in = (u8 *)(a + MXSOCK_ARGS), *out = (u8 *)(rpc_out + MXSOCK_ANSWER);
@@ -228,12 +238,14 @@ static void *rpc(int fno, void *data, int size) {
   (void)size;
   if (fno == MXSOCK_SOCKET) {
     int fd = lwip_socket(AF_INET, a[0] == MXSOCK_UDP ? SOCK_DGRAM : SOCK_STREAM, 0);
-    r[0] = fd < 0 ? -24 : add(fd);
+    r[0] = fd < 0 ? -24 : add(fd, (int)(a[1] & 0xFF));
     return r;
   }
   if (fno == MXSOCK_CLOSE_ALL) {
+    /* a[0] 1: but the sockets of the processes that go on (the bytes from
+       a[1]): a parent's stay open when its child ends */
     for (int s = 0; s < MXSOCK_SOCKETS; s++)
-      if (sockets[s].fd) {
+      if (sockets[s].fd && !(a[0] == 1 && live((const u8 *)(a + 1), sockets[s].owner))) {
         lwip_close(sockets[s].fd - 1);
         sockets[s].fd = 0;
       }
@@ -295,7 +307,7 @@ static void *rpc(int fno, void *data, int size) {
       r[0] = MXSOCK_AGAIN;
       break;
     }
-    r[0] = add(n);
+    r[0] = add(n, sockets[s].owner);
     r[1] = (s32)addr.sin_addr.s_addr, r[2] = ntohs(addr.sin_port);
     break;
   case MXSOCK_CONNECT:

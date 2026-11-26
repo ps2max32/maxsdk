@@ -18,6 +18,7 @@
 #define MXSOCK_ANSWER 4
 #define MXSOCK_MAX 4096u /* bytes of data in one call */
 #define MXSOCK_SOCKETS 32
+#define MXSOCK_LIVE 16 /* processes in MXSOCK_CLOSE_ALL */
 
 #define MXSOCK_AGAIN (-11)
 #define MXSOCK_CLOSED (-104) /* by the other side, or an error on the connection */
@@ -39,10 +40,12 @@
 #define MXSOCK_WRITE 2
 
 enum {
-  MXSOCK_SOCKET,  /* type; answer: socket */
+  MXSOCK_SOCKET,  /* type, its process (1-255, 0: not known; kernel version 51);
+                     answer: socket */
   MXSOCK_BIND,    /* socket, port */
   MXSOCK_LISTEN,  /* socket, backlog */
-  MXSOCK_ACCEPT,  /* socket; answer: socket, ip, port */
+  MXSOCK_ACCEPT,  /* socket; answer: socket (of the listening one's process), ip,
+                     port */
   MXSOCK_CONNECT, /* socket, ip, port: AGAIN until it is up, then 0 */
   MXSOCK_SEND,    /* socket, size, data; answer: bytes taken */
   MXSOCK_RECV,    /* socket, size; answer: bytes, data; 0 at the end */
@@ -50,7 +53,9 @@ enum {
   MXSOCK_RECVFROM, /* socket, size; answer: bytes, ip, port, data */
   MXSOCK_CLOSE,   /* socket */
   MXSOCK_POLL,    /* socket, MXSOCK_READ | MXSOCK_WRITE; answer: those ready */
-  MXSOCK_CLOSE_ALL, /* what a program left open */
+  MXSOCK_CLOSE_ALL, /* what a program left open: 0, every socket; or (kernel
+                       version 51) 1, then up to MXSOCK_LIVE processes (bytes, 0
+                       ends the list): every socket but those of these processes */
   /* kernel version 30 (common/include/mxnet.h): the EE address of a struct
      mxnet_status (64-byte aligned), written now and at each change from
      then on; answer: MXNET_STATUS_VERSION */

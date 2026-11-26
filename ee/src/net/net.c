@@ -1,5 +1,6 @@
 /* Sockets: the EE's side of common/include/mxsock.h (<mx/net.h>). */
 #include <mx/cpu.h>
+#include <mx/kernel.h>
 #include <mx/net.h>
 #include <mx/sif.h>
 #include <mx/string.h>
@@ -58,7 +59,13 @@ static int call(int fno, u32 a0, u32 a1, u32 a2, u32 a3, u32 send, u32 back) {
   return call_data(fno, a0, a1, a2, a3, 0, 0, 0, 0, 0);
 }
 
-int mx_net_socket(int type) { return call(MXSOCK_SOCKET, (u32)type, 0, 0, 0, 0, 0); }
+/* the socket's process, for the kernel's cleanup when another program ends
+   (kernel version 51): a parent's sockets stay while its child ends */
+static u32 owner(void) {
+  int p = mx__kernel && mx__kernel->version >= 51 ? mx__kernel->proc_self() : 0;
+  return p > 0 && p < 256 ? (u32)p : 0;
+}
+int mx_net_socket(int type) { return call(MXSOCK_SOCKET, (u32)type, owner(), 0, 0, 0, 0); }
 int mx_net_bind(int s, u32 port) { return call(MXSOCK_BIND, (u32)s, port, 0, 0, 0, 0); }
 int mx_net_listen(int s, int backlog) { return call(MXSOCK_LISTEN, (u32)s, (u32)backlog, 0, 0, 0, 0); }
 int mx_net_connect(int s, u32 ip, u32 port) { return call(MXSOCK_CONNECT, (u32)s, ip, port, 0, 0, 0); }

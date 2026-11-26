@@ -130,7 +130,8 @@ records its status (`ptab.c`) and has the command thread take it away (`side_end
 `exec_side_ended`): its threads, semaphores, interrupt handlers, ports, timers and the file
 server's lock by its process tag (`end_side_off`), its slot out of the sides and park lists,
 its VM space and pinned core back to the VM; the kernel's `mx__vm_shutdown` service does
-nothing for it (its exit calls it). Its files, sockets and IOP memory are not tagged yet; its
+nothing for it (its exit calls it). Its files and sockets carry its process (versions 50 and
+51) but are not closed at its end yet, and its IOP memory is not tagged; its
 core, when a run of its own, stays unused until those above it end. The one in front goes
 on. `tests/ps2/k47_sideend.c` (exit and crash).
 
@@ -541,7 +542,11 @@ set-up comes from the settings: `net.mode` `dhcp`, or a fixed address (`net.ip`,
 `net.gw`, which mxnet starts with, and `net.dns`). The kernel applies them at its start when
 the stack differs, and a second after the last change of a `net.*` key
 (`MXSOCK_NET_CONFIG`). The host link's sockets are bound to any address, so it follows a new
-one. Without the new mxsock (an older card) the network is not watched: `mx_net_status` says
+one. Until version 51 none of this worked on the PS2: net.c's words for the calls lay 8 bytes
+past a 16-byte block, which SIF DMA moves whole, so the kernel never saw MXSOCK_NET_WATCH's
+answer (the network "not started") and mxsock took a word before them for the address of its
+DMA. Every word the kernel sends or receives by SIF DMA starts its own 64-byte line (net.c,
+dev.c, pad.c); a network that does not start is logged with the reason. Without the new mxsock (an older card) the network is not watched: `mx_net_status` says
 `up` 0. `tests/ps2/k57_net.c`.
 The kernel's VM keeps a fault log of one program (`docs/vm.md`, "The fault log"):
 `mx_vm_trace_restart`, `mx_vm_trace_mark` and `mx_vm_trace_save` record its page faults (the
@@ -792,7 +797,11 @@ kernel's `mx_fio_open`, which programs call through its table, sends the calling
 process with `MXIO_OPEN` (`mx__fio_proc`; 0 for the kernel's own files, which only the VM's
 mask keeps). Before version 50 every mxio file but the VM's was closed, a waiting parent's too:
 after a child ended its reads failed (-9) and left their buffers as they were
-(`tests/ps2/k92_files.c`). A space closes its own files when it is freed. A
+(`tests/ps2/k92_files.c`). Sockets the same way (version 51): `mx_net_socket` sends its
+process with `MXSOCK_SOCKET` (`mx__kernel->proc_self`, in the program: net.c is not the
+kernel's), an accepted socket is the listening one's, and the kernel's `MXSOCK_CLOSE_ALL`
+lists the processes that go on (`tests/ps2/k93_sockets.c`). A space closes its own files when
+it is freed. A
 program without VM that takes all memory (no core heap) does not start while a program with VM
 is parked: `k40_frame` and `k41_present` have a core heap for that.
 
