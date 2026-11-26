@@ -14,6 +14,7 @@
 #include <mx/sif.h>
 #include <mx/snd.h>
 #include <mx/string.h>
+#include <mx/thread.h>
 #include <mxsnd.h>
 
 /* IOP modules as data: 16-byte aligned for the transfer to the IOP */
@@ -45,12 +46,31 @@ static u32 iop_area, stream_w, cmd_w, stream_r0, cmd_r0;
 static u8 line[16]; /* the stream's bytes of the line stream_w is in (not a whole one yet) */
 volatile u32 mx__snd_dropped; /* commands left out: the ring was full */
 
-static int call(int fno, u32 a, u32 b) {
+/* The program's threads one at a time (Quake 3 copies samples on a thread
+   beside the game's): lock_io for an exchange with mxsnd (arg, res, srv, the
+   bounce buffer and mxsnd's upload area), held around call() and the
+   transfers that go with it, and for SPU RAM's map (blk); lock_own for own()'s taking back, which calls
+   call() (so the two differ). */
+static int lock_io = -1, lock_own = -1;
+static void io_begin(void) { mx_sema_wait(lock_io); }
+static void io_end(void) { mx_sema_signal(lock_io); }
+
+/* an RPC to mxsnd, with lock_io held; ans: its answer's 8 words */
+static int call_ans(int fno, u32 a, u32 b, u32 *ans) {
   volatile u32 *w = MX_UNCACHED(arg);
   w[0] = a, w[1] = b, w[2] = owner, w[3] = 0;
   if (mx_sif_call(&srv, fno, (void *)w, 16, (void *)MX_UNCACHED(res), 32) < 0)
     return -1;
+  for (int i = 0; ans && i < 8; i++)
+    ans[i] = MX_UNCACHED(res)[i];
   return (int)MX_UNCACHED(res)[0];
+}
+/* the same, taking lock_io */
+static int call(int fno, u32 a, u32 b) {
+  io_begin();
+  int r = call_ans(fno, a, b, 0);
+  io_end();
+  return r;
 }
 
 /* Load and start the module from buf to end; < 0 if it does not load or does
@@ -126,9 +146,13 @@ static int blocks_lost(void);
 /* mxsnd this program's: its counts and numbers */
 static int take(int fno) {
   memset(MX_UNCACHED(&area), 0, sizeof area);
-  if (call(fno, mx_paddr_of(&area).v, (u32)mx_proc_self()) < 0)
+  u32 ans[8];
+  io_begin();
+  int r = call_ans(fno, mx_paddr_of(&area).v, (u32)mx_proc_self(), ans);
+  io_end();
+  if (r < 0)
     return -1;
-  const volatile struct mxsnd_init *in = (const volatile struct mxsnd_init *)MX_UNCACHED(res);
+  const struct mxsnd_init *in = (const struct mxsnd_init *)ans;
   if (in->version != MXSND_VERSION)
     return -1;
   iop_area = in->area;
@@ -142,6 +166,10 @@ static int take(int fno) {
 int mx_snd_init(void) {
   if (ready)
     return 0;
+  if (lock_io < 0 && (lock_io = mx_sema_create(1, 1)) < 0)
+    return -1;
+  if (lock_own < 0 && (lock_own = mx_sema_create(1, 1)) < 0)
+    return -1;
   if (!mx_sif_ready() && mx_sif_init() < 0)
     return -1;
   if (mx_sif_bind_tries(&srv, MXSND_SID, 2) < 0 || !srv.server) {
@@ -164,7 +192,8 @@ int mx_snd_init(void) {
    opened it, until it ends, or longer (a program at the home menu beside it).
    Lost, it is taken back by the first call made in front: the counts are
    mxsnd's, the voices are silent, the settings sent again. Called by
-   everything that uses mxsnd, on the program's own thread. 0: not now.
+   everything that uses mxsnd, from threads (not from an interrupt
+   handler: it may wait for another thread's taking back). 0: not now.
    Back in front after mx__snd_quiet, lost or not, mx__snd_front is called
    once, with the sound this program's again (for what goes on by itself,
    as a song; none yet). */
@@ -173,9 +202,33 @@ static int quieted;
 static int in_front(void) {
   return !mx__kernel || mx__kernel->version < 48 || mx__kernel->proc_in_front();
 }
+static volatile int resuming; /* a thread is in own()'s taking back */
+static int own_slow(int *front, int *was_lost);
 static int own(void) {
   if (!ready)
     return 0;
+  /* resuming read last: it is set before take() clears the records, so a
+     cleared record read here is followed by resuming seen set */
+  if (!lost() && !quieted) {
+    __asm__ volatile("" ::: "memory");
+    if (!resuming)
+      return 1;
+  }
+  /* taking back (take() clears the records it is read from: a thread beside
+     must not count it as done before it is), one thread at a time; the
+     functions told afterwards call into here again themselves */
+  int front = 0, was_lost = 0;
+  mx_sema_wait(lock_own);
+  int r = own_slow(&front, &was_lost);
+  mx_sema_signal(lock_own);
+  if (was_lost && lost_fn)
+    lost_fn();
+  if (front && mx__snd_front)
+    mx__snd_front();
+  return r;
+}
+/* own() with lock_own held: anew, as another thread may have taken it back */
+static int own_slow(int *front, int *was_lost) {
   int gone = lost();
   if (!gone && !quieted)
     return 1;
@@ -183,22 +236,24 @@ static int own(void) {
     return !gone;
   if (!gone) {
     quieted = 0;
-    if (mx__snd_front)
-      mx__snd_front();
+    *front = 1;
     return 1;
   }
   u32 gen = spu_gen;
+  resuming = 1;
   if (take(MXSND_RESUME) < 0) {
     ((volatile struct mxsnd_status *)MX_UNCACHED(area.s))->flags = MXSND_F_LOST; /* still */
+    resuming = 0;
     return 0;
   }
   voices_off();
   settings();
   quieted = 0;
-  if (gen != spu_gen && blocks_lost() && lost_fn)
-    lost_fn();
-  if (mx__snd_front)
-    mx__snd_front();
+  io_begin();
+  *was_lost = gen != spu_gen && blocks_lost();
+  io_end();
+  resuming = 0;
+  *front = 1;
   return 1;
 }
 
@@ -445,8 +500,10 @@ static int block(u32 at) {
 static int stale(const struct mx_snd_sample *s) {
   if (!nlost)
     return 0;
-  int i = block(s->spu);
-  return i >= 0 && blk[i].lost;
+  io_begin();
+  int i = block(s->spu), r = i >= 0 && blk[i].lost;
+  io_end();
+  return r;
 }
 
 static void spu_free(u32 at) {
@@ -516,11 +573,15 @@ static int upload(u32 at, const void *adpcm, u32 size) {
   for (u32 o = 0; o < total; o += MXSND_UPLOAD_BYTES) {
     u32 n = total - o < MXSND_UPLOAD_BYTES ? total - o : MXSND_UPLOAD_BYTES;
     u32 have = size - o < n ? size - o : n;
+    u32 ans[8];
+    io_begin();
     memcpy(bounce, src + o, have);
     memset(bounce + have, 0, n - have);
-    if (mx_iop_write(AREA(upload), bounce, n) < 0 || call(MXSND_UPLOAD, at + o, n) != 0)
+    int r = mx_iop_write(AREA(upload), bounce, n) < 0 ? -1 : call_ans(MXSND_UPLOAD, at + o, n, ans);
+    io_end();
+    if (r != 0)
       return -1;
-    spu_gen = MX_UNCACHED(res)[1];
+    spu_gen = ans[1];
   }
   return 0;
 }
@@ -539,11 +600,15 @@ static int own_wait(void) {
 int mx_snd_load(struct mx_snd_sample *s, const void *adpcm, u32 size, u32 rate) {
   if (!size || !own_wait())
     return -1;
+  io_begin(); /* SPU RAM's map: a thread beside may load or free too */
   u32 at = spu_alloc((size + 63) & ~63u);
+  io_end();
   if (!at)
     return -1;
   if (upload(at, adpcm, size) < 0) {
+    io_begin();
     spu_free(at);
+    io_end();
     return -1;
   }
   const u8 *src = adpcm, *last = src + size - 16;
@@ -557,12 +622,18 @@ int mx_snd_load(struct mx_snd_sample *s, const void *adpcm, u32 size, u32 rate) 
 int mx_snd_reload(struct mx_snd_sample *s, const void *adpcm) {
   if (!s->spu || !own_wait())
     return -1;
+  io_begin();
   int i = block(s->spu);
+  io_end();
   if (i < 0 || upload(s->spu, adpcm, s->size) < 0)
     return -1;
-  nlost -= blk[i].lost != 0;
-  blk[i].lost = 0;
-  return 0;
+  io_begin();
+  if ((i = block(s->spu)) >= 0) {
+    nlost -= blk[i].lost != 0;
+    blk[i].lost = 0;
+  }
+  io_end();
+  return i < 0 ? -1 : 0;
 }
 
 void mx_snd_on_lost(void (*fn)(void)) { lost_fn = fn; }
@@ -579,7 +650,9 @@ int mx_snd_free(struct mx_snd_sample *s) {
       vs[v].on = 0, vs[v].s = 0;
     }
   send(); /* the voices stop before the RAM is used again */
+  io_begin();
   spu_free(s->spu);
+  io_end();
   s->spu = 0;
   return 0;
 }
@@ -727,9 +800,12 @@ static void settings(void) {
 /* SPU RAM at spu (bytes, 64-byte multiples, up to MXSND_UPLOAD_BYTES) into
    dst (tests: the voices' mix, MXSND_SPU_MIX0 / MIX1) */
 int mx__snd_peek(u32 spu, void *dst, u32 bytes) {
-  if (!own() || call(MXSND_PEEK, spu, bytes) != 0)
+  if (!own())
     return -1;
-  return mx_iop_read(AREA(upload), dst, bytes);
+  io_begin();
+  int r = call_ans(MXSND_PEEK, spu, bytes, 0) != 0 ? -1 : mx_iop_read(AREA(upload), dst, bytes);
+  io_end();
+  return r;
 }
 
 /* frames played and frames the stream starved, at 48 kHz (for tests) */
@@ -762,8 +838,11 @@ int mx__snd_music_data(int what, const void *data, u32 bytes, u32 spu) {
     return 0;
   for (u32 o = 0; o < bytes;) {
     u32 n = bytes - o < MXSND_UPLOAD_BYTES ? bytes - o : MXSND_UPLOAD_BYTES;
+    io_begin();
     memcpy(bounce, (const u8 *)data + o, n);
-    if (mx_iop_write(AREA(upload), bounce, (n + 15) & ~15u) < 0 || call(MXSND_M_DATA, (u32)what, n) != 0) {
+    int r = mx_iop_write(AREA(upload), bounce, (n + 15) & ~15u) < 0 ? -1 : call_ans(MXSND_M_DATA, (u32)what, n, 0);
+    io_end();
+    if (r != 0) {
       call(MXSND_M_ALLOC, (u32)what, 0);
       return -1;
     }

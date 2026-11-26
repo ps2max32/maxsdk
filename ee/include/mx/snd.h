@@ -13,7 +13,11 @@
    The EE writes the stream and the commands into mxsnd's memory by SIF DMA
    and mxsnd works them every 10.7 ms: the stream's calls and mx_snd_commit
    cost no wait on the IOP; mx_snd_init and mx_snd_load wait for it. Not for
-   interrupt handlers, nor for two threads at once. */
+   interrupt handlers. One thread plays (voices, channels, the stream,
+   mx_snd_commit, mx_snd_free); mx_snd_load and mx_snd_reload may run on
+   another beside it, as long as the sample loaded is not played or freed
+   meanwhile (their exchanges with mxsnd, SPU RAM's map and the taking back
+   of the sound after another program had it go one thread at a time). */
 
 #include <mx/types.h>
 
