@@ -358,6 +358,15 @@ KiB, one entry in place of two), the shell 2 MiB for 1.25 (now 1.25 MiB, three e
 place of four). A program's core heap ends where its core does: what it gets beyond
 `MX_CORE_HEAP` is at most that rounding.
 
+Fixed under version 51 (2026-11-27): the plan counts only the entries left. The programs
+waiting or beside (the service, a shell that started a program) keep their cores' entries,
+and a core planned for all 8 could not be mapped: the shell's start of Quake 3's CONVERT.ELF
+(a 1.3 MiB core, 5 entries, with 4 kept) failed. Its failure then hung the kernel: the BIOS's
+TLB entries were written back without the VM's (`MX_PHYS_WIN`, the frames' window), and the
+next use of the VM's tables missed with interrupts off. A start that fails after its core
+was placed now writes the VM's entries again (`exec.c`'s `tlb_back`, as at a program's end),
+says "no memory for its core", and the program that started it goes on.
+
 Version 37 (2026-11-17, mx OS plan step 6, the count): who holds main memory (`<mx/proc.h>`:
 `mx_proc_memory`; `apps/mxos/ee/ptab.c`'s `ptab_memory`, `vm.c`'s `mx__vm_frames_of`). For the
 kernel and each process, in frames of 32 KiB: its core, what else it holds pinned (pinned
