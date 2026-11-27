@@ -366,6 +366,14 @@ since version 39, the timer idle), and they were the reason its core's TLB entri
 at interrupt level. `tests/ps2/k31_beside.c`: 0 vblanks beside (11651 rounds of its worker),
 then its handler again in front.
 
+Also under version 51 (2026-11-27, mx OS plan step 6, part 3): a pinned heap's run grown for one
+large allocation (over a block) is that allocation's alone (`ee/src/vm/mem.c`, `seg.own`): nothing
+else is put in its rest, so its frames go back to the pool when it is freed. Before, libgl's
+small objects sat in the rest of the shell's 512 KiB font texture, and the shell beside a game
+held 544 KiB pinned after moving the texture out. With libgl's `mxgl_suspend` moving textures to
+pageable memory (`mxgl_resume` brings them back), the shell beside a game holds 5 pinned frames,
+was 20.
+
 Fixed under version 51 (2026-11-27): the plan counts only the entries left. The programs
 waiting or beside (the service, a shell that started a program) keep their cores' entries,
 and a core planned for all 8 could not be mapped: the shell's start of Quake 3's CONVERT.ELF

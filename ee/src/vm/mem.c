@@ -31,6 +31,9 @@ struct seg {
   u8 frames; /* frames of the pool (mx__vm_frames_take), else physical blocks */
   u8 va;     /* a piece of the region: never given back */
   u8 live;
+  u8 own;    /* a run of its own for one large allocation: nothing else is put in
+                its rest, so that it goes back with that allocation (a shell's
+                512 KB texture and 12 KB of small objects in its rest held 544 KB) */
 };
 
 struct mx_heap {
@@ -124,13 +127,13 @@ static void ext_remove(struct mx_heap *h, u32 i) {
 }
 
 /* a new segment of [a, a + n), all free */
-static void seg_add(struct mx_heap *h, u32 a, u32 n, int frames, int va) {
+static void seg_add(struct mx_heap *h, u32 a, u32 n, int frames, int va, int own) {
   u32 si = 0;
   while (si < h->nseg && h->seg[si].live)
     si++;
   if (si == h->nseg)
     h->nseg++;
-  h->seg[si] = (struct seg){a, n, (u8)frames, (u8)va, 1};
+  h->seg[si] = (struct seg){a, n, (u8)frames, (u8)va, 1, (u8)own};
   u32 i = 0;
   while (i < h->next && h->ext[i].a < a)
     i++;
@@ -147,7 +150,7 @@ static void setup(struct mx_heap *h) {
   if (h->paged && h->max && !room(h)) {
     u32 va = mx__vm_va_take(h->max);
     if (va)
-      seg_add(h, va, (h->max + MX_VM_PAGE - 1) & ~(MX_VM_PAGE - 1), 0, 1);
+      seg_add(h, va, (h->max + MX_VM_PAGE - 1) & ~(MX_VM_PAGE - 1), 0, 1, 0);
   }
 }
 
@@ -169,11 +172,13 @@ struct mx_heap *mx_heap_create(const char *name, int kind, u32 max_bytes) {
   return h;
 }
 
-/* the first free extent that holds bytes at align: split, marked used */
-static void *fit(struct mx_heap *h, u32 bytes, u32 align) {
+/* the first free extent that holds bytes at align: split, marked used.
+   Only in segment seg when seg >= 0 (a run grown for it), and never in the
+   rest of another's run of its own */
+static void *fit(struct mx_heap *h, u32 bytes, u32 align, int seg) {
   for (u32 i = 0; i < h->next; i++) {
     struct ext e = h->ext[i];
-    if (e.used)
+    if (e.used || (seg >= 0 ? e.seg != (u32)seg : h->seg[e.seg].own))
       continue;
     u32 a = (e.a + align - 1) & ~(align - 1);
     if (a < e.a || a - e.a + bytes > e.n)
@@ -202,7 +207,7 @@ void *mx_heap_alloc(struct mx_heap *h, u32 bytes, u32 align) {
   setup(h);
   void *p = 0;
   if (room(h) == 0)
-    p = fit(h, bytes, align);
+    p = fit(h, bytes, align, -1);
   if (!p && !h->paged && (!h->max || h->held + bytes <= h->max) && room(h) == 0) {
     /* grow: a block, or a run of its own (frames are 32 KiB aligned) */
     u32 n = bytes + (align > MX_VM_PAGE ? align : 0);
@@ -210,8 +215,11 @@ void *mx_heap_alloc(struct mx_heap *h, u32 bytes, u32 align) {
     int frames = mx_vm_active();
     void *m = frames ? mx__vm_frames_take(n) : mx__phys_alloc(n, align > 64 ? align : 64);
     if (m) {
-      seg_add(h, (u32)(uintptr_t)m, n, frames, 0);
-      p = fit(h, bytes, align);
+      seg_add(h, (u32)(uintptr_t)m, n, frames, 0, n > BLOCK);
+      u32 si = 0;
+      while (si < h->nseg && !(h->seg[si].live && h->seg[si].a == (u32)(uintptr_t)m))
+        si++;
+      p = fit(h, bytes, align, (int)si);
     }
   }
   unlock();
