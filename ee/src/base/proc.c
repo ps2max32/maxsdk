@@ -39,7 +39,7 @@ int mx_msg_reply(int msg, const void *reply, u32 len) { return CALL(msg_reply, (
 
 /* the frame pipeline's, if the program has it: its stream drawn before
    another process is in front (src/gs/frame.c) */
-extern void mx__frame_yield(void) __attribute__((weak));
+extern int mx__frame_yield(void) __attribute__((weak));
 /* the sound is the process in front's too (mx OS plan step 5): its voices
    and stream silenced at a handover (src/base/snd.c, with sound) */
 extern void mx__snd_quiet(void) __attribute__((weak));

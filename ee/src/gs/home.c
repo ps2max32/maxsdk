@@ -105,8 +105,8 @@ void mx__home_poll(void) {
      starts again at the next frame), the sound silenced: another process
      may have the graphics and the sound now, and this one's interrupts of
      them stop meanwhile */
-  void mx__frame_yield(void);
-  mx__frame_yield();
+  int mx__frame_yield(void);
+  int dropped = mx__frame_yield();
   if (mx__snd_quiet)
     mx__snd_quiet();
   int synced = mx_frame_sync() >= 0;
@@ -122,8 +122,16 @@ void mx__home_poll(void) {
     mx__kernel->home_picture_set(0, 0);
     mx_dma_free(pic);
   }
-  if (!end)
-    lost_check(); /* the shell was in front meanwhile */
+  /* the shell was in front meanwhile; or, in hires mode, this program's
+     records were dropped by the pause (with the textures they were to
+     upload: the cache must not count them as there), also when nothing
+     else had the graphics (no menu: a host's program without the shell) */
+  if (!end && dropped) {
+    mx__frame_lost();
+    gen_known = 0;
+    lost_check();
+  } else if (!end)
+    lost_check();
   if (page != ~0u)
     mx_vram_give(page, pages);
   if (end)

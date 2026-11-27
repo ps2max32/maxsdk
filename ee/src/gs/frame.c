@@ -394,18 +394,22 @@ int mx_frame_sync(void) {
    out, then stopped; started again at the next frame). Nothing after
    mx_frame_stop (all was drawn then; after beam racing a sync would wait
    on a queue whose channel interrupt is gone: a shell that left 1080i hung
-   at a launch). */
+   at a launch). 1 when the hires pipeline was paused: the records waiting,
+   and the texture uploads they carried, are dropped, so the caller takes
+   the graphics up again (mx__frame_lost) even when no other process had
+   them (the home button without a menu: gs/home.c). */
 void mx__hires_pause(void);
-void mx__frame_yield(void) {
+int mx__frame_yield(void) {
   if (f.half[0] && f.record && !f.stopped) {
     mx__hires_pause();
-    return;
+    return 1;
   }
   if (!f.half[0] || f.record || f.stopped || mx_frame_sync() < 0)
-    return;
+    return 0;
   u32 t0 = mx_count();
   while (mx_gs.frames_done != mx_gs.frames && mx_count() - t0 < MX_EE_HZ / 10)
     mx_sleep_us(1000);
+  return 0;
 }
 
 /* The graphics were another process's since this program's last frame, or
