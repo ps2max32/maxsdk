@@ -43,21 +43,35 @@ extern int mx__frame_yield(void) __attribute__((weak));
 /* the sound is the process in front's too (mx OS plan step 5): its voices
    and stream silenced at a handover (src/base/snd.c, with sound) */
 extern void mx__snd_quiet(void) __attribute__((weak));
-static void yield(void) {
-  if (mx__frame_yield)
-    mx__frame_yield();
+/* 1 when it paused the hires pipeline: its records waiting were dropped,
+   with the texture uploads they carried (src/gs/frame.c) */
+static int yield(void) {
+  int dropped = mx__frame_yield ? mx__frame_yield() : 0;
   if (mx__snd_quiet)
     mx__snd_quiet();
+  return dropped;
+}
+/* A start or switch that failed: no other process had the graphics, so
+   nothing tells this one they were lost (kernel version 34's generation),
+   but a hires pause dropped what was waiting: taken up again here (a shell
+   in 1080i whose launch the kernel refused came back without its fonts'
+   textures). After one that worked, the next frame finds the generation
+   changed (src/gs/home.c). */
+extern void mx__frame_lost(void) __attribute__((weak));
+static int after(int r, int dropped) {
+  if (r < 0 && dropped && mx__frame_lost)
+    mx__frame_lost();
+  return r;
 }
 int mx_proc_spawn(int argc, const char *args, u32 args_len, const char *swap) {
   mx_debug_flush();
-  yield();
-  return CALLV(14, proc_spawn, (argc, args, args_len, swap));
+  int d = yield();
+  return after(CALLV(14, proc_spawn, (argc, args, args_len, swap)), d);
 }
 int mx_proc_spawn_in(const char *dir, int argc, const char *args, u32 args_len, const char *swap) {
   mx_debug_flush();
-  yield();
-  return CALLV(40, proc_spawn_in, (dir, argc, args, args_len, swap));
+  int d = yield();
+  return after(CALLV(40, proc_spawn_in, (dir, argc, args, args_len, swap)), d);
 }
 #ifdef MX_KERNEL
 /* kernel version 40: the working directory is the kernel's, for each process
@@ -70,8 +84,8 @@ int mx_proc_wait(int id, int *status, int nohang) {
 }
 int mx_proc_kill(int id, int status) { return CALLV(14, proc_kill, (id, status)); }
 int mx_proc_front(int id) {
-  yield();
-  return CALLV(24, proc_front, (id));
+  int d = yield();
+  return after(CALLV(24, proc_front, (id)), d);
 }
 int mx_proc_events(int port) { return CALLV(15, proc_events, (port)); }
 int mx_log_read(u32 *pos, void *buf, u32 max, int *proc, int wait) {

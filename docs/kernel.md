@@ -358,6 +358,14 @@ KiB, one entry in place of two), the shell 2 MiB for 1.25 (now 1.25 MiB, three e
 place of four). A program's core heap ends where its core does: what it gets beyond
 `MX_CORE_HEAP` is at most that rounding.
 
+Under version 51 (2026-11-27, mx OS plan step 6): a process beside has no interrupt handlers of
+its own. `end_park` takes a side's handlers out as a waiting one's (its slots cleared: it goes
+on, and an id may be another's later), `end_unpark_beside` adds them again when it is in front.
+Before, the shell beside a game kept its GS, vblank, hires timer and VIF1 handlers (filtered
+since version 39, the timer idle), and they were the reason its core's TLB entries had to stay
+at interrupt level. `tests/ps2/k31_beside.c`: 0 vblanks beside (11651 rounds of its worker),
+then its handler again in front.
+
 Fixed under version 51 (2026-11-27): the plan counts only the entries left. The programs
 waiting or beside (the service, a shell that started a program) keep their cores' entries,
 and a core planned for all 8 could not be mapped: the shell's start of Quake 3's CONVERT.ELF

@@ -2,8 +2,10 @@
    program without VM with its core at a run of its own (MX_CORE_HEAP)
    starts another with mx_loader_launch_beside, and its worker thread goes on
    while the other runs, whenever the other waits: its core memory (at the
-   same virtual addresses as the other's), its ASID, VU0's registers and its
-   vblank handler stay its own. Started by mxlink:
+   same virtual addresses as the other's), its ASID and VU0's registers stay
+   its own. Its vblank handler is out while it is beside (mx OS plan step
+   6, 2026-11-27: only the program in front has interrupts of its own) and
+   runs again once it is in front. Started by mxlink:
      k31_beside.elf host:vm32_side.elf     (status 0 expected) */
 #include "t.h"
 #include <mx/irq.h>
@@ -96,13 +98,18 @@ int main(int argc, char **argv) {
   mx_thread_set_prio(mx_thread_self(), 127);
   while (!done)
     mx_thread_yield();
+  /* in front again: its handler is back */
+  u32 vb = vblanks;
+  mx_sleep_us(100000);
+  u32 after = vblanks - vb;
   mx_irq_intc(MX_INTC_VBON, 0, 0);
-  mx_printf("k31: back, status %d; meanwhile %u rounds of the worker, %u vblanks here; "
-            "changed: %u words, %u VU0 registers, %u ASIDs\n",
-            st, r, v, bad_mem, bad_vu, bad_asid);
+  mx_printf("k31: back, status %d; meanwhile %u rounds of the worker, %u vblanks here (%u in "
+            "front after); changed: %u words, %u VU0 registers, %u ASIDs\n",
+            st, r, v, after, bad_mem, bad_vu, bad_asid);
   CHECK_EQ(st, 0);
   CHECK(r > 0);
-  CHECK(v > 0); /* its handler ran while the other did */
+  CHECK_EQ(v, 0);   /* no handler of its own while beside */
+  CHECK(after > 0); /* back in front: its handler again */
   CHECK_EQ(bad_mem, 0);
   CHECK_EQ(bad_vu, 0);
   CHECK_EQ(bad_asid, 0);

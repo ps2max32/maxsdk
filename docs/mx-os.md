@@ -264,8 +264,10 @@ Retail PS2s have 32 MiB; never count on more.
     `mx_pad_init`, files). The main stack is in the core after `.bss` (128 KiB, or
     `--defsym=__mx_stack_size=<bytes>`; not `__stack_size`), not at the top of memory.
     `mx_loader_launch_beside` (kernel version 12) is the same, but the program's other threads
-    and interrupt handlers go on while the other runs: they may not use the pad meanwhile,
-    and the other runs in front. Since 2026-11-14 (mx OS plan step 4c) a program beside may
+    go on while the other runs: they may not use the pad meanwhile, and the other runs in
+    front. Its interrupt handlers do not: they are out while it is beside and back when it is
+    in front again (since 2026-11-27, mx OS plan step 6: only the program in front has
+    interrupts of its own; the kernel's timers and sleeps go on). Since 2026-11-14 (mx OS plan step 4c) a program beside may
     end (`mx_exit`, returning from `main`) or crash while the other runs: it ends alone and
     the one in front goes on; before, its end ended the one in front. `mx_proc_front(id)`
     (version 24) brings a process that waits or runs beside in front; the one in front is
