@@ -1033,6 +1033,34 @@ through the one LRU when the game needs the frames. No call hands main memory ov
   its child, of 991 frames: the kernel 5 frames in the pool (and its own MiB), the host
   link's service 32 of core and 8 pinned, the waiting program 32 of core: 72 frames (2.3
   MiB) held by what is not in front. The shell beside a game is to be read from the log.
+- Measured 2026-11-27 on a SCPH-90006, the shell (MXSHELL2, 1080i) beside Quake 3 PS2 and the
+  host link's service below it (kernel 51; the kernel's log at the start and a debug dump of
+  the parked programs' handler slots):
+  | | core | of it fast | pinned | paged | INTC handlers | DMAC handlers | threads |
+  |---|---|---|---|---|---|---|---|
+  | MXSHELL | 36 frames | 24 | 20 | 36 | GS, VBON, TIM0 (hires) | VIF1 | 2 |
+  | MXLINK  | 16 frames | 0  | 0  | 1  | none | none | 4 |
+  | kernel  | 32 frames | -  | 3  | 0  | | | |
+  The shell and the service hold 2.25 MiB (72 frames) and 4 of the 8 core TLB entries (13-20;
+  the shell 3, the service 1). The shell's handlers stay registered beside the game: the kernel
+  filters the drawing ones (part 4) and its hires timer is stopped (`mx__hires_pause`), but they
+  are its. The service has none.
+- What that costs now: the core TLB entries are a limit, not a reservation (unused ones are the
+  VM's), but the program in front gets only those the processes beside leave: 4. Quake 3 PS2
+  1.1.2's core of 6 MiB needs 5 (two of 256 KiB up to 0x200000, then 1 MiB pairs; 4 entries
+  cover 5 MiB at most), so the shell's launch is refused ("no memory for its core"; before
+  2026-11-27 the kernel planned for 8 and hung). With parts 5 and 6, a process beside holds no
+  core entries and no pinned frames: the one in front gets all 8 entries and its 2.25 MiB.
+  First steps for that (user, 2026-11-27: the background holds as little as it can; only the
+  kernel and the program in front keep entries and locked memory; DMA needs no TLB entry, only
+  what runs at interrupt level does):
+  - A process beside registers no handlers of its own: the shell's GS, VBON, TIM0 and VIF1 go
+    out when it leaves the front (as for a waiting one, `end_park`), back when it returns.
+  - Its pinned heaps (the shell's 640 KiB: libgl's uploads and packets) are given back at the
+    handover and taken again at `mx__frame_lost`, which uploads what was in GS memory anyway.
+  - Its core as pages (parts 5, 6): no fixed TLB entries beside; a thread that runs there
+    refills from the core's table like any page (the frames are not moved while there is room,
+    so a refill reads nothing).
 - A test that says, with a game in front, how many frames each other process and the kernel
   keep pinned. The number is written down with each step; the aim is the kernel's memory and
   a few pages for each process.
