@@ -1061,6 +1061,10 @@ through the one LRU when the game needs the frames. No call hands main memory ov
   - Its core as pages (parts 5, 6): no fixed TLB entries beside; a thread that runs there
     refills from the core's table like any page (the frames are not moved while there is room,
     so a refill reads nothing).
+    The entries are done (2026-11-27, kernel.md, "part 5, its first half"): a side's core is
+    reached by 32 KiB refills from the VM's ring, which leave the TLB when the kernel switches
+    away from it; the program in front has all 8 core entries. Its frames stay pinned: giving
+    them to the pager (split and joined, part 5's second half, and part 6) is next.
 - A test that says, with a game in front, how many frames each other process and the kernel
   keep pinned. The number is written down with each step; the aim is the kernel's memory and
   a few pages for each process.

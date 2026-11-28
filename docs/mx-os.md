@@ -267,7 +267,9 @@ Retail PS2s have 32 MiB; never count on more.
     go on while the other runs: they may not use the pad meanwhile, and the other runs in
     front. Its interrupt handlers do not: they are out while it is beside and back when it is
     in front again (since 2026-11-27, mx OS plan step 6: only the program in front has
-    interrupts of its own; the kernel's timers and sleeps go on). A program beside should give back the pinned memory it can: libgl's `mxgl_suspend`
+    interrupts of its own; the kernel's timers and sleeps go on). Its own timers (`mx_timer_add`)
+    wait until it is in front too, and its core has no TLB entries while it is beside (its
+    memory stays where it is, reached by refills). A program beside should give back the pinned memory it can: libgl's `mxgl_suspend`
     frees its arenas and moves its textures to pageable memory, `mxgl_resume` brings them back
     (it returns -2 while there is no pinned memory for them yet: try again later). Since 2026-11-14 (mx OS plan step 4c) a program beside may
     end (`mx_exit`, returning from `main`) or crash while the other runs: it ends alone and

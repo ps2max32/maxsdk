@@ -456,10 +456,21 @@ static void tlb_read(u32 i, u32 *pm, u32 *hi, u32 *lo0, u32 *lo1) {
                    : "r"(i), "r"(mx__asid));
 }
 
+/* The core of a process beside the one in front has no TLB entries of its
+   own (mx OS plan step 6, part 5): the kernel says where a page of it is
+   (mx__core_pa, kproc.c: the physical address of va in the core of the
+   process whose space is live, 0 if va is not in one), and a refill there
+   takes an entry of the ring for its 32 KiB, marked in core_slot; the
+   kernel clears them when it switches away (mx__vm_core_out). */
+u32 mx__core_pa(u32 va) __attribute__((weak));
+static u8 core_slot[TLB_N];
+u32 mx__vm_core_refills; /* for the kernel's log */
+
 /* A TLB entry for something new: the next one in turn, freed of what it
    held. Interrupts off (or at EXL). */
 static u32 tlb_take(void) {
   u32 s = F.next_slot;
+  core_slot[s] = 0;
   F.next_slot = F.next_of[s];
   u32 old = F.slot_page[s];
   if (old)
@@ -473,6 +484,28 @@ static u32 tlb_take(void) {
    0xE0000000 + i * 8 KiB on the PS2, (i - 1) * 8 KiB on PCSX2, up to
    0xE005E000), so never two alike. */
 static void tlb_clear(u32 s) { tlb_write(s, 0, 0xE0000000u + ((48 + s) << 13), 0, 0); }
+
+/* a refill in such a core: the pair of 16 KiB pages of its 32 KiB, cached
+   and writable, under the live ASID */
+static void core_refill(u32 va, u32 pa) {
+  u32 s = tlb_take();
+  u32 lo = (pa & ~0x7FFFu) >> 12 << 6 | 0x1Eu; /* C = 3, D, V, not G */
+  tlb_write(s, 0x6000u, (va & ~0x7FFFu) | mx__asid, lo, lo + 0x100u);
+  core_slot[s] = 1;
+  mx__vm_core_refills++;
+}
+
+/* the kernel switches away from the space a core's entries were refilled
+   in (kproc.c): those entries out of the TLB. One the fast refill took for
+   a VM page since (its slot_page set) is that page's now. Interrupts off. */
+void mx__vm_core_out(void) {
+  for (u32 i = 0; i < TLB_N; i++)
+    if (core_slot[i]) {
+      if (!F.slot_page[i])
+        tlb_clear(i);
+      core_slot[i] = 0;
+    }
+}
 
 /* With a trace: block b of page pg (mapped) into TLB entry s. Writable
    only once a store to it was seen in this interval, so the first one is
@@ -1007,6 +1040,7 @@ void mx__vm_tlb_again(void) {
     return;
   int was = mx_di();
   tlb_init(tlb_flo, tlb_fhi);
+  memset(core_slot, 0, sizeof core_slot);
   FOR_PAGES(vs, pg)
     PSLOT(vs, pg) = 0;
   mx_irq_restore(was);
@@ -1022,7 +1056,7 @@ void mx__vm_tlb_fix(void) {
     return;
   int was = mx_di();
   for (u32 i = 0; i < TLB_N; i++) {
-    if (tlb_fixed[i])
+    if (tlb_fixed[i] || core_slot[i]) /* a ring entry of a core beside */
       continue;
     u32 pm, hi, lo0, lo1;
     tlb_read(i, &pm, &hi, &lo0, &lo1);
@@ -1330,6 +1364,13 @@ int mx__vm_exception(struct mx__vm_x *x) {
     d[7] = pg != ~0u ? PSLOT(vs, pg * vm.bpp) | (u32)(LEAF(vs, pg) != &zero_leaf) << 8 : 0;
     d[8] = vs->id, d[9] = mx__asid, d[10] = x->status, d[11] = vs->npages;
   }
+  if ((code == 2 || code == 3) && pg == ~0u && mx__core_pa) {
+    u32 pa = mx__core_pa(va);
+    if (pa) {
+      core_refill(va, pa);
+      return VMX_RETURN;
+    }
+  }
   if (code < 1 || code > 3 || pg == ~0u) {
       mx__exception_note = va - MX_VM_BASE < MX_VM_LIMIT - MX_VM_BASE
                              ? "VM: outside the VM in use (mx_vm_size)"
@@ -1403,7 +1444,13 @@ static int to_thread(struct mx__vm_x *x) {
     return VMX_FATAL;
   }
   struct mx__vm_x *f = (struct mx__vm_x *)((sp - VMX_SIZE - 64) & ~63u);
-  *f = *x;
+  /* a stack in a core beside (no entries of its own): written through the
+     frames' window, as a refill here at EXL = 1 could not come back */
+  u32 pa = mx__core_pa ? mx__core_pa((u32)(uintptr_t)f) : 0;
+  if (pa && mx__core_pa((u32)(uintptr_t)f + VMX_SIZE - 1) == pa + VMX_SIZE - 1)
+    *(struct mx__vm_x *)(uintptr_t)(MX_PHYS_WIN + pa) = *x;
+  else
+    *f = *x;
   x->frame = f;
   return VMX_SLOW;
 }
@@ -2212,12 +2259,25 @@ volatile u32 mx__vm_where;
 /* Debugging: the last page fault handled in the thread: the instruction
    and the address. */
 volatile u32 mx__vm_fault_epc, mx__vm_fault_va;
+/* Back to the faulting instruction (tlb.S: syscall -VM_RESUME_SYSCALL, whose
+   handler reads f and the kernel's entry puts 16 bytes below sp, both at
+   EXL = 1). Interrupts off and both in the TLB first: on a core beside they
+   have entries of the ring only, and a switch takes them (mx__vm_core_out);
+   Status comes back from f. */
+static void __attribute__((noreturn)) resume(struct mx__vm_x *f) {
+  mx_di();
+  volatile u32 *a = (volatile u32 *)f;
+  (void)a[0], (void)a[VMX_SIZE / 4 - 1];
+  __asm__ volatile("lw $8, -16($29)\n\tlw $8, -4($29)" : : : "$8", "memory");
+  mx__vm_resume(f);
+}
+
 void mx__vm_slow(struct mx__vm_x *f) {
   if ((f->cause >> 2 & 31) == 9) {
     u32 insn = *(const u32 *)(uintptr_t)f->epc;
     f->epc += 4;
     break_fn(insn >> 6 & 0xFFFFF);
-    mx__vm_resume(f);
+    resume(f);
   }
   mx__vm_fault_epc = f->epc, mx__vm_fault_va = f->badvaddr;
   mx__vm_where = 1;
@@ -2237,7 +2297,7 @@ void mx__vm_slow(struct mx__vm_x *f) {
   unlock();
   mx__vm_where = 3;
   irq_check(0x31);
-  mx__vm_resume(f);
+  resume(f);
 }
 
 /* ---- pins and pieces ------------------------------------------------------------- */

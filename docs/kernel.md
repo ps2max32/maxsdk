@@ -143,8 +143,7 @@ in front as `exec_unpark` does, without the end of a child: its mapping, kernel 
 space, path and VU0 registers. When that one ends, the paused one is in front again; another
 `proc_front` may bring it back first. `proc_wait` answers from the process table for a process
 that is not the caller's last child. Since 4b the records are in the programs' own memory, so
-the lists hold up to six waiting and four beside (TLB entries for the cores beside are the
-limit in practice). `tests/ps2/k48_turns.c`, `tests/ps2/k49_three.c`. A process that waits
+the lists hold up to six waiting and four beside. `tests/ps2/k48_turns.c`, `tests/ps2/k49_three.c`. A process that waits
 (paused, or for its child) is not mapped, so its handlers in the kernel's table do not run
 (`kproc_handler_enter` answers -1 from the process table, `ksched_dispatch` skips them) and
 its timers are put off by 10 ms until it is in front again (`tick` in `src/irq/timer.c`; a
@@ -373,6 +372,32 @@ small objects sat in the rest of the shell's 512 KiB font texture, and the shell
 held 544 KiB pinned after moving the texture out. With libgl's `mxgl_suspend` moving textures to
 pageable memory (`mxgl_resume` brings them back), the shell beside a game holds 5 pinned frames,
 was 20.
+
+Also under version 51 (2026-11-27, mx OS plan step 6, part 5, its first half): the core of a
+process beside has no TLB entries of its own, so the program in front has all 8 core entries
+(before, the shell and the service kept 4 of them, and Quake 3 PS2 1.1.2's core of 6 MiB, 5
+entries, could not start from the shell). Its frames stay where they are, pinned; only the
+entries go:
+- A TLB refill in a side's core (`apps/mxos/ee/kproc.c`'s `mx__core_pa`: the side whose space
+  is live, its ASID set, the address below its core's end) takes the next entry of the VM's
+  ring for its 32 KiB (`ee/src/vm/vm.c`'s `core_refill`, a pair of 16 KiB pages under its
+  ASID). The kernel takes those entries out when it switches away from the side
+  (`mx__vm_core_out`), so a side that comes in front again gets its own (`tlb_core_map`) with
+  none of its ASID left in the ring. The kernel's log counts them ("core refills beside").
+- Nothing of a side may miss at interrupt level, where a refill cannot return: its handlers are
+  out (above), its timers wait as a waiting process's (`kproc_handler_enter` answers -1 for a
+  side), the kernel reads and writes its copy of the kernel's state through `MX_PHYS_WIN`, and
+  the VM writes a slow fault's registers onto a side's stack through `MX_PHYS_WIN`. Before the
+  VM's resume (a syscall whose entry puts 16 bytes below the caller's stack and whose handler
+  reads the registers, both at EXL = 1) the faulting thread has interrupts off and touches both,
+  so that no switch takes their entries in between.
+- PCSX2 does not look at the ASID (`tlb_emu`): while a side's space is live, the front's core
+  entries are out of the TLB (`tlb_emu_hide`), and back at the switch to the front's; without
+  that a side's threads ran in the front's core there.
+- `tlb_core_keep` is `tlb_core_side(va_end)`: only the range of the sides' cores stays free of
+  the BIOS's global entries.
+`tests/ps2/k31_beside.c` with `vm32_side.elf` (138 refills of the worker beside, its memory,
+VU0 registers and ASID unchanged) and `k32_port.c` with `vm33_msg.elf` (302) on PCSX2.
 
 Fixed under version 51 (2026-11-27): the plan counts only the entries left. The programs
 waiting or beside (the service, a shell that started a program) keep their cores' entries,
